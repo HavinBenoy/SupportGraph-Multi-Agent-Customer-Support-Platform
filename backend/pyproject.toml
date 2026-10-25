@@ -1,0 +1,28 @@
+[project]
+name = "supportgraph"
+version = "0.1.0"
+description = "Multi-tenant customer support platform run by LangGraph agents"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+# Providers are optional so the core installs fast and tests need no network.
+ollama = ["langchain-ollama"]
+openai = ["langchain-openai"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
