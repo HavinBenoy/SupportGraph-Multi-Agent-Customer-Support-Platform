@@ -1,4 +1,6 @@
 .env
+infra/langfuse/.env
+*.env.local
 .venv/
 __pycache__/
 *.pyc

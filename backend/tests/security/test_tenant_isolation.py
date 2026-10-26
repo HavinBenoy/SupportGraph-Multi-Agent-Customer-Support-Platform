@@ -40,7 +40,7 @@ def test_missing_vs_forbidden_look_identical(alice_cfg):
 def test_tool_schemas_expose_no_scope_fields_to_the_llm():
     for t in get_tools():
         props = set(t.get_input_schema().model_json_schema()["properties"])
-        assert props == {"order_id"}, f"{t.name} leaks extra args to the model: {props}"
+        assert props <= {"order_id"}, f"{t.name} leaks extra args to the model: {props}"
 
 
 def test_prompt_injection_cannot_widen_scope(alice_cfg):

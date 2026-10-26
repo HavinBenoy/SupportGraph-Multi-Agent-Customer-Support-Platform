@@ -2,9 +2,9 @@
 
 from langchain_core.tools import BaseTool
 
-from app.tools.read_tools import check_return_eligibility, get_order_status
+from app.tools.read_tools import check_return_eligibility, get_order_status, list_my_orders
 
-READ_TOOLS: list[BaseTool] = [get_order_status, check_return_eligibility]
+READ_TOOLS: list[BaseTool] = [get_order_status, list_my_orders, check_return_eligibility]
 
 
 def get_tools(tenant_id: str | None = None) -> list[BaseTool]:  # noqa: ARG001 (tenant filtering comes in step 7)

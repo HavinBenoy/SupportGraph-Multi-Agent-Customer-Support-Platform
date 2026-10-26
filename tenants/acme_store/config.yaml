@@ -1,0 +1,6 @@
+# Per-tenant settings. Loaded into the `tenants` table by scripts/seed_store.py.
+# Policy text in docs/ must agree with these values (tests enforce it for the return window).
+tenant_id: acme_store
+name: Acme Store
+currency: USD
+return_window_days: 30

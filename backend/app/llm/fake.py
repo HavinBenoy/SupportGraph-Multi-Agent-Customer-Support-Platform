@@ -16,6 +16,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 ORDER_ID_RE = re.compile(r"\b[A-Za-z]\d{4}\b")
 RETURN_WORDS = re.compile(r"\b(return|refund|send (it )?back)\b", re.IGNORECASE)
+LIST_WORDS = re.compile(r"\b(my orders|order history|recent orders|what did i (order|buy))\b", re.IGNORECASE)
 
 
 class ScriptedChatModel(BaseChatModel):
@@ -38,6 +39,8 @@ class ScriptedChatModel(BaseChatModel):
     def _decide(self, messages: list[BaseMessage]) -> AIMessage:
         text = next((str(m.content) for m in reversed(messages) if isinstance(m, HumanMessage)), "")
         match = ORDER_ID_RE.search(text)
+        if not match and LIST_WORDS.search(text):
+            return AIMessage(content="", tool_calls=[{"name": "list_my_orders", "args": {}, "id": "call_1", "type": "tool_call"}])
         if not match:
             return AIMessage(content="Could you share your order number (for example A1001)?")
         tool = "check_return_eligibility" if RETURN_WORDS.search(text) else "get_order_status"
@@ -54,6 +57,10 @@ class ScriptedChatModel(BaseChatModel):
             return "Sorry, I hit a problem looking that up."
         if "error" in data:
             return f"I couldn't complete that lookup: {data['error']}"
+        if "orders" in data:
+            if not data["orders"]:
+                return "I don't see any orders on your account."
+            return "Your recent orders: " + "; ".join(f"{o['order_id']} ({o['status']})" for o in data["orders"]) + "."
         if "eligible" in data:
             return f"Return check for {data['order_id']}: {data['reason']}"
         return f"Order {data['order_id']} is {data['status']}."
