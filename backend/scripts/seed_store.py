@@ -1,4 +1,4 @@
-"""Load the mock store into the configured database (SG_DATABASE_URL).
+"""Load the institute sample data into the configured database (SG_DATABASE_URL).
 
     python scripts/seed_store.py                       # dates relative to today
     python scripts/seed_store.py --as-of 2026-10-24    # pin the date (what the tests use)
@@ -22,7 +22,7 @@ def main() -> None:
     with session_scope() as db:
         counts = seed(db, as_of=a.as_of, include_isolation_fixture=a.isolation_fixture)
     for tenant, n in counts.items():
-        print(f"seeded {tenant}: {n} orders")
+        print(f"seeded {tenant}: {n} enrolments")
 
 
 if __name__ == "__main__":

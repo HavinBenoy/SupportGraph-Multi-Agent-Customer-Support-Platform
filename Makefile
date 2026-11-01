@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq
 
 venv:
 	python3 -m venv .venv
@@ -14,7 +14,7 @@ db-down:
 db-psql:
 	docker compose exec db psql -U supportgraph -d supportgraph
 
-# Create/upgrade the schema (Alembic), then load the mock store. Needs `make db-up` first.
+# Create/upgrade the schema (Alembic), then load the institute sample data. Needs `make db-up` first.
 db-migrate:
 	cd backend && ../.venv/bin/alembic -c alembic.ini upgrade head
 
@@ -27,6 +27,18 @@ db-setup:
 	$(MAKE) db-migrate
 	$(MAKE) db-seed
 
+# Build step 2 (RAG FAQ baseline). Needs `make db-up db-setup` first. Safe to re-run: unchanged docs are skipped.
+ingest:
+	cd backend && ../.venv/bin/python scripts/ingest_docs.py
+
+# Ask the FAQ bot: make faq Q="What is the fee for the Data Science with Python course?"
+faq:
+	cd backend && ../.venv/bin/python scripts/ask_faq.py --sources "$(or $(Q),What is the fee for the Data Science with Python course?)"
+
+# Baseline numbers + leak check on the labelled tickets (needs `make ingest`). Fails if anything leaks.
+eval-rag:
+	cd backend && ../.venv/bin/python scripts/eval_rag.py
+
 test:
 	cd backend && ../.venv/bin/python -m pytest -q
 
@@ -37,7 +49,7 @@ test-pg:
 
 # Needs the database to be up, migrated and seeded: make db-up db-setup
 demo:
-	cd backend && ../.venv/bin/python scripts/run_agent.py "Where is my order A1001?"
+	cd backend && ../.venv/bin/python scripts/run_agent.py "What is my attendance in PYF-101?"
 
 # ---- Langfuse (self-hosted tracing UI; separate Compose project from the app DB) ----
 LF_COMPOSE = docker compose -f infra/langfuse/docker-compose.yml --env-file infra/langfuse/.env
@@ -71,3 +83,7 @@ langfuse-reset: infra/langfuse/.env
 
 verify-tracing:
 	cd backend && ../.venv/bin/python scripts/verify_tracing.py
+
+# Same check for the FAQ workflow (spans: retrieve, generate, validate). Needs `make ingest` and a running Langfuse.
+verify-tracing-faq:
+	cd backend && ../.venv/bin/python scripts/verify_tracing.py --workflow faq

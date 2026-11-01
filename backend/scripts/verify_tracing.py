@@ -11,6 +11,7 @@ Why this uses the observations API and not /api/public/traces: Langfuse v4 store
 exposed by the SDK as `client.api.observations.get_many()`, is the real-time read path, so that is what we use.
 """
 
+import argparse
 import sys
 import time
 import uuid
@@ -24,7 +25,9 @@ from app.config import get_settings
 from app.graph.builder import build_graph
 from app.observability.tracing import instrument_config, shutdown_tracing, tracing_enabled
 
-EXPECTED_SPANS = {"agent", "tools", "get_order_status"}
+EXPECTED_SPANS = {"agent", "tools", "get_my_attendance"}
+# What each workflow must leave in Langfuse. The FAQ bot (build step 2) is retrieve -> generate -> validate.
+EXPECTED_BY_WORKFLOW = {"agent": EXPECTED_SPANS, "faq": {"retrieve", "generate", "validate"}}
 FIELDS = "core,basic"  # id, traceId, parentObservationId, name, sessionId, ... (no input/output payloads needed)
 PAGE_SIZE = 100
 MAX_PAGES = 20  # hard stop so a misbehaving server cannot make us loop forever
@@ -109,7 +112,28 @@ def diagnose(client: Any, since: datetime, log: Callable[[str], None] = print) -
     log("  If the names are right but the session differs, the session id is not being propagated onto spans.")
 
 
-def main() -> int:
+def _run_workflow(workflow: str, tenant: str, ticket: str) -> str:
+    """Run one traced workflow and return a one-line summary of what it answered."""
+    if workflow == "faq":
+        from app.rag.faq import answer_question, build_faq_graph
+
+        r = answer_question(build_faq_graph(), "What payment methods do you accept?", tenant_id=tenant, ticket_id=ticket)
+        note = "" if not r.abstained else f"  [abstained: {r.reason}; if no_documents_ingested run `make ingest`]"
+        return f"{r.answer}{note}"
+    config = instrument_config(
+        {"configurable": {"tenant_id": tenant, "student_id": "stu_asha"}, "recursion_limit": 10},
+        tenant_id=tenant, student_id="stu_asha", ticket_id=ticket,
+    )
+    result = build_graph().invoke({"messages": [HumanMessage("What is my attendance in PYF-101?")]}, config)
+    return result["messages"][-1].content
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--workflow", choices=sorted(EXPECTED_BY_WORKFLOW), default="agent")
+    workflow = ap.parse_args(argv).workflow
+    expected = EXPECTED_BY_WORKFLOW[workflow]
+
     s = get_settings()
     if not tracing_enabled(s):
         print("Tracing is not enabled. Run `make langfuse-init` (sets SG_TRACING_ENABLED and the keys).")
@@ -119,12 +143,7 @@ def main() -> int:
     ticket = f"verify-{uuid.uuid4().hex[:8]}"
     session = f"{s.default_tenant}:{ticket}"
     started = datetime.now(timezone.utc) - timedelta(seconds=5)  # small allowance for clock skew
-    config = instrument_config(
-        {"configurable": {"tenant_id": s.default_tenant, "customer_id": "cust_alice"}, "recursion_limit": 10},
-        tenant_id=s.default_tenant, customer_id="cust_alice", ticket_id=ticket,
-    )
-    result = build_graph().invoke({"messages": [HumanMessage("Where is my order A1001?")]}, config)
-    print("Agent answered:", result["messages"][-1].content)
+    print("Workflow answered:", _run_workflow(workflow, s.default_tenant, ticket))
     shutdown_tracing()
 
     # A separate client used only for READING. tracing_enabled=False so it never exports spans itself.
@@ -133,7 +152,7 @@ def main() -> int:
     reader = Langfuse(public_key=s.langfuse_public_key, secret_key=s.langfuse_secret_key.get_secret_value(),  # type: ignore[union-attr]
                       base_url=base, tracing_enabled=False)
     try:
-        r = verify_session(reader, session)
+        r = verify_session(reader, session, expected=expected)
     except VerifyError as e:
         print(f"FAIL: {e}")
         return 1
@@ -148,7 +167,7 @@ def main() -> int:
             print(f"FAIL: no observations for session {session} within 90s. See README > Troubleshooting.")
         diagnose(reader, started)
         return 1
-    print("OK: trace contains the agent, tools and get_order_status spans.")
+    print(f"OK: trace contains the expected spans: {', '.join(sorted(expected))}.")
     return 0
 
 

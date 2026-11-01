@@ -9,8 +9,8 @@ from app.config import Settings
 from app.observability import tracing
 from app.observability.tracing import instrument_config, tracing_enabled
 
-BASE = {"configurable": {"tenant_id": "acme_store", "customer_id": "cust_alice"}, "recursion_limit": 10}
-IDS = dict(tenant_id="acme_store", customer_id="cust_alice", ticket_id="T-1")
+BASE = {"configurable": {"tenant_id": "qspiders_sample", "student_id": "stu_asha"}, "recursion_limit": 10}
+IDS = dict(tenant_id="qspiders_sample", student_id="stu_asha", ticket_id="T-1")
 
 
 def _settings(**kw) -> Settings:
@@ -57,9 +57,9 @@ def test_enabled_adds_callback_and_trace_attributes(monkeypatch):
 
     assert out["callbacks"] == ["existing", sentinel]
     assert out["metadata"]["keep"] == 1
-    assert out["metadata"]["langfuse_session_id"] == "acme_store:T-1"
-    assert out["metadata"]["langfuse_user_id"] == "cust_alice"
-    assert out["metadata"]["langfuse_tags"] == ["tenant:acme_store"]
+    assert out["metadata"]["langfuse_session_id"] == "qspiders_sample:T-1"
+    assert out["metadata"]["langfuse_user_id"] == "stu_asha"
+    assert out["metadata"]["langfuse_tags"] == ["tenant:qspiders_sample"]
     assert out["configurable"] == BASE["configurable"]  # trusted scope is carried through unchanged
     assert "callbacks" not in BASE  # input not mutated
 

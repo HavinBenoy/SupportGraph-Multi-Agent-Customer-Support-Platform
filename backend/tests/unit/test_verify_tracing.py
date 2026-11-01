@@ -19,7 +19,7 @@ from langfuse.api.core.api_error import ApiError
 
 from scripts import verify_tracing as vt
 
-SESSION = "acme_store:verify-abc"
+SESSION = "qspiders_sample:verify-abc"
 
 
 def obs(name, trace_id="t1", session_id=SESSION):
@@ -65,7 +65,7 @@ def run(client, timeout=30.0):
 # ---------------- layer 1: logic ----------------
 
 def test_success_when_all_expected_spans_are_present():
-    r = run(fake_client([[obs("supportgraph.ticket"), obs("agent"), obs("tools"), obs("get_order_status")]]))
+    r = run(fake_client([[obs("supportgraph.ticket"), obs("agent"), obs("tools"), obs("get_my_attendance")]]))
     assert r["ok"] and r["trace_id"] == "t1" and r["missing"] == set()
 
 
@@ -73,7 +73,7 @@ def test_child_spans_without_a_session_id_are_found_through_the_trace_id():
     # By session we only see the root; the children are only discoverable by trace id.
     by_session = [obs("supportgraph.ticket")]
     by_trace = [obs("supportgraph.ticket"), obs("agent", session_id=None), obs("tools", session_id=None),
-                obs("get_order_status", session_id=None)]
+                obs("get_my_attendance", session_id=None)]
     client = fake_client([by_session, by_trace])
     r = run(client)
     assert r["ok"]
@@ -84,15 +84,15 @@ def test_child_spans_without_a_session_id_are_found_through_the_trace_id():
 
 def test_keeps_polling_until_late_spans_arrive():
     partial = [obs("supportgraph.ticket"), obs("agent")]
-    full = partial + [obs("tools"), obs("get_order_status")]
+    full = partial + [obs("tools"), obs("get_my_attendance")]
     client = fake_client([[], partial, partial, partial, partial, full])  # nothing, then partial, then complete
     assert run(client)["ok"]
 
 
 def test_reports_exactly_which_spans_are_missing_after_timeout():
-    client = fake_client([[obs("supportgraph.ticket"), obs("agent"), obs("tools")]])  # no get_order_status
+    client = fake_client([[obs("supportgraph.ticket"), obs("agent"), obs("tools")]])  # no get_my_attendance
     r = run(client, timeout=9)
-    assert not r["ok"] and r["trace_id"] == "t1" and r["missing"] == {"get_order_status"}
+    assert not r["ok"] and r["trace_id"] == "t1" and r["missing"] == {"get_my_attendance"}
 
 
 def test_no_observations_at_all_times_out_cleanly():
@@ -101,7 +101,7 @@ def test_no_observations_at_all_times_out_cleanly():
 
 
 def test_transient_errors_are_retried():
-    full = [obs("agent"), obs("tools"), obs("get_order_status")]
+    full = [obs("agent"), obs("tools"), obs("get_my_attendance")]
     client = fake_client([ConnectionError("server starting"), ApiError(status_code=503), full])
     assert run(client)["ok"]
 
@@ -121,10 +121,10 @@ def test_404_fails_fast_and_names_the_base_url():
 
 def test_pagination_follows_the_cursor():
     page1 = ([obs("supportgraph.ticket")], "next-page")
-    page2 = ([obs("agent"), obs("tools"), obs("get_order_status")], None)
-    client = fake_client([page1, page2, ([obs("agent"), obs("tools"), obs("get_order_status")], None)])
+    page2 = ([obs("agent"), obs("tools"), obs("get_my_attendance")], None)
+    client = fake_client([page1, page2, ([obs("agent"), obs("tools"), obs("get_my_attendance")], None)])
     rows = vt.fetch_observations(client, session_id=SESSION)
-    assert [o.name for o in rows] == ["supportgraph.ticket", "agent", "tools", "get_order_status"]
+    assert [o.name for o in rows] == ["supportgraph.ticket", "agent", "tools", "get_my_attendance"]
     assert client.api.observations.calls[1]["cursor"] == "next-page"
 
 
@@ -212,7 +212,7 @@ def reader_for():
 
 
 def test_real_sdk_client_verifies_against_v4_style_server_without_touching_legacy_endpoint(reader_for):
-    client, srv = reader_for([raw("supportgraph.ticket"), raw("agent"), raw("tools"), raw("get_order_status")])
+    client, srv = reader_for([raw("supportgraph.ticket"), raw("agent"), raw("tools"), raw("get_my_attendance")])
     r = vt.verify_session(client, SESSION, timeout=5, interval=0.1)
     assert r["ok"] and r["trace_id"] == "t1"
     assert srv.requests, "expected the SDK to call the server"
@@ -222,7 +222,7 @@ def test_real_sdk_client_verifies_against_v4_style_server_without_touching_legac
 
 
 def test_real_sdk_reports_a_different_session_as_not_found(reader_for):
-    client, _ = reader_for([raw("agent", session="acme_store:someone-else")])
+    client, _ = reader_for([raw("agent", session="qspiders_sample:someone-else")])
     r = vt.verify_session(client, SESSION, timeout=0.3, interval=0.1)
     assert not r["ok"] and r["trace_id"] is None
 
@@ -245,15 +245,15 @@ def test_main_sequence_traced_run_then_shutdown_then_read_with_the_same_key_and_
     from app.observability.tracing import instrument_config, shutdown_tracing
 
     pk = f"pk-lf-{uuid.uuid4().hex}"
-    srv = V4StandIn([raw("supportgraph.ticket"), raw("agent"), raw("tools"), raw("get_order_status")])
+    srv = V4StandIn([raw("supportgraph.ticket"), raw("agent"), raw("tools"), raw("get_my_attendance")])
     try:
         settings = Settings(_env_file=None, tracing_enabled=True, langfuse_public_key=pk,
                             langfuse_secret_key="sk-lf-test", langfuse_base_url=srv.url)
-        cfg = instrument_config({"configurable": {"tenant_id": "acme_store", "customer_id": "cust_alice",
+        cfg = instrument_config({"configurable": {"tenant_id": "qspiders_sample", "student_id": "stu_asha",
                                                  "today": "2026-10-24"}, "recursion_limit": 10},
-                                tenant_id="acme_store", customer_id="cust_alice", ticket_id="verify-abc", settings=settings)
-        result = build_graph().invoke({"messages": [("human", "Where is my order A1001?")]}, cfg)
-        assert "shipped" in result["messages"][-1].content
+                                tenant_id="qspiders_sample", student_id="stu_asha", ticket_id="verify-abc", settings=settings)
+        result = build_graph().invoke({"messages": [("human", "What is my attendance in PYF-101?")]}, cfg)
+        assert "80.0%" in result["messages"][-1].content
         shutdown_tracing()
 
         reader = Langfuse(public_key=pk, secret_key="sk-lf-test", base_url=srv.url, tracing_enabled=False)
@@ -263,3 +263,18 @@ def test_main_sequence_traced_run_then_shutdown_then_read_with_the_same_key_and_
         assert not any("/api/public/traces" in p for p in srv.requests)
     finally:
         srv.server.shutdown()
+
+
+def test_faq_workflow_expects_the_three_answering_stages_and_its_question_really_gets_answered():
+    """The verifier question must take the answered path (retrieve -> generate -> validate), not abstain, or the
+    expected `generate`/`validate` spans could never appear and `make verify-tracing-faq` would always fail."""
+    from app.db.session import session_scope
+    from app.llm.gateway import get_embedding_client
+    from app.rag.ingest import ingest_tenant
+    from tests.rag.conftest import settings
+
+    assert vt.EXPECTED_BY_WORKFLOW["faq"] == {"retrieve", "generate", "validate"}
+    with session_scope() as db:
+        ingest_tenant(db, "qspiders_sample", get_embedding_client(settings()))
+    summary = vt._run_workflow("faq", "qspiders_sample", "verify-faq-1")
+    assert "UPI" in summary and "abstained" not in summary

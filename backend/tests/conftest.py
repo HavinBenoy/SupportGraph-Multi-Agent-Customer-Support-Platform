@@ -20,7 +20,7 @@ AS_OF = date(2026, 10, 24)  # the date every test pins; seed offsets are relativ
 
 @pytest.fixture(autouse=True)
 def seeded_db():
-    """Fresh in-memory SQLite store (both tenants, dates pinned to AS_OF) for every test. No Docker needed.
+    """Fresh in-memory SQLite database (both tenants, dates pinned to AS_OF) for every test. No Docker needed.
     Postgres-specific behaviour is covered separately in tests/db/test_postgres.py."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 
@@ -37,10 +37,10 @@ def seeded_db():
 
 
 @pytest.fixture
-def alice_cfg():
-    """Trusted scope for customer Alice at acme_store, with a frozen 'today' so tests are deterministic."""
-    return {"configurable": {"tenant_id": "acme_store", "customer_id": "cust_alice", "today": "2026-10-24"}}
+def asha_cfg():
+    """Trusted scope for student Asha (active in PYF-101) at qspiders_sample, with a frozen 'today'."""
+    return {"configurable": {"tenant_id": "qspiders_sample", "student_id": "stu_asha", "today": "2026-10-24"}}
 
 
-def scope_cfg(tenant: str, customer: str, today: str = "2026-10-24", **extra):
-    return {"configurable": {"tenant_id": tenant, "customer_id": customer, "today": today}, **extra}
+def scope_cfg(tenant: str, student: str, today: str = "2026-10-24", **extra):
+    return {"configurable": {"tenant_id": tenant, "student_id": student, "today": today}, **extra}

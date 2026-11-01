@@ -1,20 +1,28 @@
 # Synthetic tickets
 
-`tickets_acme_v1.jsonl`: one labelled ticket per line for the `acme_store` tenant, written to match the seeded
-mock store (`backend/app/db/seed_data.py`) and the policy docs (`tenants/acme_store/docs/`).
-Used from build step 3 (triage accuracy, routing) and step 6 (full evals). The file is the source of truth; edit it directly.
+`tickets_qspiders_v1.jsonl`: 53 labelled messages, one per line, for the `qspiders_sample` tenant. They are written
+to match the seeded sample data (`backend/app/db/seed_data.py`) and the help documents
+(`tenants/qspiders_sample/docs/`). Used by the FAQ baseline evaluation now (build step 2), and by triage/routing
+accuracy (step 3) and the full evals (step 6) later. The file is the source of truth; edit it directly.
+
+**Everything here is synthetic.** The messages are invented, not collected from real students or prospects, and the
+facts they expect come from clearly-labelled sample documents (plus one page of public website facts).
 
 | Field | Meaning |
 |---|---|
-| `id`, `tenant_id`, `customer_id`, `channel`, `language`, `message` | the input |
-| `category` | `order_status` `returns` `refund` `shipping` `billing` `account` `product_question` `security` `safety` `other` |
+| `id`, `tenant_id`, `student_id`, `channel`, `language`, `message` | the input. `student_id` is `anonymous` for a prospective student (not signed in, no personal records) |
+| `persona` | `prospect` (asks about courses, fees, admissions) or `student` (signed in; schedule, attendance, assessments) |
+| `category` | `courses` `eligibility` `fees` `admissions` `placement` `attendance` `assessment` `schedule` `privacy` `other` |
 | `priority`, `sentiment` | `low/medium/high/urgent`, `positive/neutral/negative/angry` |
-| `expected_route` | `knowledge` (answer from docs), `action` (use tools), `escalate` (human), `clarify` (ask / refuse politely) |
+| `expected_route` | `knowledge` (answer from docs), `action` (use the student's own records via tools), `escalate` (human team), `clarify` (ask, or politely decline) |
 | `expected_tools` | read tools a good run calls |
-| `expected_write_action` | `null`, `create_return` or `refund`: what a write step would propose (build step 4) |
+| `expected_write_action` | `null`, `request_makeup_class` or `raise_support_ticket`: what a write step would propose (build step 4) |
 | `needs_human` | should end with a human involved (escalation precision/recall) |
-| `must_abstain` | answer is NOT in the docs; the bot must say it does not know |
-| `expected_facts` / `must_not_contain` | strings a correct reply must / must not contain (groundedness, leakage) |
-| `tags` | `adversarial`, `injection`, `cross_customer`, `cross_tenant`, `boundary`, ... for slicing metrics |
+| `must_abstain` | the answer is NOT in the docs; the bot must say it does not know |
+| `expected_facts` | strings a correct reply must contain (answer relevance) |
+| `expected_docs` | the document(s) that hold the answer (retrieval quality: did the right document come back?) |
+| `must_not_contain` | text that must never appear (leakage of internal policy or other people's data) |
+| `tags` | `adversarial`, `injection`, `cross_student`, `cross_tenant`, `pii_fishing`, `internal_probe`, `boundary`, `non_english`, ... for slicing metrics |
 
-Labels are my best judgment of correct behaviour, not ground truth from real customers. Review them; disagreements are useful design discussions.
+Labels are one person's judgment of correct behaviour, not ground truth from real conversations. Review them;
+disagreements are useful design discussions.

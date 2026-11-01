@@ -6,7 +6,7 @@ Keys are never logged.
 
 Usage:
     config = instrument_config({"recursion_limit": 10, "configurable": {...}},
-                               tenant_id="acme_store", customer_id="cust_alice", ticket_id="T-1")
+                               tenant_id="qspiders_sample", student_id="stu_asha", ticket_id="T-1")
     graph.invoke(state, config)
     flush_tracing()          # short-lived scripts; a long-running API server does not need it
 """
@@ -46,13 +46,13 @@ def _make_handler(s: Settings) -> Any:
     return CallbackHandler(public_key=s.langfuse_public_key)
 
 
-def instrument_config(config: dict, *, tenant_id: str, customer_id: str, ticket_id: str,
+def instrument_config(config: dict, *, tenant_id: str, student_id: str, ticket_id: str,
                       settings: Settings | None = None) -> dict:
     """Return `config` plus a Langfuse callback and trace attributes. Returns it unchanged if tracing is off.
 
     Trace attributes (so you can filter in the UI):
       session  = "<tenant>:<ticket>"  (same shape as the planned LangGraph thread_id)
-      user     = customer_id          (a pseudonymous id, not a name or email)
+      user     = student_id          (a pseudonymous id, not a name or email)
       tags     = ["tenant:<tenant>"]
     """
     s = settings or get_settings()
@@ -71,7 +71,7 @@ def instrument_config(config: dict, *, tenant_id: str, customer_id: str, ticket_
         "metadata": {
             **config.get("metadata", {}),
             "langfuse_session_id": f"{tenant_id}:{ticket_id}",
-            "langfuse_user_id": customer_id,
+            "langfuse_user_id": student_id,
             "langfuse_tags": [f"tenant:{tenant_id}"],
         },
     }

@@ -1,0 +1,12 @@
+# Per-tenant settings. Loaded into the `tenants` table by scripts/seed_store.py.
+#
+# SAMPLE DEPLOYMENT: this tenant is modelled on a training institute (QSpiders / PySpiders) but every number below
+# and every document under docs/ is clearly-labelled sample content, not the institute's real policy.
+# Replace it with the institute's approved material before any real use. `is_sample: true` makes the demo
+# tools and the FAQ bot say so out loud.
+# The attendance threshold in docs/ must agree with this value (tests enforce it).
+tenant_id: qspiders_sample
+name: QSpiders / PySpiders (sample deployment)
+timezone: Asia/Kolkata
+attendance_threshold_pct: 75
+is_sample: true

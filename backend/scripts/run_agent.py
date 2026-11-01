@@ -1,6 +1,6 @@
 """Run the minimal agent from the command line and watch each graph step.
 
-    cd backend && python scripts/run_agent.py "Where is my order A1001?"
+    cd backend && python scripts/run_agent.py "What is my attendance in PYF-101?"
 
 If tracing is configured (make langfuse-init, SG_TRACING_ENABLED=true) the run also appears in the
 Langfuse UI under session "<tenant>:<ticket>"; otherwise it behaves exactly as before.
@@ -22,14 +22,14 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("message")
     p.add_argument("--tenant", default=get_settings().default_tenant)
-    p.add_argument("--customer", default="cust_alice")
+    p.add_argument("--student", default="stu_asha")
     p.add_argument("--ticket", default=f"T-{uuid.uuid4().hex[:8]}")
     args = p.parse_args()
 
     graph = build_graph()
     # Trusted scope lives in config, NOT in the prompt or tool arguments.
-    config = {"configurable": {"tenant_id": args.tenant, "customer_id": args.customer}, "recursion_limit": 10}
-    config = instrument_config(config, tenant_id=args.tenant, customer_id=args.customer, ticket_id=args.ticket)
+    config = {"configurable": {"tenant_id": args.tenant, "student_id": args.student}, "recursion_limit": 10}
+    config = instrument_config(config, tenant_id=args.tenant, student_id=args.student, ticket_id=args.ticket)
 
     for update in graph.stream({"messages": [HumanMessage(args.message)]}, config, stream_mode="updates"):
         for node, delta in update.items():

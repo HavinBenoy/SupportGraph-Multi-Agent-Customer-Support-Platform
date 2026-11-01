@@ -10,5 +10,5 @@ class Scope:
     """Who is asking. Built by trusted code from the authenticated request, never from LLM output."""
 
     tenant_id: str
-    customer_id: str
+    student_id: str
     today: date

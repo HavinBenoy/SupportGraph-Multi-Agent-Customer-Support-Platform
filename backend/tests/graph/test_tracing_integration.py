@@ -67,10 +67,10 @@ def collector():
 def _traced_run(base_url: str, public_key: str, ticket: str):
     s = Settings(_env_file=None, tracing_enabled=True, langfuse_public_key=public_key,
                  langfuse_secret_key="sk-lf-test", langfuse_base_url=base_url)
-    cfg = {"configurable": {"tenant_id": "acme_store", "customer_id": "cust_alice", "today": "2026-10-24"},
+    cfg = {"configurable": {"tenant_id": "qspiders_sample", "student_id": "stu_asha", "today": "2026-10-24"},
            "recursion_limit": 10}
-    cfg = instrument_config(cfg, tenant_id="acme_store", customer_id="cust_alice", ticket_id=ticket, settings=s)
-    result = build_graph().invoke({"messages": [HumanMessage("Where is my order A1001?")]}, cfg)
+    cfg = instrument_config(cfg, tenant_id="qspiders_sample", student_id="stu_asha", ticket_id=ticket, settings=s)
+    result = build_graph().invoke({"messages": [HumanMessage("What is my attendance in PYF-101?")]}, cfg)
     return cfg, result
 
 
@@ -80,14 +80,14 @@ def test_traced_run_exports_graph_and_tool_spans(collector):
     shutdown_tracing()
 
     assert cfg["callbacks"], "handler should be attached when tracing is on"
-    assert "shipped" in result["messages"][-1].content  # answer unaffected by tracing
+    assert "80.0%" in result["messages"][-1].content  # answer unaffected by tracing
 
     deadline = time.time() + 10
     while time.time() < deadline and not collector.trace_bytes():
         time.sleep(0.2)
     data = collector.trace_bytes()
     assert data, f"no OTLP trace export received; saw: {[(m, p) for m, p, _ in collector.requests]}"
-    for expected in (b"agent", b"tools", b"get_order_status", b"acme_store:T-42", b"cust_alice", b"tenant:acme_store"):
+    for expected in (b"agent", b"tools", b"get_my_attendance", b"qspiders_sample:T-42", b"stu_asha", b"tenant:qspiders_sample"):
         assert expected in data, f"{expected!r} missing from exported spans"
 
 
@@ -95,11 +95,11 @@ def test_unreachable_langfuse_never_breaks_or_stalls_the_run():
     started = time.time()
     # Nothing listens on this port.
     cfg, result = _traced_run("http://127.0.0.1:9", "pk-lf-integration-2", "T-43")
-    assert "shipped" in result["messages"][-1].content
+    assert "80.0%" in result["messages"][-1].content
     shutdown_tracing()  # must return (best-effort), not raise
     assert time.time() - started < 30
 
 
-def test_untraced_run_is_identical_in_behavior(alice_cfg):
-    result = build_graph().invoke({"messages": [HumanMessage("Where is my order A1001?")]}, alice_cfg)
+def test_untraced_run_is_identical_in_behavior(asha_cfg):
+    result = build_graph().invoke({"messages": [HumanMessage("What is my attendance in PYF-101?")]}, asha_cfg)
     assert [m.type for m in result["messages"]] == ["human", "ai", "tool", "ai"]

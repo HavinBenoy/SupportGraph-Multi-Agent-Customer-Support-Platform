@@ -1,37 +1,51 @@
-"""Mock store schema (build step 1).
+"""Institute schema (build step 1), modelled on a training institute such as QSpiders / PySpiders.
 
 Tenant isolation is built into the keys: every table is keyed by (tenant_id, id) and every foreign key
-INCLUDES tenant_id. So the database itself rejects an order that points at another tenant's customer;
+INCLUDES tenant_id. So the database itself rejects an enrolment that points at another tenant's student;
 isolation does not rely on every query remembering a WHERE clause.
+
+Ownership: a student's own data hangs off `enrollments` (student_id). Batches, sessions and assessment definitions
+are shared by everyone in the batch; attendance and results are per enrolment, so they are only reachable through
+the student's own enrolment.
 """
 
 from datetime import date, datetime
-from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
-ORDER_STATUSES = ("processing", "shipped", "delivered", "cancelled", "returned")
+BATCH_MODES = ("online", "offline")
+ENROLLMENT_STATUSES = ("active", "completed", "on_hold", "withdrawn")
+ASSESSMENT_KINDS = ("quiz", "assignment", "project", "mock_interview")
+RESULT_STATUSES = ("submitted", "graded", "missing")
+
+# Width of every stored embedding. Changing it needs a new migration AND a full re-ingest, because vectors of
+# different widths (or from different models) cannot be compared. See docs in README "Build step 2".
+EMBEDDING_DIM = 768
+# pgvector's `vector(768)` on Postgres; a JSON list on SQLite so the fast test suite needs no extension.
+EmbeddingColumn = Vector(EMBEDDING_DIM).with_variant(JSON(), "sqlite")
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
-    __table_args__ = (CheckConstraint("return_window_days > 0", name="return_window_positive"),)
+    __table_args__ = (CheckConstraint("attendance_threshold_pct BETWEEN 1 AND 100", name="attendance_threshold_valid"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
-    currency: Mapped[str] = mapped_column(String(3))
-    return_window_days: Mapped[int] = mapped_column(Integer)
+    timezone: Mapped[str] = mapped_column(String(64))
+    attendance_threshold_pct: Mapped[int] = mapped_column(Integer)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Customer(Base):
-    __tablename__ = "customers"
-    __table_args__ = (
-        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
-    )
+class Student(Base):
+    __tablename__ = "students"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),)
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -39,48 +53,162 @@ class Customer(Base):
     email: Mapped[str] = mapped_column(String(320))
 
 
-class Order(Base):
-    __tablename__ = "orders"
+class Course(Base):
+    __tablename__ = "courses"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),)
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    brand: Mapped[str] = mapped_column(String(64))  # e.g. "QSpiders", "PySpiders"
+    name: Mapped[str] = mapped_column(String(200))
+
+
+class Batch(Base):
+    __tablename__ = "batches"
     __table_args__ = (
-        ForeignKeyConstraint(["tenant_id", "customer_id"], ["customers.tenant_id", "customers.id"]),
-        CheckConstraint("status IN ('processing','shipped','delivered','cancelled','returned')", name="status_valid"),
-        # A delivery date exists exactly when the parcel was delivered (a returned order was delivered first).
-        CheckConstraint(
-            "(status IN ('delivered','returned') AND delivered_on IS NOT NULL)"
-            " OR (status NOT IN ('delivered','returned') AND delivered_on IS NULL)",
-            name="delivered_on_matches_status",
-        ),
-        CheckConstraint("total >= 0", name="total_non_negative"),
-        Index("ix_orders_tenant_customer", "tenant_id", "customer_id"),
+        ForeignKeyConstraint(["tenant_id", "course_id"], ["courses.tenant_id", "courses.id"]),
+        CheckConstraint("mode IN ('online','offline')", name="mode_valid"),
+        # An offline batch happens at a centre; an online one does not.
+        CheckConstraint("(mode = 'offline' AND centre IS NOT NULL) OR (mode = 'online' AND centre IS NULL)",
+                        name="centre_matches_mode"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # e.g. PYF-101
+    course_id: Mapped[str] = mapped_column(String(32))
+    mode: Mapped[str] = mapped_column(String(8))
+    centre: Mapped[str | None] = mapped_column(String(100))
+    timing: Mapped[str] = mapped_column(String(100))  # human-readable, e.g. "Mon-Fri 10:00-12:00 IST"
+    start_date: Mapped[date] = mapped_column(Date)
+
+
+class Enrollment(Base):
+    """A student in a batch. This row is the ownership link for everything personal (attendance, results)."""
+
+    __tablename__ = "enrollments"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "student_id"], ["students.tenant_id", "students.id"]),
+        ForeignKeyConstraint(["tenant_id", "batch_id"], ["batches.tenant_id", "batches.id"]),
+        CheckConstraint("status IN ('active','completed','on_hold','withdrawn')", name="status_valid"),
+        Index("ix_enrollments_tenant_student", "tenant_id", "student_id"),
     )
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    customer_id: Mapped[str] = mapped_column(String(64))
+    student_id: Mapped[str] = mapped_column(String(64))
+    batch_id: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16))
-    carrier: Mapped[str | None] = mapped_column(String(64))
-    tracking: Mapped[str | None] = mapped_column(String(64))
-    placed_on: Mapped[date] = mapped_column(Date)
-    eta: Mapped[date | None] = mapped_column(Date)
-    delivered_on: Mapped[date | None] = mapped_column(Date)
-    total: Mapped[Decimal] = mapped_column(Numeric(10, 2))  # money is never a float
-    currency: Mapped[str] = mapped_column(String(3))
-
-    items: Mapped[list["OrderItem"]] = relationship(order_by="OrderItem.line_no", viewonly=True)
+    enrolled_on: Mapped[date] = mapped_column(Date)
 
 
-class OrderItem(Base):
-    __tablename__ = "order_items"
+class ClassSession(Base):
+    """One scheduled class of a batch (past or future)."""
+
+    __tablename__ = "class_sessions"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "batch_id"], ["batches.tenant_id", "batches.id"]),)
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    topic: Mapped[str] = mapped_column(String(200))
+
+
+class AttendanceRecord(Base):
+    __tablename__ = "attendance_records"
     __table_args__ = (
-        ForeignKeyConstraint(["tenant_id", "order_id"], ["orders.tenant_id", "orders.id"]),
-        CheckConstraint("quantity > 0", name="quantity_positive"),
-        CheckConstraint("unit_price >= 0", name="unit_price_non_negative"),
+        ForeignKeyConstraint(["tenant_id", "enrollment_id"], ["enrollments.tenant_id", "enrollments.id"]),
+        Index("ix_attendance_tenant_enrollment", "tenant_id", "enrollment_id"),
     )
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    order_id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    line_no: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sku: Mapped[str] = mapped_column(String(64))
-    name: Mapped[str] = mapped_column(String(200))
-    quantity: Mapped[int] = mapped_column(Integer)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    enrollment_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    present: Mapped[bool] = mapped_column(Boolean)
+
+
+class Assessment(Base):
+    __tablename__ = "assessments"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "batch_id"], ["batches.tenant_id", "batches.id"]),
+        CheckConstraint("kind IN ('quiz','assignment','project','mock_interview')", name="kind_valid"),
+        CheckConstraint("max_score > 0", name="max_score_positive"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(16))
+    due_date: Mapped[date] = mapped_column(Date)
+    max_score: Mapped[int] = mapped_column(Integer)
+
+
+class AssessmentResult(Base):
+    """One student's result for one assessment; absent row = not submitted yet and not past due."""
+
+    __tablename__ = "assessment_results"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "assessment_id"], ["assessments.tenant_id", "assessments.id"]),
+        ForeignKeyConstraint(["tenant_id", "enrollment_id"], ["enrollments.tenant_id", "enrollments.id"]),
+        CheckConstraint("status IN ('submitted','graded','missing')", name="status_valid"),
+        # A score exists exactly when the work has been graded.
+        CheckConstraint("(status = 'graded' AND score IS NOT NULL) OR (status <> 'graded' AND score IS NULL)",
+                        name="score_matches_status"),
+        CheckConstraint("score IS NULL OR score >= 0", name="score_non_negative"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    assessment_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enrollment_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))
+    score: Mapped[int | None] = mapped_column(Integer)
+
+
+class Document(Base):
+    """One customer-facing help article that has been ingested for retrieval (build step 2).
+
+    SECURITY: `audience` may only ever be 'public'. The CHECK makes the database itself refuse an internal
+    document, so an ingestion bug or a mistakenly placed file cannot put staff-only policy into customer answers.
+    Widening this constraint (e.g. for a future agent-console assistant) is a deliberate security decision that
+    belongs in its own migration and its own table or retrieval path, not a quiet edit.
+    """
+
+    __tablename__ = "documents"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("audience = 'public'", name="audience_public_only"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))
+    audience: Mapped[str] = mapped_column(String(16))
+    source_path: Mapped[str] = mapped_column(String(300))  # relative to the tenant folder, e.g. docs/returns.md
+    content_hash: Mapped[str] = mapped_column(String(64))  # sha256 of the file: unchanged files are not re-embedded
+    last_reviewed: Mapped[date | None] = mapped_column(Date)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Chunk(Base):
+    """A passage of a document plus its embedding. Keyed (tenant_id, doc_id, chunk_index); the foreign key
+    includes tenant_id, so a chunk cannot point at another tenant's document."""
+
+    __tablename__ = "chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "doc_id"], ["documents.tenant_id", "documents.doc_id"], ondelete="CASCADE"),
+        CheckConstraint("audience = 'public'", name="audience_public_only"),
+        CheckConstraint("chunk_index >= 0", name="chunk_index_non_negative"),
+        Index("ix_chunks_tenant_model", "tenant_id", "embedding_model"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    heading: Mapped[str] = mapped_column(String(400))  # "Returns and Refunds > Return window"
+    text: Mapped[str] = mapped_column(Text)
+    token_count: Mapped[int] = mapped_column(Integer)  # approximate (words); for sizing, not billing
+    audience: Mapped[str] = mapped_column(String(16))  # denormalised so retrieval can filter on it directly
+    # Which model produced the vector. Retrieval only compares vectors from the CURRENT model: mixing models
+    # silently returns meaningless similarities.
+    embedding_model: Mapped[str] = mapped_column(String(100))
+    embedding = mapped_column(EmbeddingColumn, nullable=False)

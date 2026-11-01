@@ -1,110 +1,174 @@
-"""Mock store data as pure Python (no DB, no dates). Dates are expressed as day offsets from an `as_of`
+"""Institute sample data as pure Python (no DB, no dates). Dates are expressed as day offsets from an `as_of`
 date so the demo never goes stale and tests can pin the date.
 
+EVERYTHING HERE IS SYNTHETIC SAMPLE DATA. The names, batches, attendance and scores are invented to exercise the
+tools; they are not records of any real institute or student. Batch ids, centre names and course names are
+placeholders, not QSpiders / PySpiders' real catalogue.
+
 Two tenants on purpose:
-  acme_store  - the real demo tenant (config from tenants/acme_store/config.yaml)
-  other_store - a TEST FIXTURE that deliberately reuses acme's order id "A1001" and customer id
-                "cust_alice", to prove one tenant can never read another's rows. Seeded only on request.
+  qspiders_sample - the demo tenant (config from tenants/qspiders_sample/config.yaml)
+  other_institute - a TEST FIXTURE that deliberately reuses the demo's student id "stu_asha" and batch id
+                    "PYF-101", to prove one tenant can never read another's rows. Seeded only on request.
+
+Scenarios the demo student set covers (each one is asserted by tests):
+  stu_asha    active, 80% attendance (above the 75% threshold), one graded / one submitted / one upcoming assessment
+  stu_rahul   active, 60% attendance (below), a missing assignment
+  stu_sneha   active, exactly 75% (the boundary: at the threshold is NOT below it)
+  stu_karthik enrolment on hold, 50% attendance
+  stu_meera   two active enrolments in different batches
+  stu_neha    withdrawn: the tools must behave as if she has no access to that batch
 """
 
 from dataclasses import dataclass
-from decimal import Decimal
 
 from app.tenants.loader import load_tenant_config
 from app.tenants.schema import TenantConfig
 
 
 @dataclass(frozen=True)
-class SeedItem:
-    sku: str
+class SeedCourse:
+    id: str
+    brand: str
     name: str
-    quantity: int
-    unit_price: Decimal
 
 
 @dataclass(frozen=True)
-class SeedOrder:
+class SeedBatch:
     id: str
-    customer_id: str
+    course_id: str
+    mode: str                       # online | offline
+    centre: str | None
+    timing: str
+    started_days_ago: int
+    past_sessions: int              # held on as_of-1 ... as_of-N
+    upcoming_sessions: int          # scheduled on as_of+1 ... as_of+M
+    topics: tuple[str, ...]         # cycled over the sessions in date order
+
+
+@dataclass(frozen=True)
+class SeedEnrollment:
+    id: str
+    student_id: str
+    batch_id: str
     status: str
-    items: tuple[SeedItem, ...]
-    placed_days_ago: int
-    carrier: str | None = None
-    tracking: str | None = None
-    eta_in_days: int | None = None          # relative to as_of; negative = ETA already passed
-    delivered_days_ago: int | None = None
+    enrolled_days_ago: int
+    attendance: str                 # one char per PAST session, oldest first: P present, A absent
+
+
+@dataclass(frozen=True)
+class SeedAssessment:
+    id: str
+    batch_id: str
+    title: str
+    kind: str
+    due_in_days: int                # negative = already due
+    max_score: int
+
+
+@dataclass(frozen=True)
+class SeedResult:
+    assessment_id: str
+    enrollment_id: str
+    status: str                     # submitted | graded | missing
+    score: int | None = None
 
 
 @dataclass(frozen=True)
 class SeedTenant:
     config: TenantConfig
-    customers: tuple[tuple[str, str, str], ...]  # (id, name, email)
-    orders: tuple[SeedOrder, ...]
+    students: tuple[tuple[str, str, str], ...]  # (id, name, email)
+    courses: tuple[SeedCourse, ...]
+    batches: tuple[SeedBatch, ...]
+    enrollments: tuple[SeedEnrollment, ...]
+    assessments: tuple[SeedAssessment, ...]
+    results: tuple[SeedResult, ...]
 
 
-def _i(sku: str, name: str, price: str, qty: int = 1) -> SeedItem:
-    return SeedItem(sku, name, qty, Decimal(price))
-
-
-def acme_store() -> SeedTenant:
+def qspiders_sample() -> SeedTenant:
     return SeedTenant(
-        config=load_tenant_config("acme_store"),
-        customers=(
-            ("cust_alice", "Alice Nguyen", "alice@example.com"),
-            ("cust_bob", "Bob Martin", "bob@example.com"),
-            ("cust_carol", "Carol Diaz", "carol@example.com"),
-            ("cust_dave", "Dave Okafor", "dave@example.com"),
-            ("cust_erin", "Erin Walsh", "erin@example.com"),
+        config=load_tenant_config("qspiders_sample"),
+        students=(
+            ("stu_asha", "Asha Rao", "asha@example.com"),
+            ("stu_rahul", "Rahul Menon", "rahul@example.com"),
+            ("stu_sneha", "Sneha Iyer", "sneha@example.com"),
+            ("stu_karthik", "Karthik Reddy", "karthik@example.com"),
+            ("stu_meera", "Meera Nair", "meera@example.com"),
+            ("stu_neha", "Neha Kulkarni", "neha@example.com"),
         ),
-        orders=(
-            SeedOrder("A1001", "cust_alice", "shipped", (_i("MS-100", "Wireless Mouse", "29.99"),), 3,
-                      carrier="UPS", tracking="1Z999AA10123456784", eta_in_days=3),
-            SeedOrder("A1002", "cust_alice", "delivered", (_i("HB-220", "USB-C Hub", "49.99"),), 18,
-                      carrier="UPS", tracking="1Z999AA10123456001", delivered_days_ago=14),
-            SeedOrder("A1003", "cust_bob", "delivered", (_i("LS-310", "Laptop Stand", "39.99"),), 90,
-                      carrier="FedEx", tracking="789012345001", delivered_days_ago=84),
-            SeedOrder("A1004", "cust_alice", "processing",
-                      (_i("PC-401", "Phone Case", "12.50", 2), _i("SP-402", "Screen Protector", "8.99")), 1),
-            # Late: the ETA already passed (for "where is my order?!" tickets).
-            SeedOrder("A1005", "cust_bob", "shipped", (_i("KB-510", "Mechanical Keyboard", "89.00"),), 9,
-                      carrier="FedEx", tracking="789012345005", eta_in_days=-2),
-            # Return-window boundary: exactly 30 days after delivery (eligible) and 31 days (not).
-            SeedOrder("A1006", "cust_carol", "delivered", (_i("BS-610", "Bluetooth Speaker", "89.00"),), 35,
-                      carrier="UPS", tracking="1Z999AA10123456006", delivered_days_ago=30),
-            SeedOrder("A1007", "cust_carol", "delivered", (_i("DL-710", "Desk Lamp", "34.50"),), 36,
-                      carrier="UPS", tracking="1Z999AA10123456007", delivered_days_ago=31),
-            SeedOrder("A1008", "cust_dave", "cancelled", (_i("KB-811", "Compact Keyboard", "59.99"),), 6),
-            SeedOrder("A1009", "cust_dave", "returned", (_i("WC-912", "HD Webcam", "74.00"),), 26,
-                      carrier="DHL", tracking="JD0146000050", delivered_days_ago=20),
-            # High-value order (for refund-above-approval-limit tickets).
-            SeedOrder("A1010", "cust_erin", "delivered", (_i("LT-999", "Ultrabook Laptop", "1299.00"),), 8,
-                      carrier="FedEx", tracking="789012345010", delivered_days_ago=5),
-            SeedOrder("A1011", "cust_erin", "shipped",
-                      (_i("CB-120", "USB-C Cable 2m", "9.99", 3), _i("CH-121", "65W Charger", "27.00")), 2,
-                      carrier="UPS", tracking="1Z999AA10123456011", eta_in_days=2),
-            SeedOrder("A1012", "cust_bob", "processing", (_i("MP-130", "Large Mouse Pad", "14.99"),), 0),
+        courses=(
+            SeedCourse("PY-FS", "PySpiders", "Python Full Stack (sample curriculum)"),
+            SeedCourse("QS-TEST", "QSpiders", "Software Testing (sample curriculum)"),
+            SeedCourse("PY-DS", "PySpiders", "Data Science with Python (sample curriculum)"),
+        ),
+        batches=(
+            SeedBatch("PYF-101", "PY-FS", "online", None, "Mon-Fri 10:00-12:00 IST", 14, 10, 5,
+                      ("Python basics", "Data types and control flow", "Functions", "OOP", "File handling",
+                       "Flask routing", "REST APIs", "SQL basics", "ORM", "Testing with pytest", "Django intro",
+                       "Deployment basics", "Git and GitHub", "Capstone planning", "Interview preparation")),
+            SeedBatch("QAT-201", "QS-TEST", "offline", "Sample Centre A", "Mon-Sat 18:00-20:00 IST", 10, 8, 4,
+                      ("Testing fundamentals", "Test design techniques", "Test case writing", "Defect life cycle",
+                       "SQL for testers", "API testing basics", "Automation basics", "Selenium locators",
+                       "Selenium waits", "Test frameworks", "Bug tracking tools", "Mock interview prep")),
+            SeedBatch("PYD-301", "PY-DS", "online", None, "Tue-Sat 19:00-21:00 IST", 7, 6, 4,
+                      ("Python refresher", "NumPy", "Pandas basics", "Data cleaning", "Visualisation", "Statistics basics", "Intro to ML", "Model evaluation",
+                       "Project work", "Portfolio review")),
+        ),
+        enrollments=(
+            SeedEnrollment("E-1001", "stu_asha", "PYF-101", "active", 14, "PPPPAPPPAP"),     # 8/10 = 80%
+            SeedEnrollment("E-1002", "stu_rahul", "PYF-101", "active", 14, "PAPAPPAAPP"),    # 6/10 = 60%
+            SeedEnrollment("E-1003", "stu_sneha", "QAT-201", "active", 10, "PPAPPAPP"),      # 6/8  = 75% boundary
+            SeedEnrollment("E-1004", "stu_karthik", "QAT-201", "on_hold", 10, "PPAPPAAA"),   # 4/8  = 50%
+            SeedEnrollment("E-1005", "stu_meera", "PYF-101", "active", 14, "PPPPPPPPPP"),    # 100%
+            SeedEnrollment("E-1006", "stu_meera", "PYD-301", "active", 7, "PPAPPP"),         # 5/6
+            SeedEnrollment("E-1007", "stu_neha", "PYD-301", "withdrawn", 7, "PAAPAA"),
+        ),
+        assessments=(
+            SeedAssessment("ASM-1", "PYF-101", "Python Basics Quiz", "quiz", -7, 20),
+            SeedAssessment("ASM-2", "PYF-101", "Flask REST API Assignment", "assignment", -2, 50),
+            SeedAssessment("ASM-3", "PYF-101", "Capstone Project Milestone 1", "project", 6, 100),
+            SeedAssessment("ASM-4", "QAT-201", "Test Design Techniques Quiz", "quiz", -5, 25),
+            SeedAssessment("ASM-5", "QAT-201", "Bug Report Assignment", "assignment", 3, 40),
+            SeedAssessment("ASM-6", "PYD-301", "Pandas Exercise", "assignment", -1, 30),
+        ),
+        results=(
+            SeedResult("ASM-1", "E-1001", "graded", 17),
+            SeedResult("ASM-2", "E-1001", "submitted"),
+            SeedResult("ASM-1", "E-1002", "graded", 11),
+            SeedResult("ASM-2", "E-1002", "missing"),
+            SeedResult("ASM-1", "E-1005", "graded", 19),
+            SeedResult("ASM-2", "E-1005", "graded", 44),
+            SeedResult("ASM-4", "E-1003", "graded", 20),
+            SeedResult("ASM-4", "E-1004", "missing"),
+            SeedResult("ASM-6", "E-1006", "submitted"),
         ),
     )
 
 
-def other_store() -> SeedTenant:
+def other_institute() -> SeedTenant:
     return SeedTenant(
-        config=TenantConfig(tenant_id="other_store", name="Other Store (test fixture)", currency="USD",
-                            return_window_days=7),
-        customers=(
-            ("cust_alice", "Alicia Other", "alicia@other.example"),  # same customer id as acme's Alice
-            ("cust_zed", "Zed Other", "zed@other.example"),
+        config=TenantConfig(tenant_id="other_institute", name="Other Institute (test fixture)",
+                            timezone="Asia/Kolkata", attendance_threshold_pct=90),
+        students=(
+            ("stu_asha", "Aisha Other", "aisha@other.example"),  # same student id as the demo tenant's Asha
+            ("stu_zed", "Zed Other", "zed@other.example"),
         ),
-        orders=(
-            SeedOrder("A1001", "cust_alice", "processing", (_i("SECRET-1", "SECRET OTHER-TENANT ITEM", "1.00"),), 1),
-            SeedOrder("Z9001", "cust_zed", "delivered", (_i("GD-1", "Other Tenant Gadget", "50.00"),), 8,
-                      carrier="DHL", tracking="JD0146009001", delivered_days_ago=4),
+        courses=(SeedCourse("OT-1", "OtherBrand", "SECRET OTHER-TENANT COURSE"),),
+        batches=(
+            SeedBatch("PYF-101", "OT-1", "online", None, "Sun 09:00-11:00 IST", 14, 4, 2,
+                      ("SECRET OTHER-TENANT TOPIC",)),                  # same batch id as the demo tenant's
+            SeedBatch("OTH-900", "OT-1", "online", None, "Sat 09:00-11:00 IST", 14, 4, 2, ("Other topic",)),
         ),
+        enrollments=(
+            SeedEnrollment("E-1001", "stu_asha", "PYF-101", "active", 14, "AAAA"),   # same enrolment id too
+            SeedEnrollment("E-9001", "stu_zed", "OTH-900", "active", 14, "PPPP"),
+        ),
+        assessments=(SeedAssessment("ASM-1", "PYF-101", "SECRET OTHER-TENANT QUIZ", "quiz", -3, 10),),
+        results=(SeedResult("ASM-1", "E-1001", "graded", 1),),
     )
 
 
 def build_seed(include_isolation_fixture: bool = False) -> list[SeedTenant]:
-    tenants = [acme_store()]
+    tenants = [qspiders_sample()]
     if include_isolation_fixture:
-        tenants.append(other_store())
+        tenants.append(other_institute())
     return tenants

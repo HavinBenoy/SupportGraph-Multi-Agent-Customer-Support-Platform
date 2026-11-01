@@ -17,9 +17,24 @@ class Settings(BaseSettings):
     llm_model: str = "qwen2.5:7b"
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""
-    default_tenant: str = "acme_store"
+    default_tenant: str = "qspiders_sample"
     # Matches the defaults in docker-compose.yml. SQLite URLs also work (used by the fast tests).
     database_url: str = "postgresql+psycopg://supportgraph:supportgraph@localhost:5432/supportgraph"
+
+    # --- Embeddings + retrieval (build step 2) ---
+    # "fake" is a deterministic offline embedder (feature hashing): good for tests and the no-LLM demo, NOT for
+    # judging real retrieval quality. Vectors must be 768-wide (see app/db/models.py EMBEDDING_DIM).
+    embedding_provider: Literal["fake", "ollama", "openai_compat"] = "fake"
+    embedding_model: str = "nomic-embed-text"
+    embedding_base_url: str = "http://localhost:11434"
+    embedding_api_key: str = ""
+    # Some embedding models want a task prefix (nomic-embed-text: "search_query: " / "search_document: ").
+    embedding_query_prefix: str = ""
+    embedding_document_prefix: str = ""
+    rag_top_k: int = Field(default=4, ge=1, le=20)
+    # Chunks scoring below this cosine similarity are not shown to the model, and if none remain the bot abstains.
+    # Similarity scales differ per embedding model: calibrate with `make eval-rag` when you change the model.
+    rag_min_score: float = Field(default=0.2, ge=0.0, le=1.0)
 
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
