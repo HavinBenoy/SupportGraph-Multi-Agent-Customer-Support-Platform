@@ -10,3 +10,16 @@ name: QSpiders / PySpiders (sample deployment)
 timezone: Asia/Kolkata
 attendance_threshold_pct: 75
 is_sample: true
+# Query expansion vocabulary (sample): what students say -> what the help articles say.
+query_synonyms:
+  course: [programme, programmes]
+  courses: [programme, programmes]
+  marks: [score, scores, result]
+  mark: [score, result]
+  fee: [fees]
+  price: [fee, fees]
+  cost: [fee, fees]
+  job: [placement]
+  jobs: [placement]
+  discount: [concession]
+  certificate: [certification]

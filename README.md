@@ -15,7 +15,8 @@ domain changed from the original retail example.
 > real use. No real student data is used anywhere.
 
 **Status:** build step 0 (skeleton, Postgres + pgvector, ReAct agent, Langfuse tracing) realigned to the institute
-domain; build step 1 (sample data model, documents, tickets) and build step 2 (single-agent RAG FAQ baseline) in place.
+domain; build step 1 (sample data model, documents, tickets), build step 2 (single-agent RAG FAQ baseline) and build step 3
+(triage + conditional routing + knowledge agent + read-only action agent) in place.
 See "What is verified" for exactly what was run and what was not.
 
 ## Quick start
@@ -119,11 +120,63 @@ best-similarity values of the answerable and must-abstain questions.
   an authenticated retrieval path and their own table; that is a deliberate later decision.
 - No writes (make-up requests, tickets) and no escalation yet: the abstain message promises nothing.
 
+## Build step 3: triage, routing, knowledge agent, action agent
+
+```
+START -> triage -> route --+--> knowledge  corrective RAG over public documents (step 2 FAQ graph inside)
+                           +--> action     step 0 ReAct agent + read-only tools (signed-in students only)
+                           +--> clarify    fixed wording: refuse / ask for detail / close
+                           +--> escalate   flags needs_human (the real handoff brief is step 4)
+                                   \--> finalize -> END
+```
+
+Try it (needs `make db-up db-setup ingest`; no LLM key):
+
+```bash
+make support Q="What courses are available?"                               # anonymous prospect -> knowledge
+make support Q="What is my attendance in PYF-101?" STUDENT=stu_asha        # signed in -> action (read tool)
+make support Q="What is my attendance in PYF-101?"                         # prospect -> asked to sign in, no tool runs
+make support Q="I paid twice and want my money back" STUDENT=stu_asha      # -> escalate, needs_human
+make eval-routing                                                          # route accuracy, escalation precision/recall, leaks
+```
+
+**Why each part exists (with an example)**
+
+| Part | Why | Example |
+|---|---|---|
+| Triage with a validated schema (`agents/schemas.py`, `agents/triage.py`) | A model fills a typed form (category, priority, sentiment, language, confidence) instead of free text, so code can branch on it. Any provider error or invalid output becomes *low confidence*, never a crash or a guess. | "I paid twice" -> `payment_dispute`, priority high |
+| Router in plain code (`graph/nodes/router.py`) | Triage *suggests*, code *decides*, tools *authorise*. A confused or injected model can mis-label a message but cannot grant itself access to anyone's records. | A prospect labelled `attendance` + "my records" still gets "please sign in", and `require_scope` would refuse the tool anyway |
+| Escalation outranks low confidence | A vague but alarming message is better seen by a person than quizzed by a bot. Cost: over-escalation, measured as escalation precision. | "Another student keeps threatening me" -> escalate |
+| Corrective RAG (`graph/subgraphs/knowledge.py`) | If the first search finds nothing usable, try ONE reworded search instead of giving up on a vocabulary mismatch. Capped, and skipped if the rewrite is identical. | "What courses are available?" fails on the word "courses"; the retry adds the tenant's word "programmes" and finds the Programmes table |
+| Query rewriting changes what is *searched*, not what is *asked* (`rag/rewrite.py`) | The model still answers the person's own words; only retrieval sees the expanded query. Offline it uses the tenant's `query_synonyms`; with a real model an LLM rewriter. | search "courses programme programmes", answer question "What courses are available?" |
+| Action branch reuses the step 0 ReAct graph | Same read-only tools, same trusted scope; no second agent to keep in sync. | "What is my attendance in PYF-101?" -> `get_my_attendance` -> 80% |
+| Injection screen (`guardrails/injection.py`) | Cheap regex catches lazy attacks with a clean refusal. It is a *weak* layer by design; the real protections are public-only retrieval, scoped tools and data-not-instructions prompts. | "Ignore all previous instructions..." -> refused before any branch |
+| `finalize` | One exit for every branch. Appends the sample-data notice to answered knowledge replies for `is_sample` tenants. Step 4 puts the QA critic and approval gate here. | answer + "This is sample data..." |
+
+**Defence in depth for records:** router blocks prospects -> `require_scope` rejects the `anonymous` id -> every query filters by
+tenant AND student -> a batch that is missing, someone else's or another tenant's returns the same "not found" (no oracle).
+
+**Database changes: none.** State lives in the graph run; the checkpointer and tickets table arrive in step 4.
+
+### Honest limits of step 3
+
+- With the default fakes the routing numbers measure how well keyword rules fit the 53 tickets, which were in view when the rules
+  were written (route accuracy on them is therefore not a prediction). They show the plumbing works. Run `make eval-routing`
+  again with a real model before quoting quality.
+- `LlmTriager` and `LlmRewriter` are tested only against stub models (valid output, invalid schema, provider error); never a real one.
+- "Grading" in corrective RAG is the FAQ graph's own verdict (score threshold + cite-or-abstain). A wrong-but-cited answer (the
+  Java-fee and trainer tickets) is not retried because nothing flags it; an LLM relevance grader / groundedness critic is real-model work.
+- Escalation only flags `needs_human` and says honestly that no follow-up can be arranged from chat yet. Write tools, approval,
+  interrupts, checkpointer and handoff briefs are step 4.
+- "Signed in" is the `student_id` in the run config. Real authentication is not built; do not expose this graph to the internet before it is.
+- The injection screen does not catch paraphrases; the internal-leak evaluator only detects verbatim lines.
+- Ticket T048 was relabelled from `clarify` to `action` (the secure behaviour is the tool's "not found", not the router).
+
 ## What is verified
 
 Run in a sandbox without Docker or real Langfuse, on a throwaway Postgres 16 with pgvector 0.6.0 (see CHANGES.md for the
 exact commands and results). Run on your machine: `make test`, `make test-pg`, `make verify-tracing`,
-`make verify-tracing-faq`. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
+`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
 LLM or embedding model.
 
 ## Using a real model

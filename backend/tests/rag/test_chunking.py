@@ -89,3 +89,11 @@ def test_real_articles_chunk_into_topic_sized_passages_with_their_facts_intact()
     table = [c for c in by_doc["fees-and-payments"] if "55,000" in c.text]
     assert table and "| Software Testing | 35,000 |" in table[0].text  # the fee table survived with its rows intact
     assert table[0].text.lstrip().startswith("|") or "Programme fees" in table[0].heading
+
+
+def test_no_passage_exceeds_the_limit_even_without_sentence_punctuation():
+    """Regression (Step 2 review): one long unpunctuated paragraph used to come out as a single 3000-character chunk."""
+    for body in ("## A\n" + "word " * 600, "## A\n" + "x" * 2000, "## A\n" + "- " + "item " * 400):
+        chunks = chunk_markdown(body, doc_title="D", max_chars=300)
+        assert chunks and all(len(c.text) <= 300 for c in chunks), [len(c.text) for c in chunks]
+        assert "".join("".join(c.text.split()).replace("-", "") for c in chunks).count("x") in (0, 2000)  # nothing lost

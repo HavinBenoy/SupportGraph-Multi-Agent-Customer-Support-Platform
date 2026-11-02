@@ -60,12 +60,23 @@ def _pack(pieces: list[str], max_chars: int, joiner: str) -> list[str]:
     return out
 
 
+def _hard_split(piece: str, max_chars: int) -> list[str]:
+    """Last resort for one sentence/row longer than max_chars (no punctuation, a pasted URL list, ...): cut at
+    word boundaries so no passage ever exceeds the limit. A single token longer than the limit is cut as-is."""
+    if len(piece) <= max_chars:
+        return [piece]
+    words = [w[i:i + max_chars] for w in piece.split() for i in range(0, len(w), max_chars)]
+    return _pack(words, max_chars, " ")
+
+
 def _split_block(block: str, max_chars: int) -> list[str]:
     if len(block) <= max_chars:
         return [block]
     if _is_structured(block):
-        return _pack([ln for ln in block.splitlines() if ln.strip()], max_chars, "\n")
-    return _pack([s for s in _SENTENCE_END.split(block) if s.strip()], max_chars, " ")
+        pieces, joiner = [ln for ln in block.splitlines() if ln.strip()], "\n"
+    else:
+        pieces, joiner = [s for s in _SENTENCE_END.split(block) if s.strip()], " "
+    return _pack([part for piece in pieces for part in _hard_split(piece, max_chars)], max_chars, joiner)
 
 
 def _split_section(lines: list[str], max_chars: int) -> list[str]:

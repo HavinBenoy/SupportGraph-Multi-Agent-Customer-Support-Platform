@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Similarity scales differ per embedding model: calibrate with `make eval-rag` when you change the model.
     rag_min_score: float = Field(default=0.2, ge=0.0, le=1.0)
 
+    # --- Triage, routing and corrective RAG (build step 3) ---
+    # Below this triage confidence the router asks a clarifying question instead of acting.
+    triage_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    # Knowledge agent: first search + at most (attempts - 1) corrective retries. The cap prevents runaway loops and cost.
+    knowledge_max_attempts: int = Field(default=2, ge=1, le=3)
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

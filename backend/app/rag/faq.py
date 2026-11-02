@@ -38,6 +38,7 @@ from app.rag.retrieval import RetrievedChunk, count_chunks, search
 from app.tenants.loader import load_tenant_config
 from app.tools.scope import ScopeError
 
+MAX_SEARCH_CHARS = 800  # a rewritten query may be longer than the question (it carries expansions)
 MAX_QUESTION_CHARS = 500  # a help-centre question is a sentence or two; this bounds cost and the injection surface
 
 # What the user sees when the bot will not answer. It makes no promise it cannot keep (no "I'll escalate").
@@ -49,6 +50,7 @@ ABSTAIN_MESSAGE = (
 
 class FaqState(TypedDict, total=False):
     question: str
+    search_query: str  # optional: what to SEARCH for (a rewrite); the model is still asked `question`
     chunks: list[dict]  # passages above the score threshold, best first (RetrievedChunk.to_dict)
     top_score: float | None  # best similarity seen, even if below the threshold (for calibrating rag_min_score)
     raw_answer: str
@@ -90,7 +92,8 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         if len(question) > MAX_QUESTION_CHARS:
             return {"question": question[:80] + "...", "chunks": [], "top_score": None, "reason": "question_too_long"}
 
-        vector = embedder.embed_query(question)
+        search_text = " ".join((state.get("search_query") or question).split())[:MAX_SEARCH_CHARS]
+        vector = embedder.embed_query(search_text)
         with session_scope() as db:
             found = search(db, tenant_id=tenant_id, query_vector=vector, model_name=embedder.name, top_k=s.rag_top_k)
             relevant = [c for c in found if c.score >= s.rag_min_score]

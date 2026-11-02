@@ -12,7 +12,9 @@ from langchain_core.runnables import RunnableConfig
 
 from app.tenants.scope import Scope
 
-__all__ = ["Scope", "ScopeError", "require_scope"]
+ANONYMOUS = "anonymous"  # the student id used for people who are not signed in
+
+__all__ = ["ANONYMOUS", "Scope", "ScopeError", "require_scope"]
 
 
 class ScopeError(RuntimeError):
@@ -22,7 +24,7 @@ class ScopeError(RuntimeError):
 def require_scope(config: RunnableConfig) -> Scope:
     cfg = (config or {}).get("configurable", {})
     tenant_id, student_id = cfg.get("tenant_id"), cfg.get("student_id")
-    if not tenant_id or not student_id:
+    if not tenant_id or not student_id or student_id == ANONYMOUS:  # a prospect has no records to read
         raise ScopeError("Tool called without tenant_id/student_id in config['configurable']")
     today = date.fromisoformat(cfg["today"]) if cfg.get("today") else date.today()
     return Scope(tenant_id=tenant_id, student_id=student_id, today=today)

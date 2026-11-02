@@ -83,3 +83,28 @@ def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
         return EmbeddingClient(inner=inner, name=f"openai_compat:{s.embedding_model}", **common)
 
     raise ValueError(f"Unknown embedding provider: {s.embedding_provider}")
+
+
+def get_triager(settings: Settings | None = None):
+    """The triage classifier (build step 3): offline rules with the fake provider, otherwise structured output from the
+    configured chat model."""
+    s = settings or get_settings()
+    if s.llm_provider == "fake":
+        from app.llm.fake_triage import RuleTriage
+
+        return RuleTriage()
+    from app.agents.triage import LlmTriager
+
+    return LlmTriager(get_chat_model("triage", s))
+
+
+def get_rewriter(settings: Settings | None = None):
+    """The search-query rewriter for corrective RAG: glossary expansion offline, otherwise the chat model."""
+    s = settings or get_settings()
+    if s.llm_provider == "fake":
+        from app.rag.rewrite import GlossaryRewriter
+
+        return GlossaryRewriter()
+    from app.rag.rewrite import LlmRewriter
+
+    return LlmRewriter(get_chat_model("rewrite", s))

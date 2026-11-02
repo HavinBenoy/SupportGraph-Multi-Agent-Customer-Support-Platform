@@ -27,7 +27,8 @@ from app.observability.tracing import instrument_config, shutdown_tracing, traci
 
 EXPECTED_SPANS = {"agent", "tools", "get_my_attendance"}
 # What each workflow must leave in Langfuse. The FAQ bot (build step 2) is retrieve -> generate -> validate.
-EXPECTED_BY_WORKFLOW = {"agent": EXPECTED_SPANS, "faq": {"retrieve", "generate", "validate"}}
+EXPECTED_BY_WORKFLOW = {"agent": EXPECTED_SPANS, "faq": {"retrieve", "generate", "validate"},
+                       "support": {"triage", "route", "knowledge", "finalize"}}
 FIELDS = "core,basic"  # id, traceId, parentObservationId, name, sessionId, ... (no input/output payloads needed)
 PAGE_SIZE = 100
 MAX_PAGES = 20  # hard stop so a misbehaving server cannot make us loop forever
@@ -120,6 +121,11 @@ def _run_workflow(workflow: str, tenant: str, ticket: str) -> str:
         r = answer_question(build_faq_graph(), "What payment methods do you accept?", tenant_id=tenant, ticket_id=ticket)
         note = "" if not r.abstained else f"  [abstained: {r.reason}; if no_documents_ingested run `make ingest`]"
         return f"{r.answer}{note}"
+    if workflow == "support":
+        from app.graph.support import ask_support, build_support_graph
+
+        out = ask_support(build_support_graph(), "What payment methods do you accept?", tenant_id=tenant, ticket_id=ticket)
+        return f"[{out['route']}] {out['reply']}"
     config = instrument_config(
         {"configurable": {"tenant_id": tenant, "student_id": "stu_asha"}, "recursion_limit": 10},
         tenant_id=tenant, student_id="stu_asha", ticket_id=ticket,

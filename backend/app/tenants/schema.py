@@ -15,3 +15,6 @@ class TenantConfig(BaseModel):
     attendance_threshold_pct: int = Field(ge=1, le=100)
     # True while the data is a labelled stand-in rather than the institute's approved material.
     is_sample: bool = True
+    # The institute's own vocabulary, used to expand search queries (app/rag/rewrite.py): "marks" also searches "score".
+    # Keys are lowercase single words. Tenant data, so a second tenant brings its own words with no code change.
+    query_synonyms: dict[str, list[str]] = Field(default_factory=dict)
