@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Knowledge agent: first search + at most (attempts - 1) corrective retries. The cap prevents runaway loops and cost.
     knowledge_max_attempts: int = Field(default=2, ge=1, le=3)
 
+    # --- Actions, approvals, checkpointing, QA (build step 4) ---
+    # Where paused graph runs (waiting for an approval) are stored: "memory" is lost on restart (fine for demos/tests);
+    # "postgres" survives restarts and uses the same database as everything else.
+    checkpointer: Literal["memory", "postgres"] = "memory"
+    # QA loop: how many times a failing reply may be revised before it is replaced by a safe fallback.
+    qa_max_revisions: int = Field(default=1, ge=0, le=3)
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

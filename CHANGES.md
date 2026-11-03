@@ -1,3 +1,86 @@
+# CHANGES: Build step 4 (write actions, approvals, pauses, checkpointer, QA loop, escalation briefs)
+
+Extract this ZIP over your project folder. It is the **complete tree** minus `.venv`, caches, generated files and secrets; your
+`.env` and `infra/langfuse/.env` are not included and are untouched.
+
+## Apply and verify on your Ubuntu machine
+
+```bash
+cd ~/your-project && unzip -o supportgraph-step4.zip     # does not touch .env or .venv
+.venv/bin/pip install -e "backend[dev]"                  # NEW dependency: langgraph-checkpoint-postgres (see pyproject.toml)
+# add these two lines to your .env (they are in .env.example; your .env was not changed):
+#   SG_CHECKPOINTER=postgres
+#   SG_QA_MAX_REVISIONS=1
+make test                                                # fast suite, SQLite, no Docker
+make db-up && make db-migrate                            # migration 0004 (additive) + checkpointer tables. Does NOT reset or delete data.
+make test-pg                                             # real Postgres + pgvector (throwaway databases)
+make support Q="Please arrange a make-up class for the session I missed in PYD-301" STUDENT=stu_meera TICKET=demo1   # PAUSES
+make review ARGS="list"
+make review ARGS="approve demo1 --staff s_1"             # resumes the run from a different process
+make support Q="Please update my phone number to +91 98765 43210" STUDENT=stu_meera TICKET=demo2
+make support Q="yes" STUDENT=stu_meera TICKET=demo2
+make support Q="I paid twice and want my money back" STUDENT=stu_asha TICKET=demo3
+make eval-routing                                        # exit 1 on a leak, unauthorized tool call or write without a decision
+make verify-tracing-support                              # your real Langfuse; now also expects a `qa` span
+```
+`make support` passes `--ticket` when you give `TICKET=...`; reuse the same ticket to continue one conversation.
+`make db-seed` now **refuses** to re-seed a tenant that already has cases (tickets/requests); add `--reset-cases` only to discard them.
+
+## Test results: what I ran vs what I did not
+
+**Run in my sandbox (executed, this ZIP's code):**
+- SQLite suite: **511 passed, 28 skipped** (the 28 are Postgres-only tests); also re-run from a clean extraction of this ZIP.
+- Throwaway Postgres 16 + pgvector 0.6.0: **539 passed** (includes 8 new `tests/db/test_postgres_step4.py` tests: migration 0004 up/down with data
+  preserved, models-vs-migration diff, constraints, a pause that survives a simulated process restart on the Postgres checkpointer,
+  thread isolation, concurrent double approval where exactly one wins, reseed guard).
+- Cross-process run on Postgres through the real scripts: `ask_support.py` paused a make-up request, a separate `review_queue.py approve`
+  process resumed and approved it, a second approve was refused; an escalation stored a brief; `seed_store.py` refused to re-seed over cases.
+- `eval_routing` on Postgres, fake models, 57 tickets: route accuracy 100%, escalation precision/recall 100%/100%, exact tool match 100%,
+  write tickets routed 100%, paused for the correct approver 100%, escalations recorded with a brief 100%, 0 unauthorized tool calls,
+  **0 writes without a decision**, 0 leaks. QA blocked T021 (Java fee answered from the Python table). Knowledge baseline -> corrective+QA:
+  answered 91% -> 96%, all-facts-correct 65% -> 74%, correct abstention 75% -> **88%**. T026 (trainer for PYF-101) still gets answered: the batch id
+  appears in the cited batch table, so the entity check cannot see that trainers are missing. Treat these numbers as rule-fit with offline fakes,
+  not as real-model quality.
+- Mutation checks (each made tests fail, then restored): removing the role check in `authorize_decision`, removing the `interrupt` (auto-approve),
+  disabling the QA entity check.
+
+**NOT run (needs you):** `make test`, `make test-pg`, `make db-migrate` on your database, the commands above, `make verify-tracing-support`
+against your real Langfuse, and anything with a real LLM or embedding model (`LlmProposer`, `LlmCritic`, `LlmReviser`, `LlmTriager` are tested only with stub models).
+
+## What was built (one line each; design in README "Build step 4")
+- **Write tools + boundaries** `app/actions/`, `app/db/write_repo.py`: the model only proposes; code validates (own active enrolment, a session really missed within `makeup_window_days`), policy picks the approver, code writes after re-checking who decided.
+- **Approval policy**: make-up class -> staff; phone change -> the student's own "yes". Nothing automatic. Concessions/refunds are escalations, never tools.
+- **Interrupts + resume** `graph/nodes/write.py`, `graph/review.py`: `interrupt()` pause; `resume_ticket`, `converse`; wrong-party answers are ignored by re-asking (bounded).
+- **Persistent checkpointer** `graph/checkpointer.py`: memory or Postgres (`SG_CHECKPOINTER`); thread id `tenant:student:ticket` (the brief says `tenant:ticket`; the student was added so a guessed ticket id cannot reach another student's thread).
+- **QA loop** `app/qa/`, `graph/nodes/qa.py`: deterministic checks (leak, other student id, contact details, forbidden promises, uncited, unsupported numbers, entity mismatch) -> revise once -> safe fallback; security failures also escalate. Optional LLM critic/reviser.
+- **Escalation briefs** `app/escalation/`, `graph/nodes/escalate.py`: ticket + code-built, PII-masked brief, team and SLA target from tenant config; staff queue (`make review`).
+- **Database** migration `0004`: `tickets`, `escalations`, `makeup_requests`, `audit_log`, nullable `students.phone`. Additive; downgrade drops exactly these.
+
+## Files
+**Added:** `app/actions/{__init__,schemas,policy,proposer,executor}.py`, `app/qa/{__init__,checks,critic,revise}.py`, `app/escalation/{__init__,brief,queue}.py`,
+`app/db/write_repo.py`, `app/db/migrations/versions/0004_actions_and_escalations.py`, `app/graph/{checkpointer,review}.py`,
+`app/graph/nodes/{common,escalate,write,qa}.py`, `app/guardrails/pii.py`, `scripts/{review_queue,setup_checkpointer}.py`,
+`tests/step4/*` (conftest + 7 test files), `tests/db/test_postgres_step4.py`, `docs/ROADMAP.md`.
+**Modified:** `app/db/models.py`, `app/db/seed.py` (+ `scripts/seed_store.py`: cases guard), `app/config.py` (`checkpointer`, `qa_max_revisions`),
+`app/tenants/schema.py` + `tenants/qspiders_sample/config.yaml` (`makeup_window_days`, `escalation_teams`, `default_team`, `sla_hours`),
+`app/agents/{schemas,triage}.py` (`contact_update`, `WRITE_CATEGORIES`; `makeup_request` is no longer an escalation), `app/llm/fake_triage.py`,
+`app/llm/gateway.py` (`get_proposer/get_critic/get_reviser`), `app/graph/{support,state,evaluate}.py`, `app/graph/nodes/{router,replies}.py`,
+`scripts/{ask_support,eval_routing,verify_tracing}.py`, `Makefile`, `.env.example`, `backend/pyproject.toml`, dataset `tickets_qspiders_v1.jsonl` (57 tickets) + README + dataset test, step 3 tests adapted (thread id), README.
+**Removed:** nothing.
+
+## Behaviour changes to know about
+- Replies of escalations now carry a reference id and the team name (no timing promise). Make-up requests no longer escalate: they follow the write path.
+- Dataset: T038 relabelled `escalate` -> `write` (student changed to stu_meera, batch PYD-301); T054-T057 added.
+- `build_support_graph` defaults to an in-memory checkpointer; every run needs a thread id (`support_config` supplies it).
+- `ask_support` result may contain `awaiting` ("staff"/"student") and `pending` when the run paused.
+
+## Known limitations / unfinished
+No authentication (student id and `--staff` are trusted); students are not notified when staff decide; LLM proposer/critic/reviser untested with a real model;
+QA cannot catch a plausible cited wrong paraphrase or T026-type answers; one shared Postgres connection for the checkpointer (use a pool for concurrent traffic);
+anonymous escalations cannot be answered (no contact captured); the brief's `thread_id = tenant:ticket` was changed to include the student; no frontend yet (step 5 in the brief).
+
+---------------------------------------------------------------------------------------------------
+
 # CHANGES: Step 2 review + Step 3 (triage, routing, knowledge agent, action agent)
 
 Extract this ZIP over your project folder. It is the **complete tree** minus `.venv`, caches, generated files and secrets;

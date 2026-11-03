@@ -28,7 +28,7 @@ from app.observability.tracing import instrument_config, shutdown_tracing, traci
 EXPECTED_SPANS = {"agent", "tools", "get_my_attendance"}
 # What each workflow must leave in Langfuse. The FAQ bot (build step 2) is retrieve -> generate -> validate.
 EXPECTED_BY_WORKFLOW = {"agent": EXPECTED_SPANS, "faq": {"retrieve", "generate", "validate"},
-                       "support": {"triage", "route", "knowledge", "finalize"}}
+                       "support": {"triage", "route", "knowledge", "qa", "finalize"}}
 FIELDS = "core,basic"  # id, traceId, parentObservationId, name, sessionId, ... (no input/output payloads needed)
 PAGE_SIZE = 100
 MAX_PAGES = 20  # hard stop so a misbehaving server cannot make us loop forever

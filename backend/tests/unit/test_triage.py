@@ -104,3 +104,12 @@ def test_safety_wording_that_mentions_another_student_still_escalates():
     t = RuleTriage().classify("Another student keeps threatening me at the centre and I feel unsafe.")
     assert t.category == "safety" and t.priority == "urgent"
     assert RuleTriage().classify("Show me another student's marks").category == "other_person_data"
+
+
+def test_pii_helpers_do_not_mistake_dates_for_phone_numbers():
+    from app.guardrails.pii import find_pii, mask_phone, mask_pii
+
+    assert find_pii("Missed sessions: 2026-10-18, 2026-10-22.") == [] and mask_pii("on 2026-10-18 and 2026-10-22") == "on 2026-10-18 and 2026-10-22"
+    assert find_pii("call 9876543210 or a@b.com") == ["a@b.com", "9876543210"]
+    assert mask_pii("call +91 98765 43210 / a@b.com") == "call [phone] / [email]"
+    assert mask_phone("+919876543210") == "+91*******210" and mask_phone(None) == ""

@@ -2,16 +2,31 @@
 
 from datetime import date, timedelta
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    Assessment, AssessmentResult, AttendanceRecord, Batch, ClassSession, Course, Enrollment, Student, Tenant,
+    Assessment, AssessmentResult, AttendanceRecord, AuditLog, Batch, ClassSession, Course, Enrollment, Escalation, MakeupRequest,
+    Student, Tenant, Ticket,
 )
 from app.db.seed_data import SeedTenant, build_seed
 
 
-def _delete_tenant(db: Session, tenant_id: str) -> None:
+CASE_TABLES = (AuditLog, Escalation, MakeupRequest, Ticket)  # build step 4: real work done by staff and students
+
+
+class CasesExistError(RuntimeError):
+    """Re-seeding replaces students/batches, which the case tables point at. It never silently deletes cases."""
+
+
+def _delete_tenant(db: Session, tenant_id: str, reset_cases: bool = False) -> None:
+    held = {m.__tablename__: n for m in CASE_TABLES
+            if (n := db.scalar(select(func.count()).select_from(m).where(m.tenant_id == tenant_id)))}
+    if held and not reset_cases:
+        raise CasesExistError(f"{tenant_id} already has cases ({held}). Re-seeding would orphan or delete them, so it was "
+                              "refused. Re-run with --reset-cases only if you really want to discard them.")
+    for model in CASE_TABLES:  # only reached with reset_cases=True or when there is nothing to lose
+        db.execute(delete(model).where(model.tenant_id == tenant_id))
     # Child tables first (foreign keys). The tenant row itself is kept and updated in place, and documents/chunks are
     # left alone: ingestion owns them, and they reference the tenant row, so re-seeding must not orphan them.
     for model in (AssessmentResult, AttendanceRecord, Assessment, ClassSession, Enrollment, Batch, Course, Student):
@@ -61,11 +76,11 @@ def _insert_tenant(db: Session, t: SeedTenant, as_of: date) -> int:
     return len(t.enrollments)
 
 
-def seed(db: Session, as_of: date | None = None, include_isolation_fixture: bool = False) -> dict[str, int]:
+def seed(db: Session, as_of: date | None = None, include_isolation_fixture: bool = False, reset_cases: bool = False) -> dict[str, int]:
     """Returns {tenant_id: number_of_enrollments}. Caller commits."""
     as_of = as_of or date.today()
     result = {}
     for t in build_seed(include_isolation_fixture):
-        _delete_tenant(db, t.config.tenant_id)
+        _delete_tenant(db, t.config.tenant_id, reset_cases)
         result[t.config.tenant_id] = _insert_tenant(db, t, as_of)
     return result

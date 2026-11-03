@@ -16,7 +16,8 @@ domain changed from the original retail example.
 
 **Status:** build step 0 (skeleton, Postgres + pgvector, ReAct agent, Langfuse tracing) realigned to the institute
 domain; build step 1 (sample data model, documents, tickets), build step 2 (single-agent RAG FAQ baseline) and build step 3
-(triage + conditional routing + knowledge agent + read-only action agent) in place.
+(triage + conditional routing + knowledge agent + read-only action agent) and build step 4 (write actions with approval, human-in-the-loop
+pauses, persistent checkpointer, QA loop, escalation briefs) in place. Progress per step: `docs/ROADMAP.md`.
 See "What is verified" for exactly what was run and what was not.
 
 ## Quick start
@@ -37,7 +38,7 @@ make test-pg                # also run the real-Postgres + pgvector tests (throw
 ### Upgrading an existing checkout (retail to institute)
 
 `make db-migrate` applies migration `0003`. It drops the retail demo tables (`customers`, `orders`, `order_items`),
-deletes only the demo tenants `qspiders_sample` and `other_store` (and their ingested demo documents), and creates the
+deletes only the retail demo tenants `acme_store` and `other_store` (and their ingested demo documents), and creates the
 institute tables. Other tenant rows are kept. The downgrade restores the old *structure* but not the deleted demo
 rows. Then run `make db-seed` and `make ingest`. Nothing else in your database is touched.
 
@@ -156,7 +157,7 @@ make eval-routing                                                          # rou
 **Defence in depth for records:** router blocks prospects -> `require_scope` rejects the `anonymous` id -> every query filters by
 tenant AND student -> a batch that is missing, someone else's or another tenant's returns the same "not found" (no oracle).
 
-**Database changes: none.** State lives in the graph run; the checkpointer and tickets table arrive in step 4.
+**Database changes in step 3: none** (step 4 added the tables below).
 
 ### Honest limits of step 3
 
@@ -166,17 +167,74 @@ tenant AND student -> a batch that is missing, someone else's or another tenant'
 - `LlmTriager` and `LlmRewriter` are tested only against stub models (valid output, invalid schema, provider error); never a real one.
 - "Grading" in corrective RAG is the FAQ graph's own verdict (score threshold + cite-or-abstain). A wrong-but-cited answer (the
   Java-fee and trainer tickets) is not retried because nothing flags it; an LLM relevance grader / groundedness critic is real-model work.
-- Escalation only flags `needs_human` and says honestly that no follow-up can be arranged from chat yet. Write tools, approval,
-  interrupts, checkpointer and handoff briefs are step 4.
+- (Superseded by step 4: escalation now persists a ticket and a brief for a human team; see below.)
 - "Signed in" is the `student_id` in the run config. Real authentication is not built; do not expose this graph to the internet before it is.
 - The injection screen does not catch paraphrases; the internal-leak evaluator only detects verbatim lines.
 - Ticket T048 was relabelled from `clarify` to `action` (the secure behaviour is the tool's "not found", not the router).
+
+## Build step 4: write actions, approvals, pauses, checkpointer, QA loop, escalation briefs
+
+```
+START -> triage -> route --+--> knowledge / action / clarify            (unchanged from step 3)
+                           +--> write     propose -> prepare -> approval (PAUSES) -> execute
+                           +--> escalate  ticket + brief stored for a human team
+                                  \--> qa -(pass)-> finalize
+                                        \-(fixable)-> revise -> qa      (capped by SG_QA_MAX_REVISIONS)
+                                        \-(otherwise)-> fallback (+ escalate if it looked like a leak) -> finalize
+```
+
+```bash
+# one-time: add SG_CHECKPOINTER=postgres to your .env (see .env.example), then
+make db-migrate                      # migration 0004 + the checkpointer's own tables (idempotent, additive)
+make support Q="Please arrange a make-up class for the session I missed in PYD-301" STUDENT=stu_meera TICKET=demo1   # PAUSES
+make review ARGS="list"              # staff: open escalations (urgent first) and make-up requests waiting
+make review ARGS="approve demo1 --staff s_1"     # resumes the paused run, in another process
+make support Q="Please update my phone number to +91 98765 43210" STUDENT=stu_meera TICKET=demo2    # then: ... Q="yes" TICKET=demo2
+make support Q="I paid twice and want my money back" STUDENT=stu_asha TICKET=demo3     # -> ticket + brief for the accounts team
+make review ARGS="show ESC-XXXXXXXX"
+make eval-routing                    # now also checks write routing, pauses, escalation records, QA blocks
+```
+
+**The two rules that matter most**
+1. *The model never has a write tool.* It may only PROPOSE (`ActionProposal`, plain data). Code validates the proposal against the
+   database, the approval policy picks who must decide, the run pauses, and only code writes, after re-checking who decided.
+2. *Nothing the bot writes happens unattended.* There is no "auto" tier: a make-up class needs a staff decision; a phone change needs the
+   student's own "yes". Fee concessions, refunds, certificates and attendance changes are never tools: they are escalations.
+
+| Requirement | Where | Why / example |
+|---|---|---|
+| Write tools + authorization boundaries | `app/actions/` (`schemas`, `proposer`, `policy`, `executor`), `app/db/write_repo.py` | Only a signed-in student, only their own **active** enrolment, only a session they actually **missed** in the last `makeup_window_days` (tenant config). A batch that is missing, not yours, or another tenant's gives the same answer (no oracle). `authorize_decision` re-checks tenant, role and owner at the last moment. |
+| Approval policies | `policy.APPROVAL` | `request_makeup_class -> staff`, `update_contact_phone -> student`. A student cannot approve a staff action; staff cannot confirm a student's change; another student cannot confirm yours. |
+| Human-in-the-loop interrupts + resumption | `graph/nodes/write.py` (`interrupt`), `graph/review.py` (`resume_ticket`, `converse`) | The run stops at `approval` and is saved. `resume_ticket` (staff) or the student's "yes" continues the SAME run. `interrupt()` sits alone in its node because LangGraph re-runs that node on resume: side effects live before (`prepare`, idempotent) and after (`execute`). A wrong party's answer is ignored by asking again (bounded), not by raising, because a raised error would keep the bad answer stored. |
+| Persistent checkpointer | `graph/checkpointer.py` | `SG_CHECKPOINTER=postgres` stores paused runs in the same database: they survive restarts and can be resumed by another process (verified on Postgres in the tests). Thread id = `tenant:student:ticket`, so nobody can reach another student's thread by guessing a ticket id. Checkpoints contain conversation text: same retention/access rules as tickets. |
+| QA validation loop | `app/qa/`, `graph/nodes/qa.py` | Deterministic checks on every reply: internal-text leak, another student's id, contact details that were not in the question or sources, forbidden promises ("guaranteed job", "I have approved"), uncited answer, numbers not in the cited passage, and **entity mismatch** (the question names Java Full Stack but the cited passage is about Python: a citation alone does not catch it). Fixable problems are revised once; the rest are replaced by a safe fallback. An optional LLM critic can add checks (stub-tested only). |
+| Escalation briefs + handoff | `app/escalation/`, `graph/nodes/escalate.py` | A ticket row and a brief built by CODE (not a model): category, priority, team, internal SLA target, the student's own batches/attendance, a PII-masked excerpt, what the bot already did, and a suggested next step. One escalation per ticket. If the database write fails the student is told honestly (no reference, "contact support directly"). |
+
+**Database changes (migration `0004`, additive):** tables `tickets`, `escalations`, `makeup_requests`, `audit_log`; nullable `students.phone`.
+Every key and foreign key includes `tenant_id`; request creation is idempotent (unique key per ticket); decisions use `SELECT ... FOR UPDATE`
+so two reviewers cannot both win; `audit_log` is append-only by convention (no code path updates or deletes it).
+`make db-seed` now REFUSES to re-seed a tenant that already has cases (it would delete them); `--reset-cases` is the explicit opt-in.
+The routing evaluation writes rows under `eval-<ticket>-<run>` ids and deletes exactly those afterwards.
+
+### Honest limits of step 4
+
+- **No authentication.** "Signed in" is the `student_id` in the run config and "staff" is the `--staff` argument. Anything calling
+  `resume_ticket` or the review console must be trusted code. Real login, roles and per-staff permissions are the security/auth stage.
+  Ticket ids should be server-generated in a real API (a client-chosen id that collides with someone else's is refused, not merged).
+- **Students are not notified.** The outcome is returned to the caller of `resume_ticket` and stored in the thread; pushing it to a chat or
+  email needs the delivery layer.
+- **The LLM proposer, critic and reviser are tested only with stub models**, never a real one. Offline, proposals come from keyword rules.
+- **QA is a safety net, not a truth machine.** It catches the failure classes listed above. A plausible, cited, wrong paraphrase, or a
+  wrong-entity answer where the entity word does appear in the cited passage (T026: the batch id is in the batch table, the trainer is not), passes.
+- Escalation SLA hours and teams are sample tenant data; they are internal targets and are never promised to students.
+- One shared Postgres connection backs the checkpointer (what the library documents). Use a connection pool before serving concurrent traffic.
+- Prospects who escalate leave a note nobody can reply to (no contact details are collected yet); the reply says so.
 
 ## What is verified
 
 Run in a sandbox without Docker or real Langfuse, on a throwaway Postgres 16 with pgvector 0.6.0 (see CHANGES.md for the
 exact commands and results). Run on your machine: `make test`, `make test-pg`, `make verify-tracing`,
-`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
+`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`, and the step 4 commands above. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
 LLM or embedding model.
 
 ## Using a real model

@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review
 
 venv:
 	python3 -m venv .venv
@@ -17,6 +17,7 @@ db-psql:
 # Create/upgrade the schema (Alembic), then load the institute sample data. Needs `make db-up` first.
 db-migrate:
 	cd backend && ../.venv/bin/alembic -c alembic.ini upgrade head
+	cd backend && ../.venv/bin/python scripts/setup_checkpointer.py
 
 db-seed:
 	cd backend && ../.venv/bin/python scripts/seed_store.py
@@ -40,9 +41,10 @@ eval-rag:
 	cd backend && ../.venv/bin/python scripts/eval_rag.py
 
 # Build step 3 (triage + routing + knowledge/action agents).
-# make support Q="What is my attendance in PYF-101?" STUDENT=stu_asha   (omit STUDENT to ask as an anonymous prospect)
+# make support Q="What is my attendance in PYF-101?" STUDENT=stu_asha [TICKET=demo1]   (omit STUDENT to ask as an anonymous prospect;
+# reuse a TICKET to continue the same conversation)
 support:
-	cd backend && ../.venv/bin/python scripts/ask_support.py $(if $(STUDENT),--student $(STUDENT)) "$(or $(Q),What courses are available?)"
+	cd backend && ../.venv/bin/python scripts/ask_support.py $(if $(STUDENT),--student $(STUDENT)) $(if $(TICKET),--ticket $(TICKET)) "$(or $(Q),What courses are available?)"
 
 eval-routing:
 	cd backend && ../.venv/bin/python scripts/eval_routing.py
@@ -97,5 +99,9 @@ verify-tracing-faq:
 	cd backend && ../.venv/bin/python scripts/verify_tracing.py --workflow faq
 
 # Runs one prospect question through the support graph and checks Langfuse received the triage/route/knowledge spans.
-verify-tracing-support:
+verify-tracing-support review:
 	cd backend && ../.venv/bin/python scripts/verify_tracing.py --workflow support
+
+# Build step 4: staff console. make review ARGS="list"   |   make review ARGS="approve TICKET --staff s_1"
+review:
+	cd backend && ../.venv/bin/python scripts/review_queue.py $(ARGS)

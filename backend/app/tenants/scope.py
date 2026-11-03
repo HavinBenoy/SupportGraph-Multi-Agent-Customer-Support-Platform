@@ -12,3 +12,17 @@ class Scope:
     tenant_id: str
     student_id: str
     today: date
+
+
+@dataclass(frozen=True)
+class Reviewer:
+    """Who is deciding on a paused action. Built by trusted code (the staff console / student session), never by the LLM.
+    role "staff": a person on the institute's team. role "student": the student who owns the ticket confirming their own change."""
+
+    tenant_id: str
+    reviewer_id: str
+    role: str  # "staff" | "student"
+
+    @property
+    def actor(self) -> str:
+        return f"{self.role}:{self.reviewer_id}"

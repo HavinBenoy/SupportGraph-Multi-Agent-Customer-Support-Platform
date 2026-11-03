@@ -51,6 +51,7 @@ class Student(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(320))
+    phone: Mapped[str | None] = mapped_column(String(20))  # build step 4: changed only through the confirmed write action
 
 
 class Course(Base):
@@ -212,3 +213,99 @@ class Chunk(Base):
     # silently returns meaningless similarities.
     embedding_model: Mapped[str] = mapped_column(String(100))
     embedding = mapped_column(EmbeddingColumn, nullable=False)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Build step 4: cases, escalations, write actions and the audit trail. Same rule as above: every key and foreign key
+# carries tenant_id. Nothing here is ever readable by the LLM: these tables are touched only by code (app/actions,
+# app/escalation, app/db/write_repo.py).
+# ----------------------------------------------------------------------------------------------------------------------
+TICKET_STATUSES = ("open", "awaiting_approval", "escalated", "resolved")
+ESCALATION_STATUSES = ("open", "claimed", "resolved")
+MAKEUP_STATUSES = ("pending", "approved", "rejected")
+
+
+class Ticket(Base):
+    """One support case (one chat thread). `student_id` is NULL for an anonymous prospect."""
+
+    __tablename__ = "tickets"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        ForeignKeyConstraint(["tenant_id", "student_id"], ["students.tenant_id", "students.id"]),
+        CheckConstraint("status IN ('open','awaiting_approval','escalated','resolved')", name="status_valid"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    student_id: Mapped[str | None] = mapped_column(String(64))
+    channel: Mapped[str] = mapped_column(String(16), default="chat")
+    category: Mapped[str] = mapped_column(String(32), default="other")
+    priority: Mapped[str] = mapped_column(String(16), default="low")
+    status: Mapped[str] = mapped_column(String(24), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Escalation(Base):
+    """A handoff to a human team, with the brief that saves them re-reading the chat. At most one per ticket."""
+
+    __tablename__ = "escalations"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "ticket_id"], ["tickets.tenant_id", "tickets.id"]),
+        CheckConstraint("status IN ('open','claimed','resolved')", name="status_valid"),
+        Index("ix_escalations_queue", "tenant_id", "status", "team"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String(64))
+    team: Mapped[str] = mapped_column(String(64))
+    priority: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(64))
+    brief: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    claimed_by: Mapped[str | None] = mapped_column(String(64))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MakeupRequest(Base):
+    """A student's request for a make-up class. Created `pending`; only a staff decision moves it to approved/rejected."""
+
+    __tablename__ = "makeup_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "student_id"], ["students.tenant_id", "students.id"]),
+        ForeignKeyConstraint(["tenant_id", "batch_id"], ["batches.tenant_id", "batches.id"]),
+        CheckConstraint("status IN ('pending','approved','rejected')", name="status_valid"),
+        # The same ticket can never create the same request twice (resume twice, retry after a crash).
+        Index("uq_makeup_idempotency", "tenant_id", "idempotency_key", unique=True),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    student_id: Mapped[str] = mapped_column(String(64))
+    batch_id: Mapped[str] = mapped_column(String(32))
+    session_date: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    ticket_id: Mapped[str | None] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    decided_by: Mapped[str | None] = mapped_column(String(64))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    """Append-only record of every write and every approval decision. No code path updates or deletes a row."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id"], ["tenants.id"]), Index("ix_audit_tenant_ticket", "tenant_id", "ticket_id"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    ticket_id: Mapped[str | None] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(80))      # "student:stu_asha", "staff:s_1", "system"
+    action: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

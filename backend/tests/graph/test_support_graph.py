@@ -122,7 +122,7 @@ def test_missing_tenant_fails_closed(graph):
     from langchain_core.messages import HumanMessage
 
     with pytest.raises(ScopeError):
-        graph.invoke({"messages": [HumanMessage("hi")]}, {"configurable": {"student_id": "stu_asha"}})
+        graph.invoke({"messages": [HumanMessage("hi")]}, {"configurable": {"student_id": "stu_asha", "thread_id": "x", "ticket_id": "t-1"}})
 
 
 def test_unknown_tenant_fails_instead_of_answering(graph):

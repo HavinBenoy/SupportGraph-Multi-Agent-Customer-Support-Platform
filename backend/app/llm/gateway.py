@@ -108,3 +108,36 @@ def get_rewriter(settings: Settings | None = None):
     from app.rag.rewrite import LlmRewriter
 
     return LlmRewriter(get_chat_model("rewrite", s))
+
+
+def get_proposer(settings: Settings | None = None):
+    """Turns a message into an action PROPOSAL (build step 4): offline rules with the fake provider, else structured output."""
+    s = settings or get_settings()
+    if s.llm_provider == "fake":
+        from app.actions.proposer import RuleProposer
+
+        return RuleProposer()
+    from app.actions.proposer import LlmProposer
+
+    return LlmProposer(get_chat_model("proposer", s))
+
+
+def get_critic(settings: Settings | None = None):
+    """The optional LLM critic of the QA loop. None with the fake provider: the deterministic checks still run."""
+    s = settings or get_settings()
+    if s.llm_provider == "fake":
+        return None
+    from app.qa.critic import LlmCritic
+
+    return LlmCritic(get_chat_model("critic", s))
+
+
+def get_reviser(settings: Settings | None = None):
+    s = settings or get_settings()
+    if s.llm_provider == "fake":
+        from app.qa.revise import DeterministicReviser
+
+        return DeterministicReviser()
+    from app.qa.critic import LlmReviser
+
+    return LlmReviser(get_chat_model("reviser", s))

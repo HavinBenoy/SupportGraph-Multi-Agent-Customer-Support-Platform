@@ -25,7 +25,6 @@ _ESCALATE = [
     ("human_request", r"\b(talk|speak) to (a |an )?(person|human|someone|agent|counsellor)\b", "medium"),
     ("payment_dispute", r"\b(paid|charged|deducted)\b.*\b(twice|double|wrong)\b|\bmoney back\b|\bchargeback\b", "high"),
     ("complaint", r"\bcomplain|\bshouted\b|\brude\b|\bmisbehav", "high"),
-    ("makeup_request", r"\bmake-?up class\b", "medium"),
     ("concession_request", r"\bdiscount\b|\bconcession\b|\bwaive", "medium"),
 ]
 # Knowledge/record categories in priority order: the first whose keywords appear wins.
@@ -67,6 +66,10 @@ class RuleTriage:
             if re.search(pattern, low):
                 return TriageResult(category=category, priority=priority, sentiment="angry" if angry else "negative",
                                     language=lang, confidence=0.9)
+        if re.search(r"\bmake-?up (class|session)\b|\bmissed (a |the )?(class|session)\b.*\b(make|arrange|reschedule)", low):
+            return TriageResult(category="makeup_request", priority="medium", language=lang, confidence=0.9)
+        if re.search(r"\b(phone|mobile|contact)\s+(number|no\.?)\b.*\b(change|update)|\b(change|update)\b.*\b(phone|mobile|contact)\s+(number|no\.?)\b", low):
+            return TriageResult(category="contact_update", language=lang, confidence=0.9)
         for category, pattern in _TOPICS:
             if re.search(pattern, low):
                 has_batch = bool(_BATCH.search(t))

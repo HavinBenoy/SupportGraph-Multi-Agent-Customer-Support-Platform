@@ -23,3 +23,16 @@ query_synonyms:
   jobs: [placement]
   discount: [concession]
   certificate: [certification]
+
+# Build step 4 (SAMPLE values: replace with the institute's real routing and targets)
+makeup_window_days: 14
+default_team: student-support
+escalation_teams:
+  complaint: student-experience
+  payment_dispute: accounts
+  concession_request: accounts
+  legal_threat: management
+  safety: management
+  human_request: student-support
+  makeup_request: academics
+sla_hours: {low: 72, medium: 48, high: 24, urgent: 4}

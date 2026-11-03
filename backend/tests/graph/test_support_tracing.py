@@ -28,5 +28,5 @@ def test_each_support_node_is_exported_as_a_span(ingested, monkeypatch):
     finally:
         c.close()
     assert out["route"] == "knowledge"
-    for expected in (b"triage", b"route", b"knowledge", b"finalize", b"qspiders_sample:sup-1", b"tenant:qspiders_sample"):
+    for expected in (b"triage", b"route", b"knowledge", b"qa", b"finalize", b"qspiders_sample:sup-1", b"tenant:qspiders_sample"):
         assert expected in data, f"{expected!r} missing from exported spans"

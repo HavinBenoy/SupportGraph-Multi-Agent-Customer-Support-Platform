@@ -18,7 +18,7 @@ class TicketState(TypedDict, total=False):
 
     messages: Annotated[list[AnyMessage], add_messages]
     triage: dict            # TriageResult.model_dump(): a suggestion, never an authorisation
-    route: str              # knowledge | action | clarify | escalate
+    route: str              # knowledge | action | clarify | escalate | write
     route_reason: str       # why the router chose it (also used to pick the clarify wording)
     handled_by: str         # which branch produced the reply
     reply: str              # the text sent to the person
@@ -29,3 +29,14 @@ class TicketState(TypedDict, total=False):
     tools_called: list[str]  # action branch: names of the tools the agent called
     needs_human: bool       # escalate branch
     escalation_reason: str | None
+
+    # --- build step 4 ---
+    ticket_id: str          # the case this run belongs to (also the thread id suffix)
+    proposal: dict | None   # write branch: what the model PROPOSED (data, grants nothing)
+    check: dict             # write branch: code's verdict {ok, code, args, options, request_id, duplicate}
+    approval_role: str      # "staff" | "student": who must decide (from the approval policy, never from the model)
+    outcome: str            # write branch: "approved" | "rejected" | "refused" | "duplicate"
+    escalation_id: str | None
+    qa_issues: list[dict]   # [{"code","detail"}] from the last QA pass
+    qa_revisions: int       # how many times the reply was revised
+    qa_blocked: bool        # true when the reply was replaced by the safe fallback

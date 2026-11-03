@@ -11,14 +11,17 @@ Category = Literal[
     # the student's own records (action branch, only when signed in); with wants_own_records=False they are policy questions
     "attendance", "assessment", "schedule",
     # need a person (escalation branch)
-    "complaint", "payment_dispute", "legal_threat", "safety", "human_request", "makeup_request", "concession_request",
+    "complaint", "payment_dispute", "legal_threat", "safety", "human_request", "concession_request",
+    # a student asks the system to DO something small (build step 4): validated, then approved by staff or confirmed by the student
+    "makeup_request", "contact_update",
     # decline / ask
     "other_person_data", "chitchat", "other",
 ]
 
 RECORD_CATEGORIES: frozenset[str] = frozenset({"attendance", "assessment", "schedule"})
 ESCALATION_CATEGORIES: frozenset[str] = frozenset(
-    {"complaint", "payment_dispute", "legal_threat", "safety", "human_request", "makeup_request", "concession_request"})
+    {"complaint", "payment_dispute", "legal_threat", "safety", "human_request", "concession_request"})
+WRITE_CATEGORIES: frozenset[str] = frozenset({"makeup_request", "contact_update"})
 
 
 class TriageResult(BaseModel):

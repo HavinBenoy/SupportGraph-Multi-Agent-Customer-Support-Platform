@@ -14,7 +14,7 @@ PATH = ROOT / "evals" / "datasets" / "tickets_qspiders_v1.jsonl"
 DOCS = ROOT / "tenants" / "qspiders_sample" / "docs"
 TICKETS = [json.loads(line) for line in PATH.read_text(encoding="utf-8").splitlines()]
 
-ROUTES = {"knowledge", "action", "escalate", "clarify"}
+ROUTES = {"knowledge", "action", "escalate", "clarify", "write"}
 CATEGORIES = {"courses", "eligibility", "fees", "admissions", "placement", "attendance", "assessment", "schedule",
               "privacy", "other"}
 FIELDS = {"id", "tenant_id", "student_id", "persona", "channel", "language", "message", "category", "priority",
@@ -31,7 +31,7 @@ def test_schema_and_enums():
         assert t["persona"] in {"prospect", "student"}
         assert t["priority"] in {"low", "medium", "high", "urgent"}
         assert t["sentiment"] in {"positive", "neutral", "negative", "angry"}
-        assert t["expected_write_action"] in {None, "request_makeup_class", "raise_support_ticket"}
+        assert t["expected_write_action"] in {None, "request_makeup_class", "update_contact_phone", "raise_support_ticket"}
         assert set(t["expected_tools"]) <= KNOWN_TOOLS, t["id"]
         assert t["message"].strip()
 
