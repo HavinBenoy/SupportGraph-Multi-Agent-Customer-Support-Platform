@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # QA loop: how many times a failing reply may be revised before it is replaced by a safe fallback.
     qa_max_revisions: int = Field(default=1, ge=0, le=3)
 
+    # --- API and sign-in (build step 5) ---
+    # Signs login tokens and anonymous ticket ids. REQUIRED to start the API (>= 32 chars). Generate one with `make auth-init`;
+    # never commit it. Rotating it signs everyone out.
+    auth_secret: SecretStr | None = None
+    token_ttl_minutes: int = Field(default=480, ge=5, le=60 * 24 * 7)
+    login_max_failures: int = Field(default=5, ge=1, le=50)       # per (tenant, username, client) inside the window
+    login_lockout_seconds: int = Field(default=300, ge=10, le=86400)
+    chat_max_messages_per_minute: int = Field(default=30, ge=1, le=600)  # per client address or signed-in student
+    # Comma-separated browser origins allowed to call the API directly. Empty = none (the frontend proxies /api, so it needs none).
+    cors_origins: str = ""
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

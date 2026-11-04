@@ -309,3 +309,50 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(64))
     detail: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Build step 5: accounts for the staff console / student sign-in, and per-turn chat events for the admin analytics.
+# ----------------------------------------------------------------------------------------------------------------------
+ACCOUNT_ROLES = ("student", "staff", "admin")
+
+
+class Account(Base):
+    """A login. Passwords are stored only as salted scrypt hashes. A student account names the student it signs in as
+    (`student_id`, checked against `students` at login; deliberately not a foreign key so re-seeding the sample students
+    never fails because an account exists)."""
+
+    __tablename__ = "accounts"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("role IN ('student','staff','admin')", name="role_valid"),
+        CheckConstraint("(role = 'student') = (student_id IS NOT NULL)", name="student_role_has_student_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16))
+    student_id: Mapped[str | None] = mapped_column(String(64))
+    password_hash: Mapped[str] = mapped_column(String(300))
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatEvent(Base):
+    """One row per chat turn: what the system DID (route, outcome, latency), never what anyone said. Feeds the analytics."""
+
+    __tablename__ = "chat_events"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id"], ["tenants.id"]), Index("ix_chat_events_tenant_time", "tenant_id", "created_at"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    ticket_id: Mapped[str] = mapped_column(String(80))
+    signed_in: Mapped[bool] = mapped_column(Boolean)
+    route: Mapped[str] = mapped_column(String(16))
+    route_reason: Mapped[str] = mapped_column(String(64), default="")
+    abstained: Mapped[bool] = mapped_column(Boolean, default=False)
+    qa_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_human: Mapped[bool] = mapped_column(Boolean, default=False)
+    awaiting: Mapped[str] = mapped_column(String(16), default="")
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -230,11 +230,18 @@ The routing evaluation writes rows under `eval-<ticket>-<run>` ids and deletes e
 - One shared Postgres connection backs the checkpointer (what the library documents). Use a connection pool before serving concurrent traffic.
 - Prospects who escalate leave a note nobody can reply to (no contact details are collected yet); the reply says so.
 
+## Build step 5: web API, authentication and frontend
+
+A FastAPI service (`make api`) and a Next.js app (`make frontend-dev`) put the existing workflows on screen: a customer chat widget, a staff
+console (escalation briefs, claim/resolve, make-up approvals that resume the paused LangGraph run) and an admin analytics dashboard, with
+role-based access and per-tenant isolation. Setup, API table, security model and **known limitations**: `docs/STEP5.md`. Decision record:
+`docs/decisions/0003-step5-web-api-and-frontend.md`. Not production-ready: see the limitations list.
+
 ## What is verified
 
 Run in a sandbox without Docker or real Langfuse, on a throwaway Postgres 16 with pgvector 0.6.0 (see CHANGES.md for the
 exact commands and results). Run on your machine: `make test`, `make test-pg`, `make verify-tracing`,
-`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`, and the step 4 commands above. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
+`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`, and the step 4 commands above. Step 5 (API, frontend) was additionally run in the sandbox: backend 542 passed (SQLite) / 570 passed (Postgres), 26 frontend tests, `next build`, and a 9-check Chromium walk-through against Postgres; see CHANGES.md. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
 LLM or embedding model.
 
 ## Using a real model

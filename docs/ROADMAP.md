@@ -10,8 +10,8 @@ see `docs/decisions/0001-institute-domain.md`). Status of each build step for th
 | 2 | Single-agent RAG FAQ baseline + evaluation | done | your machine (fakes only; real embeddings/LLM not evaluated) |
 | 3 | Triage, conditional routing, knowledge (corrective RAG) and action (read tools) agents | done | your machine (fakes only) |
 | 4 | Write tools + approval policy, interrupts/resume, persistent checkpointer, QA loop, escalation briefs | built; sandbox-verified; **awaiting your local run** | sandbox only (see CHANGES.md) |
-| 5 | Frontend: customer widget, agent console, admin analytics | not started | |
+| 5 | Web API + auth + frontend: customer chat widget, staff console (escalations, approvals), admin analytics | built; sandbox-verified (API tests, 26 frontend tests, production build, live browser run on Postgres); **awaiting your local run** | sandbox only (see CHANGES.md, docs/STEP5.md) |
 | 6-9 | Evals; config-driven tenants; voice; polish (auth, docs, deployment) | not started | |
 
-Cross-cutting work not tied to one step: real LLM/embedding evaluation and calibration, authentication/authorization, PII masking in
+Cross-cutting work not tied to one step: real LLM/embedding evaluation and calibration, hardening authentication (refresh tokens/MFA/SSO, httpOnly cookies, shared rate limiter), PII masking in
 traces, rate limiting, student notification channel, student-only documents.

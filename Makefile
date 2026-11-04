@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e
 
 venv:
 	python3 -m venv .venv
@@ -99,9 +99,35 @@ verify-tracing-faq:
 	cd backend && ../.venv/bin/python scripts/verify_tracing.py --workflow faq
 
 # Runs one prospect question through the support graph and checks Langfuse received the triage/route/knowledge spans.
-verify-tracing-support review:
+verify-tracing-support:
 	cd backend && ../.venv/bin/python scripts/verify_tracing.py --workflow support
 
 # Build step 4: staff console. make review ARGS="list"   |   make review ARGS="approve TICKET --staff s_1"
 review:
 	cd backend && ../.venv/bin/python scripts/review_queue.py $(ARGS)
+
+auth-init:  ## write a random SG_AUTH_SECRET into .env if none is set (never prints it)
+	@test -f .env || cp .env.example .env
+	@if grep -Eq '^SG_AUTH_SECRET=.{32,}' .env; then echo "SG_AUTH_SECRET already set"; else \
+	  sed -i '/^SG_AUTH_SECRET=/d' .env && echo "SG_AUTH_SECRET=$$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> .env && echo "SG_AUTH_SECRET written to .env"; fi
+
+demo-accounts:  ## demo logins for the SAMPLE tenant (password printed once, or set SG_DEMO_PASSWORD)
+	cd backend && ../.venv/bin/python scripts/demo_accounts.py
+
+api:  ## run the HTTP API on :8000
+	cd backend && ../.venv/bin/uvicorn app.main:app --port 8000
+
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:  ## web UI on :3000, proxying /api to the API on :8000
+	cd frontend && npm run dev
+
+frontend-test:
+	cd frontend && npm test
+
+frontend-build:
+	cd frontend && npm run build
+
+e2e:  ## browser end-to-end run (needs the API and frontend running, see docs/STEP5.md)
+	cd frontend && npm run e2e
