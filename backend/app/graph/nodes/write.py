@@ -18,7 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
 from app.actions.executor import AuthorizationError, authorize_decision, execute_action, prepare_action
-from app.actions.policy import APPROVAL, validate_proposal
+from app.actions.policy import APPROVAL, mentions_other_student, validate_proposal
 from app.actions.proposer import Proposer
 from app.actions.schemas import ActionProposal
 from app.db import write_repo
@@ -57,6 +57,10 @@ def make_write_nodes(proposer: Proposer) -> dict:
         with session_scope() as db:
             write_repo.ensure_ticket(db, scope.tenant_id, ticket_id, scope.student_id, category=triage.get("category", "other"),
                                      priority=triage.get("priority", "low"))
+            if mentions_other_student(db, scope, text_of(state)):  # asked on someone else's behalf: refuse, never reinterpret as "mine"
+                write_repo.audit(db, scope.tenant_id, f"student:{scope.student_id}", "action.refused", ticket_id,
+                                 {"action": proposal.action, "code": "other_person"})
+                return _refuse("other_person", days=days)
             v = validate_proposal(db, scope, proposal, tcfg)
             if not v.ok:
                 write_repo.audit(db, scope.tenant_id, f"student:{scope.student_id}", "action.refused", ticket_id,

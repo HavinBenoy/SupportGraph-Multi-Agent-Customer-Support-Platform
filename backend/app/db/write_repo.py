@@ -98,8 +98,12 @@ def update_student_phone(db: Session, scope: Scope, phone: str) -> str | None:
 
 
 def create_escalation(db: Session, tenant_id: str, *, ticket_id: str, team: str, priority: str, reason: str, brief: dict) -> Escalation:
-    """At most one escalation per ticket: a repeat call returns the existing one (the first brief stays the record)."""
-    existing = db.scalar(select(Escalation).where(Escalation.tenant_id == tenant_id, Escalation.ticket_id == ticket_id))
+    """At most one UNRESOLVED escalation per ticket: a repeat call (a resumed run, a second message while staff are still on it) returns the
+    existing open/claimed one and its first brief stays the record. Once staff have RESOLVED it, a new escalation on the same ticket is a new
+    case: it gets a new reference, a fresh SLA clock and its own brief. (Before step 6 the resolved one was returned instead, so a follow-up
+    escalation was silently dropped: the ticket said "escalated" while no human had anything open.)"""
+    existing = db.scalar(select(Escalation).where(Escalation.tenant_id == tenant_id, Escalation.ticket_id == ticket_id,
+                                                  Escalation.status != "resolved").order_by(Escalation.created_at.desc()))
     if existing is not None:
         return existing
     row = Escalation(tenant_id=tenant_id, id=f"ESC-{uuid.uuid4().hex[:8].upper()}", ticket_id=ticket_id, team=team,

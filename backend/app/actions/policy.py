@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.actions.schemas import ActionProposal
-from app.db.models import AttendanceRecord, MakeupRequest
+from app.db.models import AttendanceRecord, MakeupRequest, Student
 from app.db import repo
 from app.guardrails.validators import normalize_batch_id
 from app.tenants.schema import TenantConfig
@@ -26,6 +26,21 @@ ACTIONS_NEEDING_RECORDS = frozenset({"request_makeup_class"})
 
 _PHONE = re.compile(r"^\+?\d{10,13}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def mentions_other_student(db: Session, scope: Scope, text: str) -> bool:
+    """True if the message names another student of the SAME tenant (their id, full name or first name as a whole word).
+
+    Write requests are only ever about the caller's own account; a message that names someone else ("update Rahul's phone") must not
+    be quietly turned into a change to the caller's record. Names are compared inside the code and never echoed. A false alarm just asks
+    the student to rephrase, which is the safe direction for a write."""
+    t = " " + re.sub(r"[^a-z0-9_ ]+", " ", text.lower()) + " "
+    for sid, name in db.execute(select(Student.id, Student.name).where(Student.tenant_id == scope.tenant_id,
+                                                                     Student.id != scope.student_id)).all():
+        parts = [w for w in re.sub(r"[^a-z ]+", " ", name.lower()).split() if len(w) > 2]
+        if f" {sid.lower()} " in t or any(f" {w} " in t for w in parts) or (name.lower() and f" {name.lower()} " in t):
+            return True
+    return False
 
 
 @dataclass

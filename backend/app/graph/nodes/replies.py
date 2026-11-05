@@ -30,6 +30,7 @@ WRITE_REFUSALS = {
     "which_session": "You missed more than one session recently: {options}. Which date do you want a make-up class for?",
     "not_a_missed_session": "I can only request a make-up for a session you missed in the last {days} days. Your missed sessions: {options}.",
     "missing_phone": "What is the new phone number? Please include the full number.",
+    "other_person": "I can only make requests for your own account, so I can't do that for someone else. Tell me what you want changed on your own record.",
     "bad_phone": "That doesn't look like a valid phone number. Please give 10 to 13 digits, with an optional leading +.",
 }
 MAKEUP_SUBMITTED = ("I've submitted a make-up class request for {batch} on {date} (reference {ref}). A staff member has to approve "

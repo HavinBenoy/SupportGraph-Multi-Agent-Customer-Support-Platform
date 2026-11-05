@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     # QA loop: how many times a failing reply may be revised before it is replaced by a safe fallback.
     qa_max_revisions: int = Field(default=1, ge=0, le=3)
 
+    # --- Evaluation (build step 6) ---
+    # Price per 1M tokens, only used to turn measured token counts into "cost per ticket". 0 = local/free model (cost reported as 0).
+    eval_price_per_m_input: float = Field(default=0.0, ge=0.0)
+    eval_price_per_m_output: float = Field(default=0.0, ge=0.0)
+
     # --- API and sign-in (build step 5) ---
     # Signs login tokens and anonymous ticket ids. REQUIRED to start the API (>= 32 chars). Generate one with `make auth-init`;
     # never commit it. Rotating it signs everyone out.

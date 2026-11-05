@@ -29,10 +29,10 @@ def optional_principal(request: Request, creds: HTTPAuthorizationCredentials | N
         principal = verify_token(secret_of(request), creds.credentials)
     except TokenError:
         raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from None
-    # A valid signature is not enough: the account must still exist and be enabled, so disabling it cuts off a live token at once.
+    # A valid signature is not enough: the account must still exist and be enabled, so disabling it, or changing its role or student, cuts off a live token at once.
     with session_scope() as db:
         acct = db.get(Account, (principal.tenant_id, principal.subject))
-        if acct is None or acct.disabled or acct.role != principal.role:
+        if acct is None or acct.disabled or acct.role != principal.role or acct.student_id != principal.student_id:
             raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
     return principal
 

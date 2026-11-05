@@ -33,6 +33,7 @@ from app.graph.nodes import replies
 from app.graph.nodes.common import PER_RUN_RESET, cfg_of, text_of
 from app.graph.nodes.escalate import escalate
 from app.graph.nodes.qa import make_qa_nodes
+from app.guardrails.escalation_floor import escalation_floor, raise_priority
 from app.graph.nodes.router import ACTION, CLARIFY, ESCALATE, KNOWLEDGE, WRITE, decide_route, is_signed_in
 from app.graph.nodes.write import make_write_nodes
 from app.graph.state import TicketState
@@ -67,6 +68,12 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
         decision, reason = decide_route(TriageResult.model_validate(state["triage"]), text=text_of(state),
                                         signed_in=is_signed_in(cfg_of(config).get("student_id")),
                                         min_confidence=s.triage_min_confidence)
+        if decision != ESCALATE and reason != "injection_suspected":
+            floor = escalation_floor(text_of(state))  # model-independent safety net: it can only ADD an escalation
+            if floor:
+                category, priority = floor
+                triage = {**state["triage"], "category": category, "priority": raise_priority(state["triage"].get("priority", "low"), priority)}
+                return {"route": ESCALATE, "route_reason": category, "triage": triage}
         return {"route": decision, "route_reason": reason}
 
     def knowledge_node(state: TicketState, config: RunnableConfig) -> dict:

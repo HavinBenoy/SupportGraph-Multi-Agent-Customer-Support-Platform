@@ -37,7 +37,7 @@ Creating real accounts: `SG_NEW_PASSWORD=... .venv/bin/python backend/scripts/cr
 | `GET /health`, `GET /config?tenant=` | none | tenant name and `is_sample` |
 | `POST /auth/login` | none | `{username, password, tenant?}` -> signed token. 5 failures per user+IP lock that key for 5 minutes (429). Same 401 for unknown user, wrong password, disabled account. |
 | `GET /auth/me` | any | |
-| `POST /chat`, `GET /chat/{ticket}` | visitor or student | server-minted signed ticket ids; 20 messages/minute per student or visitor IP (429) |
+| `POST /chat`, `GET /chat/{ticket}` | visitor or student | server-minted signed ticket ids; `SG_CHAT_MAX_MESSAGES_PER_MINUTE` per student or visitor IP (429; code default 30, `.env.example` sets 20) |
 | `GET /staff/escalations?status=`, `GET/POST /staff/escalations/{id}[/claim\|/resolve]` | staff, admin | own tenant only |
 | `GET /staff/approvals`, `POST /staff/approvals/{id}/decision` | staff, admin | `{approve: bool}`; approver = signed-in account |
 | `GET /admin/analytics?days=1..90` | admin | |
@@ -48,7 +48,7 @@ Responses expose what a UI needs. They never contain prompts, triage output, QA 
 ## Settings (`.env`)
 
 `SG_AUTH_SECRET` (required, >= 32 chars), `SG_TOKEN_TTL_MINUTES` (480), `SG_LOGIN_MAX_FAILURES` (5), `SG_LOGIN_LOCKOUT_SECONDS` (300),
-`SG_CHAT_MAX_MESSAGES_PER_MINUTE` (20), `SG_CORS_ORIGINS` (empty: the frontend proxies `/api`). Frontend: `SUPPORTGRAPH_API_URL`
+`SG_CHAT_MAX_MESSAGES_PER_MINUTE` (30), `SG_CORS_ORIGINS` (empty: the frontend proxies `/api`). Frontend: `SUPPORTGRAPH_API_URL`
 (default `http://127.0.0.1:8000`) tells Next where to forward `/api`.
 
 ## Security model in one paragraph

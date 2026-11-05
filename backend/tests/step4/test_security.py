@@ -88,3 +88,22 @@ def test_a_phone_change_for_another_student_is_impossible_through_the_executor(a
     ask("Please update my phone number to 9123456789", student="stu_asha", ticket="tk-2")
     # nothing is applied without the owner's confirmation, and each confirmation can only touch its own owner's row
     assert rows(Student, id="stu_meera")[0].phone is None and rows(Student, id="stu_asha")[0].phone is None
+
+
+@pytest.mark.parametrize("text", [
+    "Update the phone number of Rahul Menon to 9111111111.",
+    "change stu_rahul's mobile to 9111111111",
+    "Please arrange a make-up class for Sneha for the session she missed in QAT-201.",
+])
+def test_a_write_request_naming_someone_else_is_refused_not_reinterpreted_as_mine(ask, text):
+    out = ask(text, student="stu_asha")
+    assert not out.get("awaiting") and not rows(MakeupRequest)
+    if "stu_rahul" not in text:
+        assert "your own account" in out["reply"]  # reached the write branch, whose code-level check refused it
+    assert "9111111111" not in out["reply"]  # whichever safe branch answers (refusal or a clarifying question), the number is never echoed back
+    assert rows(Student, id="stu_asha")[0].phone is None and rows(Student, id="stu_rahul")[0].phone is None
+
+
+def test_own_name_in_a_write_request_is_not_refused(ask):
+    out = ask("Hi, this is Asha. Please update my phone number to 9123456780", student="stu_asha")
+    assert out["awaiting"] == "student"

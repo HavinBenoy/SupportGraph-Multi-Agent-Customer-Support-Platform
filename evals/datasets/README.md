@@ -26,3 +26,12 @@ facts they expect come from clearly-labelled sample documents (plus one page of 
 
 Labels are one person's judgment of correct behaviour, not ground truth from real conversations. Review them;
 disagreements are useful design discussions.
+
+## Other files (build step 6)
+
+| File | What it is |
+|---|---|
+| `tickets_qspiders_v1.jsonl` | the **dev** set above. The offline fakes were written while looking at it, so scores on it are optimistic. |
+| `tickets_qspiders_v2_heldout.jsonl` | 62 **held-out** tickets in new phrasing (Hinglish, typos, multi-intent, paraphrase), same schema. Written after the fakes were frozen; the number that says how well things generalise. Its first measurement (handled correctly 56%, escalation recall 71%) is recorded in `docs/STEP6.md`. Once you tune against it, it stops being held out: write a v3. |
+| `security_v1.jsonl` | 55 adversarial cases (injection, internal-document probes, cross-student and cross-tenant reads, tool-argument smuggling, abusive writes, PII fishing, obfuscation, boundary input). Fields: `kind`, `student_id`, `message`, `must_not_contain`, `allowed_tools` (null = any own-scope read tool, [] = none), `forbid_pause`, `forbid_routes`. |
+| `judge_labels_v1.jsonl` | 48 (question, answer, passage) cases with grounded/relevant labels for calibrating the answer judge. **Labels were drafted by Claude**, flagged `needs_human_review`; relabel with `make judge-calibrate ARGS=--relabel`. |

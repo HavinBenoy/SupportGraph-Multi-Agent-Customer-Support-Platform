@@ -237,11 +237,18 @@ console (escalation briefs, claim/resolve, make-up approvals that resume the pau
 role-based access and per-tenant isolation. Setup, API table, security model and **known limitations**: `docs/STEP5.md`. Decision record:
 `docs/decisions/0003-step5-web-api-and-frontend.md`. Not production-ready: see the limitations list.
 
+## Build step 6: evaluation
+
+`make eval` runs the dev set, a held-out set and a 55-case security suite through the real graphs, compares the support graph with the step 2
+baseline, reports latency and token cost, calibrates the answer judge against labelled cases, and fails on any safety gate or regression.
+`make test` includes a regression guard against `evals/reports/reference_fake_v1.json`. Definitions, results, the honest reading of them, and the
+defects this step found: `docs/STEP6.md`. With the offline fakes the held-out set (60%) is the number to believe, not the dev set (88%).
+
 ## What is verified
 
 Run in a sandbox without Docker or real Langfuse, on a throwaway Postgres 16 with pgvector 0.6.0 (see CHANGES.md for the
 exact commands and results). Run on your machine: `make test`, `make test-pg`, `make verify-tracing`,
-`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`, and the step 4 commands above. Step 5 (API, frontend) was additionally run in the sandbox: backend 542 passed (SQLite) / 570 passed (Postgres), 26 frontend tests, `next build`, and a 9-check Chromium walk-through against Postgres; see CHANGES.md. **Not verified here:** the real Langfuse v4 server (only a local stand-in server), and any real
+`make verify-tracing-faq`, `make verify-tracing-support`, `make eval-routing`, and the step 4 commands above. Step 5 (API, frontend) was additionally run in the sandbox: backend 542 passed (SQLite) / 570 passed (Postgres), 26 frontend tests, `next build`, and a 9-check Chromium walk-through against Postgres; see CHANGES.md. Step 6 (evaluation) was run in the sandbox with offline fakes: backend 601 passed (SQLite) / 629 passed (Postgres), `make eval` safety gates clean, security suite 55/55; see CHANGES.md. **Not verified here:** any real LLM, embedding or judge model, and the real Langfuse v4 server (only a local stand-in server), and any real
 LLM or embedding model.
 
 ## Using a real model

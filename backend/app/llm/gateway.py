@@ -141,3 +141,10 @@ def get_reviser(settings: Settings | None = None):
     from app.qa.critic import LlmReviser
 
     return LlmReviser(get_chat_model("reviser", s))
+
+
+def get_judge(settings: Settings | None = None):
+    """The groundedness/relevance judge used by evaluations (build step 6). See app/evals/judge.py."""
+    from app.evals.judge import get_judge as _get
+
+    return _get(settings)

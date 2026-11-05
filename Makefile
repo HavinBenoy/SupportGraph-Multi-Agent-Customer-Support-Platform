@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate
 
 venv:
 	python3 -m venv .venv
@@ -131,3 +131,10 @@ frontend-build:
 
 e2e:  ## browser end-to-end run (needs the API and frontend running, see docs/STEP5.md)
 	cd frontend && npm run e2e
+
+# Build step 6: full evaluation (dev + held-out sets, baseline comparison, security suite, judge calibration). make eval ARGS="--reference ..."
+eval:
+	cd backend && ../.venv/bin/python scripts/run_eval.py $(ARGS)
+
+judge-calibrate:  ## agreement of the judge with human labels; ARGS="--relabel" lets you label the cases yourself
+	cd backend && ../.venv/bin/python scripts/judge_calibrate.py $(ARGS)

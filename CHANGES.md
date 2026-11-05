@@ -1,74 +1,74 @@
-# CHANGES: Build step 5 (web API, authentication, frontend)
+# CHANGES: Build step 6 (evaluation)
 
 Extract this ZIP over your project folder. It is the **complete tree** minus `.venv`, `node_modules`, `.next`, caches, generated files and
-secrets. Your `.env` and `infra/langfuse/.env` are not included and are untouched; nothing resets or deletes database data.
+secrets. Your `.env` and `infra/langfuse/.env` are not included and are untouched. Nothing resets or deletes database data; no migration in this step.
 
-## Please read first: files that were already in the tree
-
-When I opened the project for step 5, partial step-5 backend files were already present (`backend/app/auth/*`, `app/api/{deps,ratelimit,
-schemas,service,analytics}.py`, the `Account`/`ChatEvent` models, migration `0005_accounts_and_chat_events.py`, the step-5 settings in
-`config.py`). They were not created in the conversation I could see. I **reviewed and built on them** (I deleted my own conflicting
-duplicates rather than overwrite them). If you did not put them there, check where they came from.
+I worked from the project tree as I last delivered it (step 5), not from a ZIP you uploaded this time. If your local tree changed since (you ran
+`make e2e` and the app), diff before overwriting.
 
 ## Apply and verify on your Ubuntu machine
 
 ```bash
-cd ~/your-project && unzip -o supportgraph-step5.zip     # does not touch .env or .venv
-.venv/bin/pip install -e "backend[dev]"                  # fastapi, uvicorn, httpx
-make auth-init                                           # random SG_AUTH_SECRET into .env (not printed). The API refuses to start without it.
-make test                                                # fast suite, SQLite
-make db-up && make db-migrate                            # migration 0005 (additive: accounts, chat_events). No data is touched.
-make test-pg                                             # real Postgres + pgvector
-SG_DEMO_PASSWORD='choose-a-password-12' make demo-accounts
-make api                                                 # terminal 1
-make frontend-install && make frontend-test && make frontend-build
-make frontend-dev                                        # terminal 2: http://localhost:3000
-pip install playwright && playwright install chromium    # optional: browser walk-through of all three screens
-E2E_PASSWORD='choose-a-password-12' make e2e
+cd ~/your-project && unzip -o supportgraph-step6.zip          # does not touch .env or .venv
+.venv/bin/pip install -e "backend[dev]"                       # no new Python dependency
+make test                                                     # fast suite incl. the new evaluation regression guard
+make db-up                                                    # if not running
+make test-pg                                                  # real Postgres + pgvector
+make frontend-install && make frontend-test && make frontend-build    # next 15.1.6 -> 15.5.29, vitest 3.0.4 -> 3.2.7 (security patches, same majors)
+make eval                                                     # dev + held-out + security + baseline comparison; writes evals/reports/latest.{md,json}
+make judge-calibrate                                          # judge vs labels; add ARGS=--relabel to label the 48 cases yourself (~10 min)
+# optional full-stack check after the dependency bump:  make api / make frontend-dev, then E2E_PASSWORD=... make e2e
 ```
+`make eval` needs ingested documents. For the cross-tenant security cases to touch real other-tenant rows it needs the second-tenant fixture; see
+`docs/STEP6.md` for the throwaway-database recipe (seeding with `--isolation-fixture` replaces the sample tenant's rows, so do not run it on your working DB).
 
 ## What changed
 
-**Backend**
-- `app/main.py`, `app/api/main.py`: FastAPI app factory (requires `SG_AUTH_SECRET` >= 32 chars; CORS off unless `SG_CORS_ORIGINS`; generic 500 with a log reference).
-- `app/api/routes/{auth,chat,staff,admin}.py`: login/me/config, visitor + student chat and history, escalation queue (list/detail/claim/resolve), make-up approvals (decision resumes the paused LangGraph run), analytics.
-- `app/auth/tokens.py`: added student-bound signed ticket ids (`new_student_ticket`, `check_student_ticket`).
-- `app/api/deps.py`: every authenticated request re-checks the account (disabled account or changed role cuts off a live token).
-- `scripts/create_account.py` (operator-only, password from env or hidden prompt), `scripts/demo_accounts.py` (refuses non-sample tenants).
-- `Makefile`: new targets `auth-init demo-accounts api frontend-* e2e`; the duplicate-target defect from the step-4 ZIP (`verify-tracing-support review:`) is gone. `make -n` shows no "overriding recipe" warning. Behaviour of `make review` is unchanged.
-- `pyproject.toml`, `.env.example`: step-5 entries.
+**Evaluation harness** (`backend/app/evals/`, `scripts/run_eval.py`, `scripts/judge_calibrate.py`, `make eval`, `make judge-calibrate`)
+- Per-ticket outcomes for the support graph and the step 2 baseline under one "handled correctly" definition; the brief's metric list (triage, routing,
+  knowledge, groundedness, escalation precision/recall, automation, wrong-action rate, latency, tokens/cost per ticket), slices, JSON + Markdown reports.
+- Judge: offline `RuleJudge`, `LlmJudge` (stub-tested only), calibration with Cohen's kappa and a trust rule.
+- Security suite runner with deterministic oracles; regression gates and `--reference` comparison; `tests/test_eval_regression.py` runs it all inside `make test`.
+- Datasets (`evals/datasets/`): `tickets_qspiders_v2_heldout.jsonl` (62), `security_v1.jsonl` (55), `judge_labels_v1.jsonl` (48, **Claude-drafted labels**). Reference report in `evals/reports/`.
 
-**Frontend** (`frontend/`, Next.js 15 App Router, TypeScript, plain CSS, no UI/chart library)
-- Chat widget, staff console, analytics dashboard, login, role gates, typed API client, auth context. `package-lock.json` included.
-- Tests: Vitest + React Testing Library (26 tests). `e2e/run.py`: Playwright walk-through.
+**Defects found by the evaluation and fixed** (each with a test that fails without the fix)
+1. Write request naming another student ("update Rahul's phone") was reinterpreted as a change to the caller's own record -> refused in code (`actions/policy.py`, `graph/nodes/write.py`).
+2. Escalation recall 71% on held-out safety / duplicate-charge messages -> model-independent `guardrails/escalation_floor.py` (can only add an escalation); recall 100%, precision 83% -> 88%. **This is the one routing behaviour change; it is additive and covered by tests.**
+3. Signed token whose `student_id` differed from the account's was accepted -> checked with the role on every request (`api/deps.py`). Your step 5 note 1.
+4. A follow-up escalation on a ticket whose earlier escalation was resolved returned the resolved one (lost; ticket "escalated", nothing open) -> new case with new reference (`db/write_repo.py`). Plausible cause of your step 5 notes 7 and 8; I could not reproduce your exact data, so please re-check.
+5. Judge graded the system's own "(Demo data: ...)" footer as a claim -> ignored.
 
-**Docs**: `docs/STEP5.md` (setup, API, security model, limitations), `docs/decisions/0003-…`, `docs/ROADMAP.md`, README section.
+**Also**: direct security regression tests for cross-student access, role changes and stale tokens (`tests/api/test_security_regression.py`, 9 tests; your step 5 note 2); frontend dependency patches for your note 3 (below); `SG_EVAL_PRICE_*` settings; docs `docs/STEP6.md`, `docs/decisions/0004-...`, ROADMAP, README, datasets README; STEP5 doc default for the chat rate limit corrected (30; `.env.example` sets 20).
 
-## Results (sandbox, executed by me)
+## Results (sandbox, executed by me; offline fakes only)
 
 | Check | Result |
 |---|---|
-| Backend suite, SQLite (`pytest backend`) | **542 passed, 28 skipped** (the 28 are the Postgres tests, skipped without `SG_TEST_DATABASE_URL`). 31 new tests in `tests/api/`; steps 0-4 unchanged and green. |
-| Backend suite, throwaway Postgres 16 + pgvector 0.6 | **570 passed, 0 skipped** |
-| Frontend `vitest run` | **26 passed** (4 files); `tsc --noEmit` clean; `next build` succeeded (5 routes) |
-| Live browser run (Chromium via Playwright) against real Postgres: migrations 0001-0005, `SG_CHECKPOINTER=postgres`, API + built frontend | **9/9 checks**: guest answer with sources; guest cannot read personal data; student make-up request pauses; staff (separate browser) approves; student's open page shows the outcome by polling; payment dispute escalates with phone number masked in the brief, then claimed and resolved; admin analytics show real counts; students/staff blocked from pages above their role; no sideways scroll at 390 px |
-| ZIP hygiene | clean extraction into an empty directory: `npm ci` + `tsc` + 26 frontend tests pass; backend suite from the extracted copy: 542 passed, 28 skipped. No `.env`, `.venv`, `node_modules`, caches or DB files inside; scan for key patterns finds only the obvious fake keys used in the tracing tests. |
+| Backend suite, SQLite | **601 passed, 28 skipped** (the 28 are Postgres tests; +59 new) |
+| Backend suite, throwaway Postgres 16 + pgvector | **629 passed, 0 skipped** |
+| Frontend after dependency bump | 26 tests passed, `tsc` clean, `next build` ok; live Chromium run against Postgres + built frontend: **9/9** |
+| `make eval` on Postgres (dev / held-out) | graph handled correctly **88% / 60%** vs baseline 47% / 37%; escalation recall 100% / 100%; security **55/55**; zero leaks, unauthorized or unexpected tool calls, writes without a decision, crashes |
+| Regression guard mutation check | disabling the escalation floor makes the guard fail (held-out recall 100% -> 71%); restored afterwards |
+| Judge calibration (`RuleJudge`, 48 Claude-drafted labels) | groundedness kappa **0.74**, 4 of 21 hallucinations missed; relevance **not trusted** (2 negative examples) |
+| ZIP hygiene | see end of this file's verification line in the final message: clean extraction, suites re-run from the extracted copy, no `.env`/`.venv`/`node_modules`/caches/DB files, key-pattern scan |
 
-API tests cover: login (success, wrong password, unknown user identical, lockout 429, disabled account, expired/garbage/foreign-secret
-tokens, role mismatch), forged and foreign conversation ids, student A vs student B, staff blocked from the student chat, body cannot
-smuggle identity (422), chat rate limit, guest cannot read personal data, make-up pause -> staff approve/reject -> student history,
-double decision conflict, escalation claim/resolve lifecycle and conflicts, another tenant's staff sees and decides nothing,
-role gates on every staff/admin route, analytics scoping and bounds.
+**Read the numbers honestly (details in docs/STEP6.md).** The dev set flatters the system (the fakes were written while looking at it). First measurement on the
+held-out set was 56% handled / 77% route accuracy / 71% escalation recall; 60% / 81% / 100% after fix 2. On plain knowledge questions held-out the graph is **no
+better than the baseline** (40% each) and declines unanswerable questions less often (43% vs 86%): the fake triager over-asks for detail. Its advantage is actions, writes and
+escalations, which the baseline cannot do. I deliberately did not tune the fakes to the held-out tickets.
 
 ## Not verified here (needs you)
 
-- `make test`, `make test-pg`, `make db-migrate` against **your** Docker Postgres and your existing data (migration 0005 was applied only to a fresh sandbox database).
-- The UI in your browsers and screen sizes beyond Chromium at 1100 and 390 px; dark mode was styled but not visually inspected.
-- Real LLM / embedding models, real Langfuse: unchanged from step 4 (fakes only). The UI exercises real plumbing, not real answer quality.
-- Behaviour under several API workers (rate limits are per process), HTTPS deployment, load.
+- `make test`, `make test-pg`, `make eval`, `make judge-calibrate` on **your** machine and database; frontend build/tests after the dependency bump on your machine.
+- **Any real LLM, embedding model or judge model.** The LLM judge, real triage and real answer quality are unmeasured. This is the next evidence the project needs.
+- Human review of the judge labels (they are my drafts, flagged `needs_human_review`).
+- Cross-tenant security cases on your own DB (they need the second-tenant fixture); without it the report says they only prove no other-tenant text appeared.
+- Langfuse tracing of eval runs (tracing is off in the eval path unless you enabled it).
 
-## Known limitations
+## Known limitations and open items
 
-Listed in full in `docs/STEP5.md`. Headlines: **authentication is basic and the platform is not production-ready** (no refresh/MFA/SSO/reset,
-tokens in `sessionStorage`, per-process rate limiter); the PostgreSQL checkpointer still uses one shared connection (pool needed before
-concurrent traffic); students are not push-notified; visitors who escalate cannot be contacted.
+- Small sets (57 + 62 tickets, 55 attacks, 48 judge cases); labels are one judgment; a few points of difference is noise.
+- `npm audit` (5 findings left, was 6): the Next.js RCE (image optimisation) and DoS findings are fixed by 15.5.29. Remaining: `vitest`'s `tinypool` / `@vitest/mocker` (test runner only, never shipped; fix needs vitest 5, breaking) and PostCSS bundled inside Next (build-time processing of our own CSS; fix needs Next 16, breaking). I did not force breaking upgrades; plan them as their own step.
+- Still open from step 5 and unchanged: token in `sessionStorage` (XSS exposure), per-process in-memory rate limiter, single shared PostgreSQL checkpointer connection (pool needed before concurrent traffic), no refresh tokens/MFA/SSO. The platform is not production-ready.
+- Observation 8 (reference vs ticket heading) not reproduced; may be fixed by defect 4.
+- T026 ("who is the trainer for PYF-101", expected decline) still gets an answer from a same-batch passage (known since step 3).
