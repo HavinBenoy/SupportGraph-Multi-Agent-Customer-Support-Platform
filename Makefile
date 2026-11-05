@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report
 
 venv:
 	python3 -m venv .venv
@@ -45,6 +45,29 @@ eval-rag:
 # reuse a TICKET to continue the same conversation)
 support:
 	cd backend && ../.venv/bin/python scripts/ask_support.py $(if $(STUDENT),--student $(STUDENT)) $(if $(TICKET),--ticket $(TICKET)) "$(or $(Q),What courses are available?)"
+
+llm-smoke:
+	cd backend && ../.venv/bin/python scripts/llm_smoke.py
+
+bench-check:
+	cd backend && ../.venv/bin/python scripts/bench.py check
+
+# Usage: make bench-llm MODELS="qwen3:4b qwen3:1.7b" [ARGS="--heldout --limit 10"]
+bench-llm:
+	cd backend && ../.venv/bin/python scripts/bench.py llm $(if $(MODELS),--models $(MODELS),) $(ARGS)
+
+bench-embed:
+	cd backend && ../.venv/bin/python scripts/bench.py embed $(if $(MODELS),--models $(MODELS),) $(ARGS)
+
+# Optional (voice milestone): make bench-stt AUDIO=~/wavs MODEL=base.en
+bench-stt:
+	cd backend && ../.venv/bin/python scripts/bench.py stt --audio $(AUDIO) --model $(or $(MODEL),base.en)
+
+bench-tts:
+	cd backend && ../.venv/bin/python scripts/bench.py tts --voice $(VOICE)
+
+bench-report:
+	cd backend && ../.venv/bin/python scripts/bench.py report
 
 eval-routing:
 	cd backend && ../.venv/bin/python scripts/eval_routing.py

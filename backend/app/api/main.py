@@ -20,6 +20,8 @@ from app.config import Settings, get_settings
 from app.graph.checkpointer import get_checkpointer
 from app.graph.support import build_support_graph
 
+from app.llm.guard import describe_llm
+
 log = logging.getLogger(__name__)
 MIN_SECRET_LENGTH = 32
 
@@ -32,6 +34,8 @@ def create_app(settings: Settings | None = None, graph=None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        for line in describe_llm(s):
+            log.info(line)
         app.state.graph = graph or build_support_graph(settings=s, checkpointer=get_checkpointer(s))
         yield
 

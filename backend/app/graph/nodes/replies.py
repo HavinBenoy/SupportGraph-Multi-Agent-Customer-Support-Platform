@@ -50,4 +50,8 @@ AWAITING_CONFIRM = "I'm waiting for your answer: reply \"yes\" to confirm the ch
 QA_FALLBACK = ("I'm not able to give a reliable answer to that here. Please contact the support team directly, or ask in a "
                "different way.")
 
+# The language model could not answer (down, timed out, daily budget reached). Fixed wording; never guesses an answer.
+MODEL_UNAVAILABLE = ("I can't answer that right now because my language model isn't responding. Please try again in a "
+                     "moment, or contact the support team directly.")
+
 SAMPLE_NOTICE = "(Demo data: this answer comes from sample documents, not the institute's real policy.)"

@@ -29,6 +29,9 @@ from app.agents.schemas import TriageResult
 from app.agents.triage import Triager
 from app.config import Settings, get_settings
 from app.graph.builder import build_graph
+import logging
+
+from app.llm.errors import ModelUnavailable
 from app.graph.nodes import replies
 from app.graph.nodes.common import PER_RUN_RESET, cfg_of, text_of
 from app.graph.nodes.escalate import escalate
@@ -45,6 +48,9 @@ from app.tenants.loader import load_tenant_config
 from app.tools.scope import ANONYMOUS, ScopeError
 
 _TICKET_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+log = logging.getLogger(__name__)
 
 
 def build_support_graph(*, triager: Triager | None = None, knowledge=None, action=None, action_model: BaseChatModel | None = None,
@@ -77,14 +83,23 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
         return {"route": decision, "route_reason": reason}
 
     def knowledge_node(state: TicketState, config: RunnableConfig) -> dict:
-        out = knowledge.invoke({"question": text_of(state)}, config)
+        try:
+            out = knowledge.invoke({"question": text_of(state)}, config)
+        except ModelUnavailable as e:
+            log.warning("knowledge: model unavailable (%s)", e.reason)
+            return {"handled_by": KNOWLEDGE, "reply": replies.MODEL_UNAVAILABLE, "abstained": True,
+                    "citations": [], "queries": [], "sources": []}
         r = out["result"]
         return {"handled_by": KNOWLEDGE, "reply": r["answer"], "abstained": r["abstained"],
                 "citations": r.get("citations", []), "queries": out.get("queries", []),
                 "sources": [c for c in r.get("chunks", []) if c["source_id"] in r.get("citations", [])]}
 
     def action_node(state: TicketState, config: RunnableConfig) -> dict:
-        out = action.invoke({"messages": [HumanMessage(text_of(state))]}, config)
+        try:
+            out = action.invoke({"messages": [HumanMessage(text_of(state))]}, config)
+        except ModelUnavailable as e:
+            log.warning("action: model unavailable (%s)", e.reason)
+            return {"handled_by": ACTION, "reply": replies.MODEL_UNAVAILABLE, "tools_called": []}
         called = [c["name"] for m in out["messages"] if isinstance(m, AIMessage) for c in m.tool_calls]
         return {"handled_by": ACTION, "reply": str(out["messages"][-1].content), "tools_called": called}
 

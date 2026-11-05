@@ -12,7 +12,9 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agents.prompts.action_agent import SYSTEM_PROMPT
 from app.graph.state import TicketState
+from app.config import get_settings
 from app.llm.gateway import get_chat_model
+from app.llm.guard import invoke_guarded
 from app.tools.registry import get_tools
 
 
@@ -22,7 +24,7 @@ def build_graph(model: BaseChatModel | None = None, tools: list[BaseTool] | None
     model_with_tools = model.bind_tools(tools)
 
     def agent(state: TicketState) -> dict:
-        reply = model_with_tools.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+        reply = invoke_guarded(model_with_tools, [SystemMessage(SYSTEM_PROMPT), *state["messages"]], get_settings())
         return {"messages": [reply]}
 
     graph = StateGraph(TicketState)

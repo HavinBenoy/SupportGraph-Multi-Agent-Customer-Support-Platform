@@ -1,4 +1,4 @@
-# Evaluation report (run `02a71b`)
+# Evaluation report (run `53ea9c`)
 
 - evaluated as of 2026-11-04; chat model `fake`, embeddings `fake`, judge `rule`
 
@@ -16,8 +16,8 @@
 | Unanswerable questions correctly declined | 75% | 88% |
 | Needs-a-human tickets that reached one | 0% | 100% |
 | Answers with a number their sources lack | 0% | 0% |
-| Median latency (ms) | 9 | 25 |
-| 95th percentile latency (ms) | 14 | 47 |
+| Median latency (ms) | 7 | 21 |
+| 95th percentile latency (ms) | 10 | 35 |
 | Tokens per ticket | 53.9 | 65.4 |
 
 By expected route (share of tickets handled correctly):
@@ -45,7 +45,7 @@ By expected route (share of tickets handled correctly):
 - knowledge: correct 74%, wrongly answered 23%, correctly declined 88%, over-declined 4%
 - groundedness: unsupported-number rate 0%; judge grounded 100% on 23 answers
 - humans: escalation precision 100%, recall 100%; automation 88%, correct automation 75%
-- speed: p50 25 ms, p95 47 ms; 0.807 model calls and 65.4 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
+- speed: p50 21 ms, p95 35 ms; 0.807 model calls and 65.4 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
 
 Weak slices (tag: handled correctly):
 
@@ -80,8 +80,8 @@ Weak slices (tag: handled correctly):
 | Unanswerable questions correctly declined | 86% | 43% |
 | Needs-a-human tickets that reached one | 0% | 100% |
 | Answers with a number their sources lack | 0% | 0% |
-| Median latency (ms) | 8 | 23 |
-| 95th percentile latency (ms) | 11 | 58 |
+| Median latency (ms) | 6 | 17 |
+| 95th percentile latency (ms) | 7 | 31 |
 | Tokens per ticket | 52.9 | 57.5 |
 
 By expected route (share of tickets handled correctly):
@@ -109,7 +109,7 @@ By expected route (share of tickets handled correctly):
 - knowledge: correct 40%, wrongly answered 37%, correctly declined 43%, over-declined 17%
 - groundedness: unsupported-number rate 0%; judge grounded 100% on 20 answers
 - humans: escalation precision 88%, recall 100%; automation 87%, correct automation 48%
-- speed: p50 23 ms, p95 58 ms; 0.71 model calls and 57.5 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
+- speed: p50 17 ms, p95 31 ms; 0.71 model calls and 57.5 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
 
 Weak slices (tag: handled correctly):
 

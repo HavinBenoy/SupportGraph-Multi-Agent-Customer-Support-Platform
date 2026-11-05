@@ -23,6 +23,7 @@ dependencies = [
 # Providers are optional so the core installs fast and tests need no network.
 ollama = ["langchain-ollama"]
 openai = ["langchain-openai"]
+bench = ["psutil", "httpx>=0.27"]            # benchmark kit; add faster-whisper / piper-tts only for the optional voice benchmarks
 dev = ["pytest>=8", "pyyaml>=6", "httpx>=0.27"]  # httpx: FastAPI TestClient
 
 [build-system]

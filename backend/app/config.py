@@ -14,9 +14,31 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SG_", env_file=_REPO_ROOT_ENV, extra="ignore", populate_by_name=True)
 
     llm_provider: Literal["fake", "ollama", "openai_compat"] = "fake"
-    llm_model: str = "qwen2.5:7b"
+    llm_model: str = "qwen3:4b"
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""
+    # --- Model gateway hardening (milestone 0) ---
+    # Per-role model override, e.g. SG_LLM_MODEL_TRIAGE=qwen3:1.7b. Roles: action, faq, triage, rewrite, proposer, critic,
+    # reviser, judge. Empty = use SG_LLM_MODEL. A role override never changes the provider or endpoint.
+    llm_model_action: str = ""
+    llm_model_faq: str = ""
+    llm_model_triage: str = ""
+    llm_model_rewrite: str = ""
+    llm_model_proposer: str = ""
+    llm_model_critic: str = ""
+    llm_model_reviser: str = ""
+    llm_model_judge: str = ""
+    llm_timeout_seconds: float = Field(default=60.0, gt=0, le=600)   # one call; CPU models are slow, so generous
+    llm_max_retries: int = Field(default=1, ge=0, le=3)              # transient network errors only (openai_compat)
+    llm_max_output_tokens: int = Field(default=400, ge=16, le=4096)  # per call cap (num_predict / max_tokens)
+    llm_num_ctx: int = Field(default=4096, ge=512, le=32768)         # Ollama context window; bigger = slower + more RAM
+    llm_keep_alive: str = "30m"                                      # Ollama: keep the model loaded between calls
+    llm_thinking: bool = False                                       # qwen3 "thinking" off: it multiplies latency on CPU
+    # Process-wide daily cap on tokens spent through guarded calls. 0 = unlimited (the right value for local models).
+    llm_daily_token_budget: int = Field(default=0, ge=0)
+    # Hard gate: a chat/embedding endpoint that is not on this machine is refused unless this is true. This is what stops
+    # a typo or a copied .env from silently sending student text to a third party.
+    allow_external_llm: bool = False
     default_tenant: str = "qspiders_sample"
     # Matches the defaults in docker-compose.yml. SQLite URLs also work (used by the fast tests).
     database_url: str = "postgresql+psycopg://supportgraph:supportgraph@localhost:5432/supportgraph"

@@ -118,4 +118,4 @@ throwaway database is recommended and your working database is never touched by 
 - Latency is local wall time with fakes: meaningless as a production estimate.
 - The regression test compares against a reference produced on Postgres and checks it on SQLite (they agree today). If it flakes on a different platform, regenerate the reference there rather than widening the tolerance.
 - Observation 8 from your step 5 notes (escalation reference vs ticket heading) could not be reproduced; the follow-up-escalation fix above may be its cause (the reply quoted an earlier, resolved reference). Please re-check on your data.
-- The two remaining `npm audit` findings (vitest chain; PostCSS bundled in Next) are development/build-time only; the fixes need major upgrades (see CHANGES.md).
+- The five remaining `npm audit` findings (the `vitest` / `tinypool` / `@vitest/mocker` chain, and PostCSS bundled in Next) are development/build-time only; the fixes need major upgrades (see CHANGES.md).

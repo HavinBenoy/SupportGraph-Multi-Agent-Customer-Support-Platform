@@ -22,6 +22,15 @@ from app.evals import report
 from app.evals.run import DATASETS_DIR, run_all
 
 REPORTS = DATASETS_DIR.parent / "reports"
+REPO_ROOT = DATASETS_DIR.parents[1]
+
+
+def resolve_repo_path(path: Path) -> Path:
+    """`make eval` runs inside backend/, so a repo-relative path like evals/reports/x.json must be looked up from the repo
+    root. Absolute paths and paths that already exist from the current folder are used as given."""
+    if path.is_absolute() or path.exists():
+        return path
+    return REPO_ROOT / path
 
 
 def main() -> int:
@@ -34,7 +43,7 @@ def main() -> int:
     p.add_argument("--today")
     p.add_argument("--no-baseline", action="store_true")
     a = p.parse_args()
-    ref = json.loads(a.reference.read_text()) if a.reference else None
+    ref = json.loads(resolve_repo_path(a.reference).read_text()) if a.reference else None
     try:
         rep = run_all(today=a.today, reference=ref, tolerance=a.tolerance, with_baseline=not a.no_baseline)
     except OperationalError:

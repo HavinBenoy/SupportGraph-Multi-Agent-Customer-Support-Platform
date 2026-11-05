@@ -1,0 +1,859 @@
+{
+  "generated_at": "2026-11-05T15:14:54+05:30",
+  "system": {
+    "os": "Linux 7.0.0-42-generic",
+    "python": "3.12.3",
+    "machine": "x86_64",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i5-11300H @ 3.10GHz",
+    "cpu_cores_physical": 4,
+    "cpu_threads": 8,
+    "ram_gb": 15.4,
+    "ram_available_gb": 2.0,
+    "load_avg_1m": 5.12
+  },
+  "settings": {
+    "num_ctx": 4096,
+    "max_output_tokens": 400,
+    "thinking": false,
+    "cases": "dev+heldout"
+  },
+  "suite": "triage",
+  "model": "qwen3:1.7b",
+  "cases": 103,
+  "category_accuracy": 0.2039,
+  "unusable_output_rate": 0.0,
+  "latency_s": {
+    "n": 103,
+    "mean": 1.484,
+    "p50": 1.388,
+    "p95": 1.883,
+    "min": 1.281,
+    "max": 2.941
+  },
+  "rows": [
+    {
+      "id": "T001",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 2.940998545003822,
+      "own_records_ok": true
+    },
+    {
+      "id": "T002",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3160773440031335,
+      "own_records_ok": true
+    },
+    {
+      "id": "T003",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.351561807008693,
+      "own_records_ok": true
+    },
+    {
+      "id": "T004",
+      "expected": "eligibility",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3784044369967887,
+      "own_records_ok": true
+    },
+    {
+      "id": "T005",
+      "expected": "eligibility",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3621303679974517,
+      "own_records_ok": true
+    },
+    {
+      "id": "T006",
+      "expected": "eligibility",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3372473700001137,
+      "own_records_ok": true
+    },
+    {
+      "id": "T007",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3424122340074973,
+      "own_records_ok": true
+    },
+    {
+      "id": "T008",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.299487519005197,
+      "own_records_ok": true
+    },
+    {
+      "id": "T009",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3019306310015963,
+      "own_records_ok": true
+    },
+    {
+      "id": "T010",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.2976199990080204,
+      "own_records_ok": true
+    },
+    {
+      "id": "T011",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3940639599895803,
+      "own_records_ok": true
+    },
+    {
+      "id": "T012",
+      "expected": "admissions",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3659995470079593,
+      "own_records_ok": true
+    },
+    {
+      "id": "T013",
+      "expected": "admissions",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3038236799911829,
+      "own_records_ok": true
+    },
+    {
+      "id": "T014",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3493094590085093,
+      "own_records_ok": true
+    },
+    {
+      "id": "T015",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3454182459972799,
+      "own_records_ok": true
+    },
+    {
+      "id": "T016",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4240962359908735,
+      "own_records_ok": false
+    },
+    {
+      "id": "T017",
+      "expected": "courses",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3177937510045012,
+      "own_records_ok": true
+    },
+    {
+      "id": "T019",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3235127029911382,
+      "own_records_ok": false
+    },
+    {
+      "id": "T020",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3345132950053085,
+      "own_records_ok": true
+    },
+    {
+      "id": "T021",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.351130718991044,
+      "own_records_ok": true
+    },
+    {
+      "id": "T022",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3331111959996633,
+      "own_records_ok": true
+    },
+    {
+      "id": "T024",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3347349899995606,
+      "own_records_ok": true
+    },
+    {
+      "id": "T025",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.2808881959936116,
+      "own_records_ok": true
+    },
+    {
+      "id": "T027",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3221493899909547,
+      "own_records_ok": true
+    },
+    {
+      "id": "T028",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3143171800038544,
+      "own_records_ok": true
+    },
+    {
+      "id": "T029",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3289115040097386,
+      "own_records_ok": true
+    },
+    {
+      "id": "T030",
+      "expected": "attendance",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.386171314996318,
+      "own_records_ok": true
+    },
+    {
+      "id": "T031",
+      "expected": "attendance",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3958883480081568,
+      "own_records_ok": true
+    },
+    {
+      "id": "T032",
+      "expected": "schedule",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3488633689994458,
+      "own_records_ok": false
+    },
+    {
+      "id": "T033",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3780619820026914,
+      "own_records_ok": true
+    },
+    {
+      "id": "T034",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3788356600125553,
+      "own_records_ok": false
+    },
+    {
+      "id": "T035",
+      "expected": "schedule",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3373587910027709,
+      "own_records_ok": true
+    },
+    {
+      "id": "T036",
+      "expected": "schedule",
+      "got": "schedule",
+      "unusable": false,
+      "total_s": 1.6092558579985052,
+      "own_records_ok": false
+    },
+    {
+      "id": "T037",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.7072002289933152,
+      "own_records_ok": false
+    },
+    {
+      "id": "T038",
+      "expected": "attendance",
+      "got": "makeup_request",
+      "unusable": false,
+      "total_s": 1.7999897970003076,
+      "own_records_ok": true
+    },
+    {
+      "id": "T039",
+      "expected": "complaint",
+      "got": "complaint",
+      "unusable": false,
+      "total_s": 1.888281517996802,
+      "own_records_ok": true
+    },
+    {
+      "id": "T040",
+      "expected": "payment_dispute",
+      "got": "payment_dispute",
+      "unusable": false,
+      "total_s": 2.2393938039895147,
+      "own_records_ok": true
+    },
+    {
+      "id": "T041",
+      "expected": "legal_threat",
+      "got": "legal_threat",
+      "unusable": false,
+      "total_s": 1.6226297009998234,
+      "own_records_ok": false
+    },
+    {
+      "id": "T043",
+      "expected": "safety",
+      "got": "safety",
+      "unusable": false,
+      "total_s": 1.7121786560019245,
+      "own_records_ok": true
+    },
+    {
+      "id": "T044",
+      "expected": "fees",
+      "got": "payment_dispute",
+      "unusable": false,
+      "total_s": 1.6447280569991563,
+      "own_records_ok": true
+    },
+    {
+      "id": "T045",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3589818109903717,
+      "own_records_ok": true
+    },
+    {
+      "id": "T047",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.6120244929916225,
+      "own_records_ok": false
+    },
+    {
+      "id": "T048",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.5631188589904923,
+      "own_records_ok": true
+    },
+    {
+      "id": "T049",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.549015620010323,
+      "own_records_ok": true
+    },
+    {
+      "id": "T050",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3324224750103895,
+      "own_records_ok": true
+    },
+    {
+      "id": "T051",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4252589170064311,
+      "own_records_ok": true
+    },
+    {
+      "id": "T053",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3684747430088464,
+      "own_records_ok": true
+    },
+    {
+      "id": "T054",
+      "expected": "attendance",
+      "got": "makeup_request",
+      "unusable": false,
+      "total_s": 1.59116443899984,
+      "own_records_ok": true
+    },
+    {
+      "id": "T056",
+      "expected": "attendance",
+      "got": "makeup_request",
+      "unusable": false,
+      "total_s": 1.5981774370011408,
+      "own_records_ok": true
+    },
+    {
+      "id": "T101",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4084224120015278,
+      "own_records_ok": true
+    },
+    {
+      "id": "T102",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4133409009955358,
+      "own_records_ok": true
+    },
+    {
+      "id": "T103",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3718450000014855,
+      "own_records_ok": true
+    },
+    {
+      "id": "T104",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3671697770041646,
+      "own_records_ok": true
+    },
+    {
+      "id": "T105",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3415085510059725,
+      "own_records_ok": true
+    },
+    {
+      "id": "T106",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4604262620123336,
+      "own_records_ok": true
+    },
+    {
+      "id": "T107",
+      "expected": "fees",
+      "got": "payment_dispute",
+      "unusable": false,
+      "total_s": 1.8387826520047383,
+      "own_records_ok": true
+    },
+    {
+      "id": "T108",
+      "expected": "courses",
+      "got": "schedule",
+      "unusable": false,
+      "total_s": 1.4445148980012164,
+      "own_records_ok": true
+    },
+    {
+      "id": "T109",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.9326585330127273,
+      "own_records_ok": true
+    },
+    {
+      "id": "T110",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.535885834004148,
+      "own_records_ok": true
+    },
+    {
+      "id": "T111",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4033395890000975,
+      "own_records_ok": true
+    },
+    {
+      "id": "T112",
+      "expected": "courses",
+      "got": "schedule",
+      "unusable": false,
+      "total_s": 1.3881458149990067,
+      "own_records_ok": true
+    },
+    {
+      "id": "T113",
+      "expected": "eligibility",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.5277255950059043,
+      "own_records_ok": true
+    },
+    {
+      "id": "T114",
+      "expected": "eligibility",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.605432684009429,
+      "own_records_ok": true
+    },
+    {
+      "id": "T115",
+      "expected": "eligibility",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.8065478669886943,
+      "own_records_ok": true
+    },
+    {
+      "id": "T116",
+      "expected": "admissions",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4816858809936093,
+      "own_records_ok": true
+    },
+    {
+      "id": "T117",
+      "expected": "admissions",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.350583610998001,
+      "own_records_ok": true
+    },
+    {
+      "id": "T118",
+      "expected": "admissions",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3938029860000825,
+      "own_records_ok": true
+    },
+    {
+      "id": "T119",
+      "expected": "admissions",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3498639230092522,
+      "own_records_ok": true
+    },
+    {
+      "id": "T120",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4319971190125216,
+      "own_records_ok": true
+    },
+    {
+      "id": "T121",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3788303890032694,
+      "own_records_ok": true
+    },
+    {
+      "id": "T122",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.386920104996534,
+      "own_records_ok": true
+    },
+    {
+      "id": "T123",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3989020550070563,
+      "own_records_ok": true
+    },
+    {
+      "id": "T125",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4096929329971317,
+      "own_records_ok": true
+    },
+    {
+      "id": "T126",
+      "expected": "privacy_policy",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.784260845000972,
+      "own_records_ok": true
+    },
+    {
+      "id": "T127",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.7732806480053114,
+      "own_records_ok": true
+    },
+    {
+      "id": "T129",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.4626862200093456,
+      "own_records_ok": true
+    },
+    {
+      "id": "T130",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3563848860067083,
+      "own_records_ok": true
+    },
+    {
+      "id": "T131",
+      "expected": "placement",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3157548059971305,
+      "own_records_ok": true
+    },
+    {
+      "id": "T134",
+      "expected": "courses",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3579554640018614,
+      "own_records_ok": true
+    },
+    {
+      "id": "T135",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.382465978997061,
+      "own_records_ok": true
+    },
+    {
+      "id": "T136",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.5366302879992872,
+      "own_records_ok": true
+    },
+    {
+      "id": "T137",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.6680904859967995,
+      "own_records_ok": true
+    },
+    {
+      "id": "T138",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4245279530005064,
+      "own_records_ok": true
+    },
+    {
+      "id": "T139",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3788135749928188,
+      "own_records_ok": true
+    },
+    {
+      "id": "T140",
+      "expected": "schedule",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3426522670051781,
+      "own_records_ok": true
+    },
+    {
+      "id": "T141",
+      "expected": "schedule",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.381902576002176,
+      "own_records_ok": true
+    },
+    {
+      "id": "T142",
+      "expected": "assessment",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3831208489864366,
+      "own_records_ok": false
+    },
+    {
+      "id": "T143",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.953176032009651,
+      "own_records_ok": false
+    },
+    {
+      "id": "T145",
+      "expected": "privacy_policy",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.505747754999902,
+      "own_records_ok": false
+    },
+    {
+      "id": "T146",
+      "expected": "privacy_policy",
+      "got": "contact_update",
+      "unusable": false,
+      "total_s": 1.9803223950002575,
+      "own_records_ok": true
+    },
+    {
+      "id": "T148",
+      "expected": "attendance",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.5004342079919297,
+      "own_records_ok": true
+    },
+    {
+      "id": "T150",
+      "expected": "attendance",
+      "got": "makeup_request",
+      "unusable": false,
+      "total_s": 1.78713908798818,
+      "own_records_ok": true
+    },
+    {
+      "id": "T151",
+      "expected": "complaint",
+      "got": "complaint",
+      "unusable": false,
+      "total_s": 1.5208857510006055,
+      "own_records_ok": true
+    },
+    {
+      "id": "T152",
+      "expected": "payment_dispute",
+      "got": "payment_dispute",
+      "unusable": false,
+      "total_s": 1.524822563995258,
+      "own_records_ok": true
+    },
+    {
+      "id": "T153",
+      "expected": "legal_threat",
+      "got": "complaint",
+      "unusable": false,
+      "total_s": 1.653124835997005,
+      "own_records_ok": true
+    },
+    {
+      "id": "T155",
+      "expected": "safety",
+      "got": "safety",
+      "unusable": false,
+      "total_s": 1.5901580500067212,
+      "own_records_ok": true
+    },
+    {
+      "id": "T156",
+      "expected": "payment_dispute",
+      "got": "payment_dispute",
+      "unusable": false,
+      "total_s": 1.5240872730064439,
+      "own_records_ok": true
+    },
+    {
+      "id": "T157",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.3403700130002107,
+      "own_records_ok": true
+    },
+    {
+      "id": "T158",
+      "expected": "fees",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3225077950046398,
+      "own_records_ok": true
+    },
+    {
+      "id": "T159",
+      "expected": "attendance",
+      "got": "attendance",
+      "unusable": false,
+      "total_s": 1.3864228349993937,
+      "own_records_ok": true
+    },
+    {
+      "id": "T160",
+      "expected": "fees",
+      "got": "other",
+      "unusable": false,
+      "total_s": 1.306560251992778,
+      "own_records_ok": true
+    },
+    {
+      "id": "T161",
+      "expected": "courses",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.3883932620083215,
+      "own_records_ok": true
+    },
+    {
+      "id": "T162",
+      "expected": "attendance",
+      "got": "assessment",
+      "unusable": false,
+      "total_s": 1.4006270649988437,
+      "own_records_ok": true
+    }
+  ]
+}

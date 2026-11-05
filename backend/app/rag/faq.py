@@ -32,6 +32,7 @@ from app.db.session import session_scope
 from app.llm.embeddings import EmbeddingClient
 from app.llm.fake_faq import SENTINEL
 from app.llm.gateway import get_chat_model, get_embedding_client
+from app.llm.guard import invoke_guarded
 from app.observability.tracing import instrument_config
 from app.rag.prompts import CITATION, build_messages
 from app.rag.retrieval import RetrievedChunk, count_chunks, search
@@ -110,7 +111,7 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
     def generate(state: FaqState, config: RunnableConfig) -> dict:
         institute_name = load_tenant_config(_tenant_of(config)).name
         chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
-        reply = model.invoke(build_messages(state["question"], chunks, institute_name=institute_name))
+        reply = invoke_guarded(model, build_messages(state["question"], chunks, institute_name=institute_name), s)
         return {"raw_answer": str(reply.content).strip()}
 
     def validate(state: FaqState) -> dict:
