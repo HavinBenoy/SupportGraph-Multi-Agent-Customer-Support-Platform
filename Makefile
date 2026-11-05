@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full
 
 venv:
 	python3 -m venv .venv
@@ -68,6 +68,42 @@ bench-tts:
 
 bench-report:
 	cd backend && ../.venv/bin/python scripts/bench.py report
+
+# Quick real-model check while developing: few tickets per split, no cold-start timing, own output folder (evals/bench-quick),
+# so it can never be mixed with a full run. Defaults to the smaller model; override: make bench-quick MODELS="qwen3:4b" N=6
+# NOT a decision benchmark: ~8 tickets per split cannot separate models. Use bench-full for that.
+bench-quick:
+	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-quick llm --models $(or $(MODELS),qwen3:1.7b) --limit $(or $(N),8) --no-cold-start $(ARGS)
+	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-quick report
+
+# The full measurement (both splits, all tickets, cold start). Slow on CPU for large models.
+bench-full:
+	cd backend && ../.venv/bin/python scripts/bench.py llm $(if $(MODELS),--models $(MODELS),) $(ARGS)
+	cd backend && ../.venv/bin/python scripts/bench.py report
+
+# One controlled variant of a model, kept apart from the baseline (own folder evals/bench-<TAG>), e.g. the Qwen3 sampling test:
+#   make bench-experiment MODELS="qwen3:4b" TAG=sampling SETS="llm_temperature=0.7 llm_top_p=0.8 llm_top_k=20"   (defaults: dev split, FAQ suite only)
+bench-experiment:
+	@test -n "$(TAG)" -a -n "$(SETS)" || { echo 'usage: make bench-experiment MODELS="qwen3:4b" TAG=sampling SETS="llm_temperature=0.7 llm_top_k=20" [N=20] [SPLITS="dev heldout"] [SUITES="faq triage"]'; exit 1; }
+	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-$(TAG) llm --models $(MODELS) --tag $(TAG) $(foreach s,$(SETS),--set $(s)) --splits $(or $(SPLITS),dev) --suites $(or $(SUITES),faq) $(if $(N),--limit $(N),) --no-cold-start
+	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-$(TAG) report
+
+# ---- test tiers (see docs/TESTING.md) ----
+# Each tier is a subset of the next. `make test` and `make test-pg` are unchanged.
+test-smoke:  ## ~5-10 s: security isolation, benchmark kit, FAQ validation/truncation, prompts, gateway, router/triage units
+	cd backend && ../.venv/bin/python -m pytest -q -x tests/security tests/bench tests/rag/test_faq_graph.py tests/rag/test_faq_truncation.py tests/rag/test_prompts.py tests/unit/test_llm_gateway_hardening.py tests/unit/test_router.py tests/unit/test_triage.py tests/unit/test_escalation_floor.py
+
+test-fast:  ## whole SQLite backend suite, in parallel when pytest-xdist is installed, failed-first, stops at first failure
+	cd backend && ../.venv/bin/python -m pytest -q -x --ff $$(../.venv/bin/python -c "import xdist" 2>/dev/null && echo "-n auto")
+
+test-targeted:  ## run only what the changed files need (git status). Preview: make test-targeted DRY=1  or  FILES="backend/app/rag/prompts.py"
+	cd backend && ../.venv/bin/python scripts/test_select.py $(if $(FILES),--files $(FILES),) $(if $(DRY),,--run)
+
+test-full:  ## everything except real models and browser e2e: backend (parallel) + Postgres + frontend tests + production build
+	$(MAKE) test-fast
+	$(MAKE) test-pg
+	$(MAKE) frontend-test
+	$(MAKE) frontend-build
 
 eval-routing:
 	cd backend && ../.venv/bin/python scripts/eval_routing.py

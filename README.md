@@ -255,7 +255,7 @@ LLM or embedding model.
 
 Edit `.env`:
 
-- Ollama: `SG_LLM_PROVIDER=ollama`, `SG_LLM_MODEL=qwen3:4b`, then `ollama pull qwen3:4b` (run `make bench-llm` first to pick a model for your machine) and `pip install -e "backend[ollama]"`.
+- Ollama: `SG_LLM_PROVIDER=ollama`, `SG_LLM_MODEL=qwen3:1.7b`, then `ollama pull qwen3:1.7b` (the M1 default; see `docs/MODEL_SELECTION.md` before changing it) and `pip install -e "backend[ollama]"`.
 - Any OpenAI-compatible API: `SG_LLM_PROVIDER=openai_compat`, set `SG_LLM_BASE_URL`, `SG_LLM_API_KEY`, `SG_LLM_MODEL`, and `pip install -e "backend[openai]"`.
 
 ## Layout rules

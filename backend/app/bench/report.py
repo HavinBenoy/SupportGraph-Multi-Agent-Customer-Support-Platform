@@ -19,7 +19,7 @@ from app.evals.run import DATASETS_DIR
 SCHEMA_VERSION = 2
 
 _SETTING_KEYS = ("llm_provider", "llm_model", "embedding_provider", "embedding_model", "llm_num_ctx", "llm_max_output_tokens",
-                 "llm_thinking", "llm_keep_alive", "llm_timeout_seconds", "rag_top_k", "rag_min_score", "triage_min_confidence",
+                 "llm_thinking", "llm_temperature", "llm_top_p", "llm_top_k", "llm_repeat_penalty", "llm_seed", "llm_keep_alive", "llm_timeout_seconds", "rag_top_k", "rag_min_score", "triage_min_confidence",
                  "embedding_query_prefix", "embedding_document_prefix", "default_tenant")
 _ROLE_KEYS = ("action", "faq", "triage", "rewrite", "proposer", "critic", "reviser", "judge")
 _PKGS = ("langchain-core", "langchain-ollama", "langgraph", "pydantic", "httpx")
@@ -83,6 +83,8 @@ def build_manifest(settings: Settings, *, argv: list[str], run_id: str | None = 
 def write_result(out_dir: Path, result: dict, *, manifest: dict | None = None, settings_info: dict | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"{result['suite']}-{result.get('model') or result.get('voice', 'x')}".replace(":", "_").replace("/", "_")
+    if result.get("variant"):  # an experiment variant (e.g. other sampling) must not overwrite the baseline file
+        name += f"--{result['variant']}"
     payload = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "system": system_info(), "manifest": manifest or {}, "settings": settings_info or {}, **result}
     p = out_dir / f"{name}.json"
@@ -107,7 +109,12 @@ _SHORT = 14  # characters of a hash / digest shown in warnings
 
 
 def _tag(r: dict) -> str:
-    return f"{r['suite']}:{r.get('model') or r.get('voice', '?')}"
+    return f"{r['suite']}:{r.get('model') or r.get('voice', '?')}" + (f"[{r['variant']}]" if r.get("variant") else "")
+
+
+def _label(r: dict) -> str:
+    """Model name for a table row; an experiment variant is shown so it cannot be mistaken for the baseline."""
+    return f"{r['model']} [{r['variant']}]" if r.get("variant") else str(r["model"])
 
 
 def _show(v) -> str:
@@ -241,7 +248,7 @@ def render_markdown(results: list[dict]) -> str:
         for r in faq:
             for split, sm in r["splits"].items():
                 a, sp = sm["answerable"], sm["speed"]
-                out.append(f"| {r['model']} | {split} | {a['n']} ({a['context_sufficient_n']} / {a['retrieval_gap_n']}) | {_pct(a['correct_rate'])} | "
+                out.append(f"| {_label(r)} | {split} | {a['n']} ({a['context_sufficient_n']} / {a['retrieval_gap_n']}) | {_pct(a['correct_rate'])} | "
                            f"{_pct(a['correct_rate_context_sufficient'])} | {_pct(a['over_abstain_rate_raw'])} | {_pct(a['over_abstain_rate_corrected'])} | "
                            f"{sp['truncated']}/{sm['cases'] - sm['errors']} | {_pct(a['unknown_citation_rate'])} | "
                            f"{_pct(sm['must_abstain']['correct_rate'])} (n={sm['must_abstain']['n']}) | "
@@ -253,7 +260,7 @@ def render_markdown(results: list[dict]) -> str:
         for r in faq:
             for split, sm in r["splits"].items():
                 lb = sm["labels"]
-                out.append(f"| {r['model']} | {split} | " + " | ".join(str(lb.get(k, 0)) for k in
+                out.append(f"| {_label(r)} | {split} | " + " | ".join(str(lb.get(k, 0)) for k in
                            ("ok", "truncated", "retrieval_gap", "over_abstain", "mixed_output", "bad_citation", "no_citation",
                             "missing_fact", "answered_unanswerable", "other")) + " |")
         out.append("")
@@ -265,7 +272,7 @@ def render_markdown(results: list[dict]) -> str:
         for r in tri:
             for split, sm in r["splits"].items():
                 e, o, c = sm["escalation"], sm["own_records"], sm["category"]
-                out.append(f"| {r['model']} | {split} | {sm['cases']} | {_pct(sm['route_accuracy'])} | {_nr(e['false_n'], e['non_escalation_n'], e['false_rate'])} | "
+                out.append(f"| {_label(r)} | {split} | {sm['cases']} | {_pct(sm['route_accuracy'])} | {_nr(e['false_n'], e['non_escalation_n'], e['false_rate'])} | "
                            f"{_nr(e['missed_n'], e['expected_n'], e['missed_rate'])} | {_pct(o['accuracy'])} (n={o['scored_n']}) | "
                            f"{_pct(c['accuracy'])} (n={c['scored_n']}) | {_pct(sm['unusable_output_rate'])} | {_f(sm['confidence'].get('p50'))} | "
                            f"{_pct(sm['below_min_confidence_rate'])} | {_f(sm['latency_s'].get('p50'))} |")

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SG_", env_file=_REPO_ROOT_ENV, extra="ignore", populate_by_name=True)
 
     llm_provider: Literal["fake", "ollama", "openai_compat"] = "fake"
-    llm_model: str = "qwen3:4b"
+    llm_model: str = "qwen3:1.7b"  # M1 decision (docs/decisions/0006): qwen3:4b was slower and worse on every FAQ metric at the tested settings
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""
     # --- Model gateway hardening (milestone 0) ---
@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     llm_num_ctx: int = Field(default=4096, ge=512, le=32768)         # Ollama context window; bigger = slower + more RAM
     llm_keep_alive: str = "30m"                                      # Ollama: keep the model loaded between calls
     llm_thinking: bool = False                                       # qwen3 "thinking" off: it multiplies latency on CPU
+    # Sampling. Defaults keep the current behaviour (temperature 0, provider defaults for the rest). Qwen3's authors advise AGAINST
+    # greedy decoding (it can loop until the token cap): for the experiment see docs/MODEL_SELECTION.md. Unset (None) = not sent.
+    llm_temperature: float = Field(default=0.0, ge=0, le=2)
+    llm_top_p: float | None = Field(default=None, gt=0, le=1)
+    llm_top_k: int | None = Field(default=None, ge=1)                # Ollama only
+    llm_repeat_penalty: float | None = Field(default=None, ge=0.5, le=2)  # Ollama only
+    llm_seed: int | None = None
     # Process-wide daily cap on tokens spent through guarded calls. 0 = unlimited (the right value for local models).
     llm_daily_token_budget: int = Field(default=0, ge=0)
     # Hard gate: a chat/embedding endpoint that is not on this machine is refused unless this is true. This is what stops

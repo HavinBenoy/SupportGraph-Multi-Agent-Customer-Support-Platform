@@ -16,6 +16,21 @@ def _role_model(role: str, s: Settings) -> str:
     return getattr(s, f"llm_model_{role}", "") or s.llm_model
 
 
+def _sampling(s: Settings, *, ollama: bool) -> dict:
+    """Only the sampling options that were explicitly set are sent, so provider defaults stay untouched otherwise."""
+    out = {}
+    if s.llm_top_p is not None:
+        out["top_p"] = s.llm_top_p
+    if s.llm_seed is not None:
+        out["seed"] = s.llm_seed
+    if ollama:
+        if s.llm_top_k is not None:
+            out["top_k"] = s.llm_top_k
+        if s.llm_repeat_penalty is not None:
+            out["repeat_penalty"] = s.llm_repeat_penalty
+    return out
+
+
 def get_chat_model(role: str = "default", settings: Settings | None = None) -> BaseChatModel:
     """Return the chat model for `role`, with the configured timeout, output cap, context size and thinking mode.
 
@@ -41,7 +56,7 @@ def get_chat_model(role: str = "default", settings: Settings | None = None) -> B
         except ImportError as e:
             raise RuntimeError('Ollama provider needs: pip install -e "backend[ollama]"') from e
         return ChatOllama(
-            model=model, base_url=s.llm_base_url, temperature=0,
+            model=model, base_url=s.llm_base_url, temperature=s.llm_temperature, **_sampling(s, ollama=True),
             num_ctx=s.llm_num_ctx, num_predict=s.llm_max_output_tokens, keep_alive=s.llm_keep_alive,
             reasoning=s.llm_thinking,
             client_kwargs={"timeout": s.llm_timeout_seconds},
@@ -53,7 +68,8 @@ def get_chat_model(role: str = "default", settings: Settings | None = None) -> B
         except ImportError as e:
             raise RuntimeError('OpenAI-compatible provider needs: pip install -e "backend[openai]"') from e
         return ChatOpenAI(
-            model=model, base_url=s.llm_base_url, api_key=s.llm_api_key or "none", temperature=0,
+            model=model, base_url=s.llm_base_url, api_key=s.llm_api_key or "none", temperature=s.llm_temperature,
+            **({"top_p": s.llm_top_p} if s.llm_top_p is not None else {}), **({"seed": s.llm_seed} if s.llm_seed is not None else {}),
             request_timeout=s.llm_timeout_seconds, max_retries=s.llm_max_retries, max_tokens=s.llm_max_output_tokens,
         )
 

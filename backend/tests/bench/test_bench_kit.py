@@ -201,7 +201,7 @@ def test_every_benchmark_code_file_is_hashed_and_a_change_in_any_is_detected():
         "app/bench/embed_bench.py", "scripts/bench.py"}
     assert all(len(v) == 64 for v in m["bench_code_sha256"].values())
     d = report.manifest_conflict_details([_res(), _res("triage", code={"app/bench/metrics.py": "m1", "scripts/bench.py": "s2"})])
-    assert [x["label"] for x in d] == ["benchmark code"] and "scripts/bench.py" in d[0]["detail"] and "metrics.py" not in d[0]["detail"].split(":", 1)[1].replace("app/bench/metrics.py", "") 
+    assert [x["label"] for x in d] == ["benchmark code"] and "scripts/bench.py" in d[0]["detail"] and "metrics.py" not in d[0]["detail"].split(":", 1)[1].replace("app/bench/metrics.py", "")
 
 
 def test_hardware_difference_across_machines_is_detected():
@@ -225,3 +225,43 @@ def test_stt_tts_files_without_manifest_do_not_trigger_warnings():
     rs = [_res(), {"suite": "stt", "model": "w", "manifest": {}, "system": {"cpu_model": "i5", "cpu_cores_physical": 4, "cpu_threads": 8,
                                                                          "ram_gb": 15.4, "machine": "x86_64"}}]
     assert report.manifest_conflicts(rs) == []
+
+
+# ---------- experiment overrides (M1 prep): controlled, recorded, never overwrite the baseline ----------
+
+def _bench_cli():
+    import importlib.util, sys
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("bench_cli", Path(__file__).resolve().parents[2] / "scripts" / "bench.py")
+    m = importlib.util.module_from_spec(spec); sys.modules["bench_cli"] = m; spec.loader.exec_module(m)
+    return m
+
+
+def test_set_overrides_only_generation_settings():
+    cli = _bench_cli()
+    s = cli.apply_overrides(S("http://127.0.0.1:1"), ["llm_temperature=0.7", "SG_LLM_TOP_K=20", "llm_top_p=0.8"])
+    assert (s.llm_temperature, s.llm_top_k, s.llm_top_p) == (0.7, 20, 0.8)
+    for bad in ("rag_top_k=9", "llm_model=x", "nonsense", "llm_temperature=hot"):
+        with pytest.raises(SystemExit):
+            cli.apply_overrides(S("http://127.0.0.1:1"), [bad])
+
+
+def test_sampling_options_reach_the_ollama_request_and_variants_do_not_overwrite(tmp_path):
+    cli = _bench_cli()
+    tickets = [{"id": "t1", "tenant_id": "qspiders_sample", "message": "What is the refund policy for fees?", "expected_route": "knowledge"}]
+    with MockOllama() as mock:
+        s = cli.apply_overrides(S(mock.url), ["llm_temperature=0.7", "llm_top_k=20", "llm_top_p=0.8", "llm_repeat_penalty=1.1"])
+        from app.llm.gateway import get_chat_model
+        from app.bench import llm_bench
+        m = get_chat_model("faq", s)
+        llm_bench.stream_once(m, [("human", "hi")])
+        opts = [b for p, b in mock.calls if p == "/api/chat"][-1]["options"]
+        assert opts["temperature"] == 0.7 and opts["top_k"] == 20 and opts["top_p"] == 0.8 and opts["repeat_penalty"] == 1.1
+        base = get_chat_model("faq", S(mock.url))
+        llm_bench.stream_once(base, [("human", "hi")])
+        opts0 = [b for p, b in mock.calls if p == "/api/chat"][-1]["options"]
+        assert opts0["temperature"] == 0 and "top_k" not in opts0 and "top_p" not in opts0  # defaults unchanged
+    a = tmp_path
+    p1 = report.write_result(a, {"suite": "faq", "model": "qwen3:4b"})
+    p2 = report.write_result(a, {"suite": "faq", "model": "qwen3:4b", "variant": "samp"})
+    assert p1 != p2 and p2.name == "faq-qwen3_4b--samp.json"

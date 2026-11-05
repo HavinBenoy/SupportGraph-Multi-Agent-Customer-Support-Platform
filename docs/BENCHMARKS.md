@@ -69,6 +69,13 @@ the top of `SUMMARY.md`, grouped as:
 Different model tags having different digests is expected and is not flagged. Files without a manifest (stt/tts) are not compared. A difference
 means the numbers were produced under different experimental conditions: re-run with identical conditions before drawing a conclusion.
 
+## Controlled variants (M1)
+`bench.py llm` also accepts `--suites faq|triage`, `--no-cold-start`, `--tag NAME` (adds `--NAME` to the result file name, so a variant never overwrites the
+baseline), `--set KEY=VALUE` (generation settings only: `llm_temperature`, `llm_top_p`, `llm_top_k`, `llm_repeat_penalty`, `llm_seed`, `llm_max_output_tokens`,
+`llm_num_ctx`, `llm_thinking`; anything else is refused so an experiment cannot silently change the dataset, prompt or retrieval) and, before the sub-command,
+`--out-dir`. The chosen settings are in the manifest, and the report's WARNING block fires if variants and baseline are summarised together. Use
+`make bench-quick`, `make bench-full`, `make bench-experiment` (see `docs/TESTING.md`).
+
 ## Known limits
 - The FAQ benchmark gives every model the same lexical top-k context, so it tests the model, not the product's embedding retrieval.
   Cases where that context lacks the facts are labelled `retrieval_gap`, not model failures.

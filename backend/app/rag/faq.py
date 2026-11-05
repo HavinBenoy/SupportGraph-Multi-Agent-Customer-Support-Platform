@@ -11,7 +11,8 @@ does for the step 0 agent, and so the step 3 knowledge subgraph can reuse these 
 Where "hallucinated policy" is stopped (all in code, none of it trusting the model):
   1. retrieve   - only passages above `rag_min_score` reach the model; if none do, the model is never called.
   2. generate   - the prompt says "answer only from the sources or reply INSUFFICIENT_CONTEXT" (app/rag/prompts.py).
-  3. validate   - the answer is accepted only if it cites at least one source AND every cited source was retrieved.
+  3. validate   - a reply cut off at the output-token limit is never accepted (even with a valid citation); otherwise the
+                  answer is accepted only if it cites at least one source AND every cited source was retrieved.
                   An uncited answer, an invented citation, or the sentinel all become a safe abstention.
 What this does NOT catch: a model that cites a real source but misstates what it says. Judging that needs a
 groundedness critic (build step 4) and evals (step 6); the baseline's numbers will show how often it matters.
@@ -33,6 +34,7 @@ from app.llm.embeddings import EmbeddingClient
 from app.llm.fake_faq import SENTINEL
 from app.llm.gateway import get_chat_model, get_embedding_client
 from app.llm.guard import invoke_guarded
+from app.llm.truncation import finish_reason, is_truncated
 from app.observability.tracing import instrument_config
 from app.rag.prompts import CITATION, build_messages
 from app.rag.retrieval import RetrievedChunk, count_chunks, search
@@ -55,6 +57,8 @@ class FaqState(TypedDict, total=False):
     chunks: list[dict]  # passages above the score threshold, best first (RetrievedChunk.to_dict)
     top_score: float | None  # best similarity seen, even if below the threshold (for calibrating rag_min_score)
     raw_answer: str
+    truncated: bool  # the model stopped at the output-token limit: the answer is incomplete and must never be shown
+    finish_reason: str | None
     answer: str
     abstained: bool
     reason: str
@@ -66,7 +70,7 @@ class FaqAnswer:
     answer: str
     abstained: bool
     reason: str  # answered | no_relevant_context | no_documents_ingested | empty_question | question_too_long |
-    #              model_abstained | uncited_answer | unknown_citation
+    #              model_abstained | truncated_answer | uncited_answer | unknown_citation
     citations: list[str] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)  # the cited passages (id, title, heading, text, score)
     top_score: float | None = None
@@ -112,13 +116,16 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         institute_name = load_tenant_config(_tenant_of(config)).name
         chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
         reply = invoke_guarded(model, build_messages(state["question"], chunks, institute_name=institute_name), s)
-        return {"raw_answer": str(reply.content).strip()}
+        return {"raw_answer": str(reply.content).strip(), "finish_reason": finish_reason(reply),
+                "truncated": is_truncated(reply, s.llm_max_output_tokens)}
 
     def validate(state: FaqState) -> dict:
         raw = state.get("raw_answer", "")
         retrieved = {c["source_id"]: c for c in state["chunks"]}
         cited = list(dict.fromkeys(CITATION.findall(raw)))  # unique, in order of first use
-        if not raw or SENTINEL in raw:  # "answer + sentinel" is treated as a refusal too: fail closed
+        if state.get("truncated"):  # checked FIRST: a cut-off reply can still contain a valid citation, which proves nothing
+            reason = "truncated_answer"
+        elif not raw or SENTINEL in raw:  # "answer + sentinel" is treated as a refusal too: fail closed
             reason = "model_abstained"
         elif not cited:
             reason = "uncited_answer"

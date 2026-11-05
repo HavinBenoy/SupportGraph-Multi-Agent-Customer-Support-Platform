@@ -13,7 +13,8 @@ see `docs/decisions/0001-institute-domain.md`). Status of each build step for th
 | 5 | Web API + auth + frontend: customer chat widget, staff console (escalations, approvals), admin analytics | built; sandbox-verified (API tests, 26 frontend tests, production build, live browser run on Postgres); **awaiting your local run** | sandbox only (see CHANGES.md, docs/STEP5.md) |
 | 6 | Evals: held-out + security sets, baseline comparison, groundedness judge + calibration, latency/cost, regression gates, fixes | built; sandbox-verified with offline fakes only; **awaiting your local run** | sandbox only (see CHANGES.md, docs/STEP6.md) |
 | M0 | Benchmark kit + model-gateway hardening, then measurement fixes after the first run (schema 2: full outputs, truncation = failure, per-split reports, route/escalation metrics, run manifest) | built; sandbox-verified (mock Ollama only); **awaiting your local test + benchmark run** | sandbox only (CHANGES.md, docs/BENCHMARKS.md, ADR 0005) |
-| M1-M9 | Real local models on the text path; browser voice; low-latency path; live calls + takeover; trial verification; knowledge management; Edesy adapter (approval needed); closure | not started; **M1 waits for your benchmark results and our model-selection review** | |
+| M1a | Truncation-safe FAQ validator (blocking prerequisite met), default model qwen3:1.7b, configurable sampling, tiered tests (`docs/TESTING.md`), experiment tooling | built; sandbox-verified; **awaiting your local run** | sandbox only (CHANGES.md, docs/MODEL_SELECTION.md, ADR 0006) |
+| M1b-M9 | Real local models on the text path (M1b: decide 4B/sampling from the experiment, then triage prompt work); browser voice; low-latency path; live calls + takeover; trial verification; knowledge management; Edesy adapter (approval needed); closure | not started; M1b waits for the sampling experiment results | |
 
 The earlier "Steps 7-9" (generic multi-tenant onboarding, e-commerce pack) were dropped: this is a QSpiders-specific product.
 
@@ -23,7 +24,7 @@ traces, rate limiting, student notification channel, student-only documents.
 
 ## Blocking prerequisites for M1 (agreed 2026-11-05)
 
-1. **FAQ validator must reject truncated replies.** Before any real LLM is connected to the product FAQ path, `validate` in `app/rag/faq.py`
+1. **DONE in M1a - FAQ validator rejects truncated replies** (`truncated_answer`; also the QA reviser). Before any real LLM is connected to the product FAQ path, `validate` in `app/rag/faq.py`
    must reject a response whose `done_reason == "length"` (or that is otherwise known to be truncated). Today it accepts any reply with a valid
    citation, so a reply cut at the token limit would reach the student. Deliberately NOT changed in M0 (benchmark layer only).
 2. Model-selection decision reviewed jointly from the schema-2 benchmark results.
