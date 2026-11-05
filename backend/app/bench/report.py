@@ -226,6 +226,31 @@ def _nr(n, d, rate_=None):
     return f"{n}/{d} ({_pct(rate_ if rate_ is not None else (n / d if d else None))})"
 
 
+def render_review(results: list[dict], labels=("missing_fact", "mixed_output")) -> str:
+    """A human-review sheet for FAQ answers the deterministic scorer marked as failures it cannot judge on meaning
+    (the expected phrase was absent, but a correct paraphrase can also look like that). READ-ONLY: it never changes a
+    score, the criteria or any result file. A person fills in the verdicts; the strict metric stays the headline."""
+    out = ["# FAQ review sheet", "",
+           "These answers were scored as failures by exact-phrase checks. Mark each one by reading the answer against the sources. "
+           "**Nothing here changes any score**; use it to see how far the strict metric under-states (or not) a model.", ""]
+    n = 0
+    for r in results:
+        if r.get("suite") != "faq":
+            continue
+        for row in r.get("rows", []):
+            if row.get("label") not in labels:
+                continue
+            n += 1
+            out += [f"## {n}. {_label(r)} / {row.get('split')} / {row.get('id')}  (scorer: {row['label']})", "",
+                    f"**Question:** {row.get('question')}", "", f"**Expected phrase(s):** {row.get('expected_facts')}", "",
+                    f"**Sources shown to the model:** {', '.join(row.get('context_ids') or [])}", "",
+                    "**Answer:**", "", "> " + str(row.get("text", "")).strip().replace("\n", "\n> "), "",
+                    "**Your verdict:**  [ ] correct (paraphrase)   [ ] partly   [ ] wrong   [ ] unsafe/invented", ""]
+    if n == 0:
+        out.append("No failures of these kinds to review.")
+    return "\n".join(out) + "\n"
+
+
 def render_markdown(results: list[dict]) -> str:
     out = ["# Benchmark summary", ""]
     if results:

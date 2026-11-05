@@ -189,6 +189,13 @@ def cmd_report(a) -> int:
     return 0
 
 
+def cmd_review(a) -> int:
+    results = report.load_results(OUT)
+    (OUT / "REVIEW.md").write_text(report.render_review(results))
+    print(f"-> {OUT / 'REVIEW.md'}")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out-dir", help="where results and SUMMARY.md go (default: evals/bench). A quick run uses evals/bench-quick so it never mixes with the full run")
@@ -205,6 +212,7 @@ def main() -> int:
     q = sub.add_parser("stt"); q.add_argument("--audio", required=True); q.add_argument("--model", default="base.en"); q.add_argument("--threads", type=int, default=4); q.set_defaults(fn=cmd_stt)
     q = sub.add_parser("tts"); q.add_argument("--voice", required=True); q.add_argument("--piper-bin"); q.set_defaults(fn=cmd_tts)
     sub.add_parser("report").set_defaults(fn=cmd_report)
+    sub.add_parser("review", help="write REVIEW.md: failures the scorer cannot judge on meaning, for a human to read").set_defaults(fn=cmd_review)
     a = p.parse_args()
     if a.out_dir:
         global OUT

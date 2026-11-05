@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full
 
 venv:
 	python3 -m venv .venv
@@ -65,6 +65,10 @@ bench-stt:
 
 bench-tts:
 	cd backend && ../.venv/bin/python scripts/bench.py tts --voice $(VOICE)
+
+# Human-review sheet of FAQ failures the strict scorer cannot judge on meaning (read-only; changes no score). DIR=bench-cmp to pick a folder.
+bench-review:
+	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/$(or $(DIR),bench) review
 
 bench-report:
 	cd backend && ../.venv/bin/python scripts/bench.py report

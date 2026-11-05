@@ -12,6 +12,7 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 | `make test-full` | `test-fast` + `test-pg` + frontend tests + production build | minutes | browser e2e (`make e2e`), real models |
 | `make bench-quick` | real model, 8 tickets per split, no cold start, own folder `evals/bench-quick` | ~1-2 min for 1.7b | decisions: 8 tickets cannot separate models |
 | `make bench-full` | real models, both splits, all tickets, cold start | ~6 min (1.7b); much longer for slow models | |
+| `make bench-review DIR=bench-x` | writes `REVIEW.md`: failures the strict scorer cannot judge on meaning, for a human to read. Read-only, changes no score | seconds | |
 | `make bench-experiment` | one controlled variant (generation settings only) in `evals/bench-<TAG>` | see MODEL_SELECTION.md | |
 
 ## Which tier when

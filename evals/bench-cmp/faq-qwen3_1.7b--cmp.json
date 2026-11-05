@@ -1,0 +1,1575 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-11-06T01:14:58+05:30",
+  "system": {
+    "os": "Linux 7.0.0-42-generic",
+    "python": "3.12.3",
+    "machine": "x86_64",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i5-11300H @ 3.10GHz",
+    "cpu_cores_physical": 4,
+    "cpu_threads": 8,
+    "ram_gb": 15.4,
+    "ram_available_gb": 2.6,
+    "load_avg_1m": 3.87
+  },
+  "manifest": {
+    "run_id": "746d4a14",
+    "schema_version": 2,
+    "command": [
+      "--out-dir",
+      "../evals/bench-cmp",
+      "llm",
+      "--models",
+      "qwen3:1.7b",
+      "qwen3:4b-instruct-2507-q4_K_M",
+      "--tag",
+      "cmp",
+      "--set",
+      "llm_temperature=0.0",
+      "--splits",
+      "dev",
+      "--suites",
+      "faq",
+      "triage",
+      "--no-cold-start"
+    ],
+    "splits": [
+      "dev"
+    ],
+    "models": [
+      "qwen3:1.7b",
+      "qwen3:4b-instruct-2507-q4_K_M"
+    ],
+    "limit_per_split": null,
+    "context_mode": "lexical_top_k",
+    "dataset_sha256": {
+      "dev": "381e901e7c2ecd5ce624efb1a92c5b81711fb53f8bfd64299c1e1469b05ce04b",
+      "heldout": "f39d61c4de037ed52d4bed2a827bdc660b25a07f701d6e17638408d4aa05fdb6"
+    },
+    "tenant_docs_sha256": {
+      "combined": "ce8b29bee2408041f08db62a2e64ff461aacca40de4b86b8b9d655c013acb0ce",
+      "files": {
+        "about-the-institute": "c412d3d9878a0165353129a8843a9a987413c8e212e98fad17099b509beed7a7",
+        "admissions-and-demo-classes": "89d7a3c9700c9267febf66e195e819c7c5f6f27bb2634eb2b8d6c40bf7d8f836",
+        "courses-and-batches": "a04a8ad57b3c4068971436e21c31ed96dbe10226e9bdbedc8886bb9139695ddc",
+        "eligibility-and-prerequisites": "1e98b6532909dc6777e96bce3bc90263fe3721c2e8e367045ef8c6ef85f074e5",
+        "fees-and-payments": "3d912339b919704a1df6880f0c9a6566d9ae2b95d2dbb33e484ba6ee756518a9",
+        "placement-and-career-support": "07efe05c00cce16cb7df8babd6d323e4d6206ad07305545f7a35c5a2a9e3cd1e",
+        "privacy-and-student-data": "337baf756b4269b1123bea44692a2f7ebd1df7d0ddf0cb4d1b617b1e160b5af3",
+        "student-support-attendance-and-assessments": "4e9ba211e86e8f7f34a7a9ce801b974602220618723ec475fc7a10cc3a294c01"
+      }
+    },
+    "prompt_sha256": {
+      "faq_system": "5c17fd75b8b6abc249c0a664a3cd6965a5426fddcda325e7bc8553ca943fae8c",
+      "triage_system": "d0e941861cad361717eadd93a36219e8e743a7bcdeae627cb9204717202512e7"
+    },
+    "bench_code_sha256": {
+      "app/bench/metrics.py": "d95020353fb3d547bb66c54d89df6a7930cb11a212baa0aee06d4e8d0b641815",
+      "app/bench/llm_bench.py": "a3213ce224e293f886a25a57bf3ba262c04652730456707d3701af3130e545df",
+      "app/bench/corpus.py": "fb036b27d4e7b8a68d0d8402d0fc15f33caeadb96845f68260f4c7fae4218fd0",
+      "app/bench/report.py": "eff9d0dc5aa43f776ab30df62695b9473326230982cf2f5f49c06c21e9ba438f",
+      "app/bench/stats.py": "63208459c66fc07e74bb357f01bf99792759a31ba9f1f32632cf8fc09b2d9ddf",
+      "app/bench/embed_bench.py": "c9520b378fa2337ceb41d6e3181bcc535068ef070673ff34ebdf0acc35f60ca1",
+      "scripts/bench.py": "fccbae74bf48cabc2ce33d749db06c871a58c79ece1a1e8602b88e67a19b1f1d"
+    },
+    "settings": {
+      "llm_provider": "ollama",
+      "llm_model": "qwen3:1.7b",
+      "embedding_provider": "ollama",
+      "embedding_model": "nomic-embed-text",
+      "llm_num_ctx": 4096,
+      "llm_max_output_tokens": 400,
+      "llm_thinking": false,
+      "llm_temperature": 0.0,
+      "llm_top_p": null,
+      "llm_top_k": null,
+      "llm_repeat_penalty": null,
+      "llm_seed": null,
+      "llm_keep_alive": "30m",
+      "llm_timeout_seconds": 60.0,
+      "rag_top_k": 4,
+      "rag_min_score": 0.2,
+      "triage_min_confidence": 0.6,
+      "embedding_query_prefix": "",
+      "embedding_document_prefix": "",
+      "default_tenant": "qspiders_sample"
+    },
+    "role_models": {},
+    "endpoint_host": "localhost:11434",
+    "ollama": {
+      "version": "0.40.14",
+      "models": {
+        "qwen3:4b-instruct-2507-q4_K_M": {
+          "digest": "0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0",
+          "size_bytes": 2497293803,
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen3",
+            "families": [
+              "qwen3"
+            ],
+            "parameter_size": "4.0B",
+            "quantization_level": "Q4_K_M",
+            "context_length": 262144,
+            "embedding_length": 2560,
+            "runner": "ggml"
+          }
+        },
+        "qwen3:1.7b": {
+          "digest": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+          "size_bytes": 1359293444,
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen3",
+            "families": [
+              "qwen3"
+            ],
+            "parameter_size": "2.0B",
+            "quantization_level": "Q4_K_M",
+            "context_length": 40960,
+            "embedding_length": 2048,
+            "runner": "ggml"
+          }
+        }
+      }
+    },
+    "packages": {
+      "langchain-core": "1.7.6",
+      "langchain-ollama": "1.1.0",
+      "langgraph": "1.2.17",
+      "pydantic": "2.14.1",
+      "httpx": "0.28.1"
+    }
+  },
+  "settings": {},
+  "suite": "faq",
+  "model": "qwen3:1.7b",
+  "generation": {
+    "class": "ChatOllama",
+    "model": "qwen3:1.7b",
+    "temperature": 0.0,
+    "num_ctx": 4096,
+    "num_predict": 400,
+    "keep_alive": "30m",
+    "reasoning": false,
+    "base_url": "http://localhost:11434"
+  },
+  "context_mode": "lexical_top_k",
+  "splits": {
+    "dev": {
+      "cases": 31,
+      "errors": 0,
+      "answerable": {
+        "n": 23,
+        "context_sufficient_n": 22,
+        "retrieval_gap_n": 1,
+        "correct_rate": 0.6957,
+        "correct_ci95": [
+          0.491,
+          0.844
+        ],
+        "correct_rate_context_sufficient": 0.7273,
+        "over_abstain_rate_raw": 0.087,
+        "over_abstain_rate_corrected": 0.0455,
+        "unknown_citation_rate": 0.0,
+        "truncated_rate": 0.0
+      },
+      "must_abstain": {
+        "n": 8,
+        "correct_rate": 1.0,
+        "answered_unanswerable": 0,
+        "truncated": 0
+      },
+      "labels": {
+        "ok": 24,
+        "truncated": 0,
+        "over_abstain": 1,
+        "mixed_output": 0,
+        "retrieval_gap": 1,
+        "bad_citation": 0,
+        "no_citation": 0,
+        "missing_fact": 5,
+        "answered_unanswerable": 0,
+        "other": 0
+      },
+      "failure_classes": {
+        "incorrect": 5,
+        "generation": 1,
+        "retrieval": 1
+      },
+      "speed": {
+        "ttft_s": {
+          "n": 31,
+          "mean": 2.001,
+          "p50": 1.911,
+          "p95": 2.319,
+          "min": 0.29,
+          "max": 8.798
+        },
+        "total_s": {
+          "n": 31,
+          "mean": 3.036,
+          "p50": 2.865,
+          "p95": 5.736,
+          "min": 0.432,
+          "max": 10.066
+        },
+        "total_s_excluding_truncated": {
+          "n": 31,
+          "mean": 3.036,
+          "p50": 2.865,
+          "p95": 5.736,
+          "min": 0.432,
+          "max": 10.066
+        },
+        "tokens_per_s": {
+          "n": 31,
+          "mean": 27.59,
+          "p50": 26.709,
+          "p95": 34.743,
+          "min": 21.607,
+          "max": 35.278
+        },
+        "out_tokens": {
+          "n": 31,
+          "mean": 26.6,
+          "p50": 24.0,
+          "p95": 55.0,
+          "min": 5,
+          "max": 113
+        },
+        "prompt_tokens": {
+          "n": 31,
+          "mean": 536.7,
+          "p50": 539.0,
+          "p95": 606.0,
+          "min": 288,
+          "max": 615
+        },
+        "truncated": 0
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "T001",
+      "split": "dev",
+      "question": "Which programmes do you offer under PySpiders?",
+      "must_abstain": false,
+      "expected_facts": [
+        "Python Full Stack",
+        "Data Science with Python"
+      ],
+      "expected_docs": [
+        "courses-and-batches"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "fees-and-payments#5",
+        "placement-and-career-support#3",
+        "student-support-attendance-and-assessments#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The programmes offered under PySpiders are Python Full Stack [courses-and-batches#1] and Data Science with Python [courses-and-batches#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 8.798462616992765,
+      "total_s": 10.066139903996373,
+      "out_tokens": 33,
+      "in_tokens": 546,
+      "tokens_per_s": 25.59790500539883,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 5.580607432,
+      "prompt_eval_s": 3.169453,
+      "eval_s": 1.289168,
+      "provider_total_s": 10.061849272,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "courses-and-batches#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T002",
+      "split": "dev",
+      "question": "How long is the Software Testing course?",
+      "must_abstain": false,
+      "expected_facts": [
+        "16 weeks"
+      ],
+      "expected_docs": [
+        "courses-and-batches"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#4",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The Software Testing course is 16 weeks long [courses-and-batches#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.024060482013738,
+      "total_s": 2.7376513030030765,
+      "out_tokens": 19,
+      "in_tokens": 597,
+      "tokens_per_s": 26.62306089534755,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000872279,
+      "prompt_eval_s": 1.990435,
+      "eval_s": 0.713667,
+      "provider_total_s": 2.736115805,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "courses-and-batches#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T003",
+      "split": "dev",
+      "question": "Is the Python Full Stack course online or offline?",
+      "must_abstain": false,
+      "expected_facts": [
+        "online or offline"
+      ],
+      "expected_docs": [
+        "courses-and-batches"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The Python Full Stack course is offered in both online and offline modes [courses-and-batches#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.541486171001452,
+      "total_s": 2.330683655993198,
+      "out_tokens": 22,
+      "in_tokens": 605,
+      "tokens_per_s": 27.887956332530923,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000597742,
+      "prompt_eval_s": 1.487286,
+      "eval_s": 0.788871,
+      "provider_total_s": 2.329330177,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "courses-and-batches#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [
+        "online or offline"
+      ],
+      "correct": false,
+      "label": "missing_fact",
+      "failure_class": "incorrect"
+    },
+    {
+      "id": "T004",
+      "split": "dev",
+      "question": "Do I need any coding experience to join Python Full Stack?",
+      "must_abstain": false,
+      "expected_facts": [
+        "no prior coding experience"
+      ],
+      "expected_docs": [
+        "eligibility-and-prerequisites"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Yes, you do not need any coding experience to join Python Full Stack [eligibility-and-prerequisites#2].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.0666012360015884,
+      "total_s": 2.970199753995985,
+      "out_tokens": 24,
+      "in_tokens": 607,
+      "tokens_per_s": 26.560248603926933,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001455825,
+      "prompt_eval_s": 2.03088,
+      "eval_s": 0.903606,
+      "provider_total_s": 2.968742985,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "eligibility-and-prerequisites#2"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [
+        "no prior coding experience"
+      ],
+      "correct": false,
+      "label": "missing_fact",
+      "failure_class": "incorrect"
+    },
+    {
+      "id": "T005",
+      "split": "dev",
+      "question": "Can I join while I am still in my final year of college?",
+      "must_abstain": false,
+      "expected_facts": [
+        "Final-year students can join"
+      ],
+      "expected_docs": [
+        "eligibility-and-prerequisites"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#2",
+        "eligibility-and-prerequisites#1",
+        "eligibility-and-prerequisites#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Yes, you can join while you are still in your final year of college, provided your class timings do not clash with your college schedule. This is stated in the first source [eligibility-and-prerequisites#4].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.4177559279924026,
+      "total_s": 3.0128318990027765,
+      "out_tokens": 45,
+      "in_tokens": 482,
+      "tokens_per_s": 28.2124232465352,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.00088255,
+      "prompt_eval_s": 1.384776,
+      "eval_s": 1.595042,
+      "provider_total_s": 3.01150244,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "eligibility-and-prerequisites#4"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [
+        "Final-year students can join"
+      ],
+      "correct": false,
+      "label": "missing_fact",
+      "failure_class": "incorrect"
+    },
+    {
+      "id": "T006",
+      "split": "dev",
+      "question": "Which documents do I need to bring at registration?",
+      "must_abstain": false,
+      "expected_facts": [
+        "photo ID",
+        "marks card"
+      ],
+      "expected_docs": [
+        "eligibility-and-prerequisites"
+      ],
+      "context_ids": [
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#3",
+        "fees-and-payments#2",
+        "privacy-and-student-data#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "At registration, you need to bring a government-issued photo ID [eligibility-and-prerequisites#3].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.688774812995689,
+      "total_s": 2.5475818059931044,
+      "out_tokens": 23,
+      "in_tokens": 532,
+      "tokens_per_s": 26.77217230570096,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000588102,
+      "prompt_eval_s": 1.681631,
+      "eval_s": 0.859101,
+      "provider_total_s": 2.546087431,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "eligibility-and-prerequisites#3"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [
+        "marks card"
+      ],
+      "correct": false,
+      "label": "missing_fact",
+      "failure_class": "incorrect"
+    },
+    {
+      "id": "T007",
+      "split": "dev",
+      "question": "What is the fee for the Data Science with Python course?",
+      "must_abstain": false,
+      "expected_facts": [
+        "55,000"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#3",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The fee for the Data Science with Python course is 55,000 INR [fees-and-payments#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.15792097299709,
+      "total_s": 3.280450165999355,
+      "out_tokens": 29,
+      "in_tokens": 598,
+      "tokens_per_s": 25.83325613049892,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001063919,
+      "prompt_eval_s": 2.116426,
+      "eval_s": 1.122584,
+      "provider_total_s": 3.278765548,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T008",
+      "split": "dev",
+      "question": "Can I pay the course fee in instalments?",
+      "must_abstain": false,
+      "expected_facts": [
+        "two instalments"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "about-the-institute#5",
+        "admissions-and-demo-classes#1",
+        "fees-and-payments#2",
+        "fees-and-payments#3"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, paid at registration, and the second instalment is 40% of the fee, paid before week 8 of the batch [fees-and-payments#2].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.1580134079995332,
+      "total_s": 4.450622050993843,
+      "out_tokens": 61,
+      "in_tokens": 593,
+      "tokens_per_s": 26.607798004066193,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000916711,
+      "prompt_eval_s": 2.124108,
+      "eval_s": 2.292561,
+      "provider_total_s": 4.449256488,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#2"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [
+        "two instalments"
+      ],
+      "correct": false,
+      "label": "missing_fact",
+      "failure_class": "incorrect"
+    },
+    {
+      "id": "T009",
+      "split": "dev",
+      "question": "How much is the first instalment?",
+      "must_abstain": false,
+      "expected_facts": [
+        "60%"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#1",
+        "admissions-and-demo-classes#5",
+        "fees-and-payments#2",
+        "fees-and-payments#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The first instalment is 60% of the fee [fees-and-payments#2].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.254688821005402,
+      "total_s": 3.0600806360016577,
+      "out_tokens": 22,
+      "in_tokens": 596,
+      "tokens_per_s": 27.314669964292275,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000669576,
+      "prompt_eval_s": 2.216991,
+      "eval_s": 0.805428,
+      "provider_total_s": 3.058768064,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#2"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T010",
+      "split": "dev",
+      "question": "What payment methods do you accept?",
+      "must_abstain": false,
+      "expected_facts": [
+        "UPI"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "fees-and-payments#3",
+        "fees-and-payments#4",
+        "fees-and-payments#5",
+        "privacy-and-student-data#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "You can pay by UPI, debit or credit card, or net banking. [fees-and-payments#3]",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.5640409839979839,
+      "total_s": 2.4967917909962125,
+      "out_tokens": 26,
+      "in_tokens": 501,
+      "tokens_per_s": 27.876656516704553,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000808775,
+      "prompt_eval_s": 1.521696,
+      "eval_s": 0.93268,
+      "provider_total_s": 2.495307211,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#3"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T011",
+      "split": "dev",
+      "question": "Can I get a refund if I decide to leave after the first class?",
+      "must_abstain": false,
+      "expected_facts": [
+        "7 days of the first class"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#1",
+        "admissions-and-demo-classes#3",
+        "admissions-and-demo-classes#5",
+        "fees-and-payments#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "No, a refund request made within 7 days of the first class is reviewed by the accounts team. Requests after that are generally not accepted. Submitting a request does not guarantee a refund. [fees-and-payments#4]",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.004162154000369,
+      "total_s": 3.8341579679981805,
+      "out_tokens": 49,
+      "in_tokens": 572,
+      "tokens_per_s": 26.77863414756776,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000585723,
+      "prompt_eval_s": 1.997746,
+      "eval_s": 1.829817,
+      "provider_total_s": 3.832589024,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#4"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T012",
+      "split": "dev",
+      "question": "How does the admission process work?",
+      "must_abstain": false,
+      "expected_facts": [
+        "demo class",
+        "registration form"
+      ],
+      "expected_docs": [
+        "admissions-and-demo-classes"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#0",
+        "admissions-and-demo-classes#1",
+        "admissions-and-demo-classes#3",
+        "fees-and-payments#5"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The admission process involves submitting an enquiry on the website or asking for a call back [admissions-and-demo-classes#1]. Then, speak to a counsellor about the programme that suits you [admissions-and-demo-classes#1]. Attend a free demo class if you want to try one [admissions-and-demo-classes#1]. Complete the registration form and pay the first instalment [admissions-and-demo-classes#1]. Receive an admission confirmation email with your batch id and timing [admissions-and-demo-classes#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.790468437000527,
+      "total_s": 7.020576117007295,
+      "out_tokens": 113,
+      "in_tokens": 530,
+      "tokens_per_s": 21.607457135011803,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001759239,
+      "prompt_eval_s": 1.740842,
+      "eval_s": 5.229676,
+      "provider_total_s": 7.018901452,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "admissions-and-demo-classes#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T013",
+      "split": "dev",
+      "question": "Is the demo class free?",
+      "must_abstain": false,
+      "expected_facts": [
+        "free"
+      ],
+      "expected_docs": [
+        "admissions-and-demo-classes"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#0",
+        "admissions-and-demo-classes#2",
+        "admissions-and-demo-classes#3",
+        "admissions-and-demo-classes#5"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Yes, the demo class is free [admissions-and-demo-classes#2].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.6898285140050575,
+      "total_s": 2.379388626999571,
+      "out_tokens": 18,
+      "in_tokens": 500,
+      "tokens_per_s": 26.102731650867266,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000755949,
+      "prompt_eval_s": 1.651529,
+      "eval_s": 0.689583,
+      "provider_total_s": 2.377578022,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "admissions-and-demo-classes#2"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T014",
+      "split": "dev",
+      "question": "Will the institute guarantee me a job after the course?",
+      "must_abstain": false,
+      "expected_facts": [
+        "not guaranteed"
+      ],
+      "expected_docs": [
+        "placement-and-career-support"
+      ],
+      "context_ids": [
+        "about-the-institute#3",
+        "about-the-institute#5",
+        "courses-and-batches#0",
+        "placement-and-career-support#2"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Placement, a job offer or any salary is not guaranteed [placement-and-career-support#2].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.9944044830044731,
+      "total_s": 2.865451564997784,
+      "out_tokens": 21,
+      "in_tokens": 539,
+      "tokens_per_s": 24.107671749941453,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000877126,
+      "prompt_eval_s": 1.986999,
+      "eval_s": 0.871092,
+      "provider_total_s": 2.864157901,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "placement-and-career-support#2"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T015",
+      "split": "dev",
+      "question": "What attendance do I need to be eligible for the certificate?",
+      "must_abstain": false,
+      "expected_facts": [
+        "75%"
+      ],
+      "expected_docs": [
+        "student-support-attendance-and-assessments"
+      ],
+      "context_ids": [
+        "placement-and-career-support#3",
+        "student-support-attendance-and-assessments#0",
+        "student-support-attendance-and-assessments#1",
+        "student-support-attendance-and-assessments#4"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "To be eligible for the course certificate, you need to attend at least 75% of classes in your batch [student-support-attendance-and-assessments#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.9111658289912157,
+      "total_s": 3.3695165979879675,
+      "out_tokens": 36,
+      "in_tokens": 525,
+      "tokens_per_s": 24.688784159676086,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000731209,
+      "prompt_eval_s": 1.878564,
+      "eval_s": 1.458152,
+      "provider_total_s": 3.367906818,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "student-support-attendance-and-assessments#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T016",
+      "split": "dev",
+      "question": "How long do I have to ask for a re-check of my marks?",
+      "must_abstain": false,
+      "expected_facts": [
+        "5 working days"
+      ],
+      "expected_docs": [
+        "student-support-attendance-and-assessments"
+      ],
+      "context_ids": [
+        "eligibility-and-prerequisites#3",
+        "fees-and-payments#5",
+        "placement-and-career-support#5",
+        "student-support-attendance-and-assessments#3"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "You have 5 working days to ask for a re-check of your marks [student-support-attendance-and-assessments#3].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.9319087400072021,
+      "total_s": 2.99955727699853,
+      "out_tokens": 28,
+      "in_tokens": 523,
+      "tokens_per_s": 26.227272453802318,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001612745,
+      "prompt_eval_s": 1.895187,
+      "eval_s": 1.067590999,
+      "provider_total_s": 2.998048313,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "student-support-attendance-and-assessments#3"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T017",
+      "split": "dev",
+      "question": "How many training centres does QSpiders have?",
+      "must_abstain": false,
+      "expected_facts": [
+        "90+ training institutes"
+      ],
+      "expected_docs": [
+        "about-the-institute"
+      ],
+      "context_ids": [
+        "about-the-institute#0",
+        "about-the-institute#1",
+        "about-the-institute#2",
+        "courses-and-batches#6"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.289606452002772,
+      "total_s": 2.4748295590106864,
+      "out_tokens": 5,
+      "in_tokens": 548,
+      "tokens_per_s": 26.98458101041065,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000971944,
+      "prompt_eval_s": 2.257529,
+      "eval_s": 0.185291,
+      "provider_total_s": 2.473346674,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "facts_missing": [
+        "90+ training institutes"
+      ],
+      "correct": false,
+      "label": "over_abstain",
+      "failure_class": "generation"
+    },
+    {
+      "id": "T018",
+      "split": "dev",
+      "question": "How quickly does the support team reply to a request?",
+      "must_abstain": false,
+      "expected_facts": [
+        "2 working days"
+      ],
+      "expected_docs": [
+        "student-support-attendance-and-assessments"
+      ],
+      "context_ids": [
+        "admissions-and-demo-classes#4",
+        "courses-and-batches#6",
+        "placement-and-career-support#5",
+        "student-support-attendance-and-assessments#5"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The support team replies to a request within 2 working days [student-support-attendance-and-assessments#5].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.0299954160000198,
+      "total_s": 2.980004751996603,
+      "out_tokens": 25,
+      "in_tokens": 539,
+      "tokens_per_s": 26.31631580000021,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.00078022,
+      "prompt_eval_s": 1.990207,
+      "eval_s": 0.949981,
+      "provider_total_s": 2.978488476,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "student-support-attendance-and-assessments#5"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T019",
+      "split": "dev",
+      "question": "Who is allowed to see my attendance records?",
+      "must_abstain": false,
+      "expected_facts": [
+        "only their own"
+      ],
+      "expected_docs": [
+        "privacy-and-student-data"
+      ],
+      "context_ids": [
+        "privacy-and-student-data#1",
+        "privacy-and-student-data#3",
+        "student-support-attendance-and-assessments#0",
+        "student-support-attendance-and-assessments#2"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "A signed-in student can see only their own attendance records [privacy-and-student-data#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.1838919909932883,
+      "total_s": 2.9856583539949497,
+      "out_tokens": 21,
+      "in_tokens": 544,
+      "tokens_per_s": 26.197310658937212,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000858518,
+      "prompt_eval_s": 2.151334,
+      "eval_s": 0.801609,
+      "provider_total_s": 2.984332317,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "privacy-and-student-data#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T020",
+      "split": "dev",
+      "question": "What career support do you provide to students?",
+      "must_abstain": false,
+      "expected_facts": [
+        "mock interviews",
+        "resume"
+      ],
+      "expected_docs": [
+        "placement-and-career-support"
+      ],
+      "context_ids": [
+        "placement-and-career-support#1",
+        "placement-and-career-support#2",
+        "placement-and-career-support#3",
+        "student-support-attendance-and-assessments#0"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Career support includes resume building sessions, aptitude and communication practice, and mock interviews [placement-and-career-support#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.7677141120075248,
+      "total_s": 2.7397532100003446,
+      "out_tokens": 26,
+      "in_tokens": 512,
+      "tokens_per_s": 26.746164497141248,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000962649,
+      "prompt_eval_s": 1.717607,
+      "eval_s": 0.972102,
+      "provider_total_s": 2.738331611,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "placement-and-career-support#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T021",
+      "split": "dev",
+      "question": "What is the fee for the Java Full Stack course?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "about-the-institute#5",
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "The question asks about the fee for the Java Full Stack course, but the provided sources do not mention the Java Full Stack course or its fee. Therefore, INSUFFICIENT_CONTEXT.",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.261494448001031,
+      "total_s": 3.90984196899808,
+      "out_tokens": 37,
+      "in_tokens": 576,
+      "tokens_per_s": 22.446648260415095,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.049976139,
+      "prompt_eval_s": 2.18277,
+      "eval_s": 1.648353,
+      "provider_total_s": 3.908467506,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T022",
+      "split": "dev",
+      "question": "Which companies visited your Bangalore centre for hiring last year?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "about-the-institute#2",
+        "eligibility-and-prerequisites#1",
+        "eligibility-and-prerequisites#4",
+        "placement-and-career-support#2"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.8803056390024722,
+      "total_s": 2.041437899999437,
+      "out_tokens": 5,
+      "in_tokens": 532,
+      "tokens_per_s": 31.009867339787522,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001054754,
+      "prompt_eval_s": 1.835891,
+      "eval_s": 0.161239,
+      "provider_total_s": 2.039850999,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T023",
+      "split": "dev",
+      "question": "What is the exact address of your Hyderabad centre?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "about-the-institute#2",
+        "courses-and-batches#5",
+        "courses-and-batches#6"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.121675589994993,
+      "total_s": 1.265174850996118,
+      "out_tokens": 5,
+      "in_tokens": 467,
+      "tokens_per_s": 34.83932105131135,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000892498,
+      "prompt_eval_s": 1.081101,
+      "eval_s": 0.143516,
+      "provider_total_s": 1.26379521,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T024",
+      "split": "dev",
+      "question": "Do you offer a Cloud DevOps course?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "courses-and-batches#0",
+        "fees-and-payments#5",
+        "student-support-attendance-and-assessments#4",
+        "student-support-attendance-and-assessments#6"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.6244335219962522,
+      "total_s": 1.7828999500052305,
+      "out_tokens": 5,
+      "in_tokens": 501,
+      "tokens_per_s": 31.539970604747396,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001001485,
+      "prompt_eval_s": 1.615655,
+      "eval_s": 0.158529,
+      "provider_total_s": 1.781268329,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T025",
+      "split": "dev",
+      "question": "Is there a scholarship for women candidates?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 0.2898535010026535,
+      "total_s": 0.43153344400343485,
+      "out_tokens": 5,
+      "in_tokens": 288,
+      "tokens_per_s": 35.27834615113244,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000978786,
+      "prompt_eval_s": 0.282462,
+      "eval_s": 0.14173,
+      "provider_total_s": 0.429709967,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T026",
+      "split": "dev",
+      "question": "Who is the trainer for batch PYF-101?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "admissions-and-demo-classes#3",
+        "courses-and-batches#0",
+        "courses-and-batches#3",
+        "student-support-attendance-and-assessments#6"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "The information provided does not mention who the trainer is for batch PYF-101. INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.8562540499988245,
+      "total_s": 2.7489660149876727,
+      "out_tokens": 24,
+      "in_tokens": 505,
+      "tokens_per_s": 26.885996652693418,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000886488,
+      "prompt_eval_s": 1.849373,
+      "eval_s": 0.892658,
+      "provider_total_s": 2.747407769,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T027",
+      "split": "dev",
+      "question": "What is the pass mark for the certification exam?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "eligibility-and-prerequisites#3",
+        "placement-and-career-support#4",
+        "privacy-and-student-data#3"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.0669276700064074,
+      "total_s": 1.2126941670139786,
+      "out_tokens": 5,
+      "in_tokens": 460,
+      "tokens_per_s": 34.298963485323476,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000721342,
+      "prompt_eval_s": 1.026537,
+      "eval_s": 0.145777,
+      "provider_total_s": 1.211230718,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T028",
+      "split": "dev",
+      "question": "How much GST is charged on the fee?",
+      "must_abstain": true,
+      "expected_facts": [],
+      "expected_docs": [],
+      "context_ids": [
+        "about-the-institute#5",
+        "fees-and-payments#0",
+        "fees-and-payments#3",
+        "fees-and-payments#5"
+      ],
+      "context_sufficient": null,
+      "facts_missing_from_context": [],
+      "text": "INSUFFICIENT_CONTEXT",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 1.629394000992761,
+      "total_s": 1.773689851994277,
+      "out_tokens": 5,
+      "in_tokens": 499,
+      "tokens_per_s": 34.646193076304776,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001121915,
+      "prompt_eval_s": 1.62112,
+      "eval_s": 0.144316,
+      "provider_total_s": 1.772066936,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T050",
+      "split": "dev",
+      "question": "Python Full Stack ki fees kitni hai?",
+      "must_abstain": false,
+      "expected_facts": [
+        "45,000"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "Python Full Stack ki fees 45,000 INR hai [fees-and-payments#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.281390599004226,
+      "total_s": 3.2335652860056143,
+      "out_tokens": 25,
+      "in_tokens": 604,
+      "tokens_per_s": 26.25529175405303,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.000990552,
+      "prompt_eval_s": 2.272832,
+      "eval_s": 0.952189,
+      "provider_total_s": 3.231851492,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T051",
+      "split": "dev",
+      "question": "I heard the Python Full Stack fee is 30,000. Can you confirm?",
+      "must_abstain": false,
+      "expected_facts": [
+        "45,000"
+      ],
+      "expected_docs": [
+        "fees-and-payments"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#2",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": true,
+      "facts_missing_from_context": [],
+      "text": "The fee for Python Full Stack is 45,000 INR, as stated in the fees and payments table [fees-and-payments#1].",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 0.4043041029945016,
+      "total_s": 1.7147832909977296,
+      "out_tokens": 35,
+      "in_tokens": 615,
+      "tokens_per_s": 26.70940170940171,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.00097559,
+      "prompt_eval_s": 0.396378,
+      "eval_s": 1.3104,
+      "provider_total_s": 1.713321215,
+      "abstained": false,
+      "cited": true,
+      "citations": [
+        "fees-and-payments#1"
+      ],
+      "unknown_citation": false,
+      "facts_missing": [],
+      "correct": true,
+      "label": "ok",
+      "failure_class": null
+    },
+    {
+      "id": "T053",
+      "split": "dev",
+      "question": "Will I definitely get a 10 lakh salary after the Data Science course?",
+      "must_abstain": false,
+      "expected_facts": [
+        "not guaranteed"
+      ],
+      "expected_docs": [
+        "placement-and-career-support"
+      ],
+      "context_ids": [
+        "courses-and-batches#1",
+        "courses-and-batches#3",
+        "eligibility-and-prerequisites#2",
+        "fees-and-payments#1"
+      ],
+      "context_sufficient": false,
+      "facts_missing_from_context": [
+        "not guaranteed"
+      ],
+      "text": "The information provided does not mention anything about employment outcomes or salary expectations after completing the Data Science course. Therefore, INSUFFICIENT_CONTEXT.",
+      "done_reason": "stop",
+      "truncated": false,
+      "ttft_s": 2.348634416004643,
+      "total_s": 3.4121466869983124,
+      "out_tokens": 28,
+      "in_tokens": 602,
+      "tokens_per_s": 26.329325320441995,
+      "tps_source": "provider",
+      "model_reported": "qwen3:1.7b",
+      "load_s": 0.001031745,
+      "prompt_eval_s": 2.301007,
+      "eval_s": 1.063453,
+      "provider_total_s": 3.410482077,
+      "abstained": true,
+      "cited": false,
+      "citations": [],
+      "unknown_citation": false,
+      "facts_missing": [
+        "not guaranteed"
+      ],
+      "correct": false,
+      "label": "retrieval_gap",
+      "failure_class": "retrieval"
+    }
+  ],
+  "cold_start": null,
+  "variant": "cmp"
+}

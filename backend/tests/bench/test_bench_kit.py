@@ -265,3 +265,17 @@ def test_sampling_options_reach_the_ollama_request_and_variants_do_not_overwrite
     p1 = report.write_result(a, {"suite": "faq", "model": "qwen3:4b"})
     p2 = report.write_result(a, {"suite": "faq", "model": "qwen3:4b", "variant": "samp"})
     assert p1 != p2 and p2.name == "faq-qwen3_4b--samp.json"
+
+
+def test_review_sheet_lists_only_judgement_failures_and_changes_nothing():
+    rows = [{"id": "T3", "split": "dev", "label": "missing_fact", "question": "Online or offline?", "expected_facts": ["online or offline"],
+             "context_ids": ["courses-and-batches#1"], "text": "Both online and offline [courses-and-batches#1]."},
+            {"id": "T9", "split": "dev", "label": "truncated", "question": "q", "expected_facts": [], "context_ids": [], "text": "cut"},
+            {"id": "T1", "split": "dev", "label": "ok", "question": "q", "expected_facts": [], "context_ids": [], "text": "fine"}]
+    res = [{"suite": "faq", "model": "m", "variant": "v", "rows": rows}]
+    before = json.dumps(res)
+    md = report.render_review(res)
+    assert json.dumps(res) == before
+    assert "T3" in md and "Both online and offline" in md and "Nothing here changes any score" in md
+    assert "T9" not in md and "T1 " not in md and "[ ] correct (paraphrase)" in md
+    assert "No failures" in report.render_review([{"suite": "faq", "model": "m", "rows": rows[2:]}])
