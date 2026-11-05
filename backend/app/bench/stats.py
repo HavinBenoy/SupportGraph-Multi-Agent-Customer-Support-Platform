@@ -1,7 +1,9 @@
 """Small statistics helpers (no numpy needed)."""
 
+import hashlib
 import math
 import platform
+from pathlib import Path
 
 
 def percentile(values: list[float], p: float) -> float | None:
@@ -48,3 +50,22 @@ def system_info() -> dict:
     except ImportError:
         info["note"] = "psutil not installed: RAM/cores omitted (pip install psutil)"
     return info
+
+
+def wilson(k: int, n: int, z: float = 1.96) -> list[float] | None:
+    """95% Wilson interval for k successes out of n. Shows how little a difference means at these sample sizes."""
+    if not n:
+        return None
+    p = k / n
+    d = 1 + z * z / n
+    c = p + z * z / (2 * n)
+    a = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return [round((c - a) / d, 3), round((c + a) / d, 3)]
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    return sha256_bytes(Path(path).read_bytes())

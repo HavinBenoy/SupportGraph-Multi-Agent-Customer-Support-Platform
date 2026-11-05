@@ -38,7 +38,10 @@ class _H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/tags":
-            return self._json({"models": [{"name": "qwen3:4b"}, {"name": "nomic-embed-text:latest"}]})
+            return self._json({"models": [{"name": "qwen3:4b", "digest": "abc123def4567890", "size": 2500000000, "details": {"family": "qwen3"}},
+                                          {"name": "nomic-embed-text:latest", "digest": "fedcba0987654321", "size": 274000000}]})
+        if self.path == "/api/version":
+            return self._json({"version": "0.0.mock"})
         self._json({}, 404)
 
     def do_POST(self):
@@ -53,7 +56,12 @@ class _H(BaseHTTPRequestHandler):
             prompt = " ".join(m.get("content", "") for m in body["messages"])
             ids = re.findall(r'<source id="([^"]+)"', prompt)
             question = (re.findall(r"<question>\n(.*?)\n</question>", prompt, re.S) or [""])[-1]
-            if "salary" in question.lower() or not ids:
+            done_reason = "stop"
+            if "ramble" in question.lower():  # never stops by itself: hits the token limit like a non-terminating model
+                limit = (body.get("options") or {}).get("num_predict", 50)
+                text = " ".join(["blah"] * limit)
+                done_reason = "length"
+            elif "salary" in question.lower() or not ids:
                 text = "INSUFFICIENT_CONTEXT"
             else:
                 text = f"Here is the answer [{ids[0]}]."
@@ -63,9 +71,9 @@ class _H(BaseHTTPRequestHandler):
             for word in text.split(" "):
                 self.wfile.write((json.dumps({"model": body["model"], "message": {"role": "assistant", "content": word + " "}, "done": False}) + "\n").encode())
             self.wfile.write((json.dumps({"model": body["model"], "message": {"role": "assistant", "content": ""}, "done": True,
-                                          "done_reason": "stop", "total_duration": 2_000_000_000, "load_duration": 500_000_000,
+                                          "done_reason": done_reason, "total_duration": 2_000_000_000, "load_duration": 500_000_000,
                                           "prompt_eval_count": 120, "prompt_eval_duration": 400_000_000,
-                                          "eval_count": 20, "eval_duration": 1_000_000_000}) + "\n").encode())
+                                          "eval_count": len(text.split()) if done_reason == "length" else 20, "eval_duration": 1_000_000_000}) + "\n").encode())
             return
         self._json({}, 404)
 

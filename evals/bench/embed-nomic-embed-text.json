@@ -1,5 +1,6 @@
 {
-  "generated_at": "2026-11-05T14:17:25+05:30",
+  "schema_version": 2,
+  "generated_at": "2026-11-05T21:28:29+05:30",
   "system": {
     "os": "Linux 7.0.0-42-generic",
     "python": "3.12.3",
@@ -8,358 +9,488 @@
     "cpu_cores_physical": 4,
     "cpu_threads": 8,
     "ram_gb": 15.4,
-    "ram_available_gb": 5.5,
-    "load_avg_1m": 3.73
+    "ram_available_gb": 3.6,
+    "load_avg_1m": 4.29
+  },
+  "manifest": {
+    "run_id": "bced09d9",
+    "schema_version": 2,
+    "command": [
+      "embed"
+    ],
+    "splits": [
+      "dev",
+      "heldout"
+    ],
+    "models": [
+      "nomic-embed-text"
+    ],
+    "limit_per_split": null,
+    "context_mode": "lexical_top_k",
+    "dataset_sha256": {
+      "dev": "381e901e7c2ecd5ce624efb1a92c5b81711fb53f8bfd64299c1e1469b05ce04b",
+      "heldout": "f39d61c4de037ed52d4bed2a827bdc660b25a07f701d6e17638408d4aa05fdb6"
+    },
+    "tenant_docs_sha256": {
+      "combined": "ce8b29bee2408041f08db62a2e64ff461aacca40de4b86b8b9d655c013acb0ce",
+      "files": {
+        "about-the-institute": "c412d3d9878a0165353129a8843a9a987413c8e212e98fad17099b509beed7a7",
+        "admissions-and-demo-classes": "89d7a3c9700c9267febf66e195e819c7c5f6f27bb2634eb2b8d6c40bf7d8f836",
+        "courses-and-batches": "a04a8ad57b3c4068971436e21c31ed96dbe10226e9bdbedc8886bb9139695ddc",
+        "eligibility-and-prerequisites": "1e98b6532909dc6777e96bce3bc90263fe3721c2e8e367045ef8c6ef85f074e5",
+        "fees-and-payments": "3d912339b919704a1df6880f0c9a6566d9ae2b95d2dbb33e484ba6ee756518a9",
+        "placement-and-career-support": "07efe05c00cce16cb7df8babd6d323e4d6206ad07305545f7a35c5a2a9e3cd1e",
+        "privacy-and-student-data": "337baf756b4269b1123bea44692a2f7ebd1df7d0ddf0cb4d1b617b1e160b5af3",
+        "student-support-attendance-and-assessments": "4e9ba211e86e8f7f34a7a9ce801b974602220618723ec475fc7a10cc3a294c01"
+      }
+    },
+    "prompt_sha256": {
+      "faq_system": "5c17fd75b8b6abc249c0a664a3cd6965a5426fddcda325e7bc8553ca943fae8c",
+      "triage_system": "d0e941861cad361717eadd93a36219e8e743a7bcdeae627cb9204717202512e7"
+    },
+    "bench_code_sha256": {
+      "app/bench/metrics.py": "d95020353fb3d547bb66c54d89df6a7930cb11a212baa0aee06d4e8d0b641815",
+      "app/bench/llm_bench.py": "a3213ce224e293f886a25a57bf3ba262c04652730456707d3701af3130e545df",
+      "app/bench/corpus.py": "fb036b27d4e7b8a68d0d8402d0fc15f33caeadb96845f68260f4c7fae4218fd0",
+      "app/bench/report.py": "85fb71ad558dac67fd253b8bd17c91f9915a44cb5f50063a1eac4858e591e06e",
+      "app/bench/stats.py": "63208459c66fc07e74bb357f01bf99792759a31ba9f1f32632cf8fc09b2d9ddf",
+      "app/bench/embed_bench.py": "c9520b378fa2337ceb41d6e3181bcc535068ef070673ff34ebdf0acc35f60ca1",
+      "scripts/bench.py": "a49e6a4cae06cb8ea49162fb82902b51a82ab99563bd2b53290e91372be33bf0"
+    },
+    "settings": {
+      "llm_provider": "ollama",
+      "llm_model": "qwen3:4b",
+      "embedding_provider": "ollama",
+      "embedding_model": "nomic-embed-text",
+      "llm_num_ctx": 4096,
+      "llm_max_output_tokens": 400,
+      "llm_thinking": false,
+      "llm_keep_alive": "30m",
+      "llm_timeout_seconds": 60.0,
+      "rag_top_k": 4,
+      "rag_min_score": 0.2,
+      "triage_min_confidence": 0.6,
+      "embedding_query_prefix": "",
+      "embedding_document_prefix": "",
+      "default_tenant": "qspiders_sample"
+    },
+    "role_models": {},
+    "endpoint_host": "localhost:11434",
+    "ollama": {
+      "version": "0.40.14",
+      "models": {
+        "nomic-embed-text:latest": {
+          "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+          "size_bytes": 274302450,
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "nomic-bert",
+            "families": [
+              "nomic-bert"
+            ],
+            "parameter_size": "137M",
+            "quantization_level": "F16",
+            "context_length": 2048,
+            "embedding_length": 768,
+            "runner": "ggml"
+          }
+        }
+      }
+    },
+    "packages": {
+      "langchain-core": "1.7.6",
+      "langchain-ollama": "1.1.0",
+      "langgraph": "1.2.17",
+      "pydantic": "2.14.1",
+      "httpx": "0.28.1"
+    }
   },
   "settings": {},
   "suite": "embed",
   "model": "nomic-embed-text",
-  "chunks": 48,
-  "dim": 768,
-  "index_total_s": 4.14,
-  "per_chunk_s": {
-    "n": 6,
-    "mean": 0.086,
-    "p50": 0.049,
-    "p95": 0.221,
-    "min": 0.046,
-    "max": 0.278
-  },
-  "query_s": {
-    "n": 68,
-    "mean": 0.02,
-    "p50": 0.02,
-    "p95": 0.025,
-    "min": 0.016,
-    "max": 0.035
-  },
-  "hit_at_1": 0.9057,
-  "hit_at_4": 1.0,
-  "answerable_n": 53,
-  "score_gap": {
-    "separable": false,
-    "answerable_p10": 0.64,
-    "abstain_p90": 0.684,
-    "note": "score distributions overlap: a similarity threshold alone cannot separate them; keep the model-side abstention"
-  },
-  "rows": [
-    {
-      "id": "T001",
-      "top_score": 0.725,
-      "hit_at_1": true,
-      "hit_at_k": true
+  "splits": {
+    "dev": {
+      "chunks": 48,
+      "dim": 768,
+      "index_total_s": 3.17,
+      "per_chunk_s": {
+        "n": 6,
+        "mean": 0.066,
+        "p50": 0.055,
+        "p95": 0.109,
+        "min": 0.05,
+        "max": 0.125
+      },
+      "query_s": {
+        "n": 31,
+        "mean": 0.02,
+        "p50": 0.02,
+        "p95": 0.024,
+        "min": 0.015,
+        "max": 0.038
+      },
+      "hit_at_1": 0.9565,
+      "hit_at_4": 1.0,
+      "answerable_n": 23,
+      "score_gap": {
+        "separable": false,
+        "answerable_p10": 0.669,
+        "abstain_p90": 0.707,
+        "note": "score distributions overlap: a similarity threshold alone cannot separate them; keep the model-side abstention"
+      },
+      "rows": [
+        {
+          "id": "T001",
+          "top_score": 0.725,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T002",
+          "top_score": 0.7348,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T003",
+          "top_score": 0.7381,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T004",
+          "top_score": 0.7932,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T005",
+          "top_score": 0.7395,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T006",
+          "top_score": 0.7737,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T007",
+          "top_score": 0.7708,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T008",
+          "top_score": 0.7176,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T009",
+          "top_score": 0.6689,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T010",
+          "top_score": 0.7531,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T011",
+          "top_score": 0.7096,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T012",
+          "top_score": 0.7093,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T013",
+          "top_score": 0.8558,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T014",
+          "top_score": 0.6818,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T015",
+          "top_score": 0.7465,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T016",
+          "top_score": 0.6668,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T017",
+          "top_score": 0.7653,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T018",
+          "top_score": 0.6981,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T019",
+          "top_score": 0.7592,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T020",
+          "top_score": 0.7524,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T050",
+          "top_score": 0.7309,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T051",
+          "top_score": 0.8143,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T053",
+          "top_score": 0.5964,
+          "hit_at_1": false,
+          "hit_at_k": true
+        }
+      ]
     },
-    {
-      "id": "T002",
-      "top_score": 0.7348,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T003",
-      "top_score": 0.7381,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T004",
-      "top_score": 0.7932,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T005",
-      "top_score": 0.7395,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T006",
-      "top_score": 0.7737,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T007",
-      "top_score": 0.7708,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T008",
-      "top_score": 0.7176,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T009",
-      "top_score": 0.6689,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T010",
-      "top_score": 0.7531,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T011",
-      "top_score": 0.7096,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T012",
-      "top_score": 0.7093,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T013",
-      "top_score": 0.8558,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T014",
-      "top_score": 0.6818,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T015",
-      "top_score": 0.7465,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T016",
-      "top_score": 0.6668,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T017",
-      "top_score": 0.7653,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T018",
-      "top_score": 0.6981,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T019",
-      "top_score": 0.7592,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T020",
-      "top_score": 0.7524,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T050",
-      "top_score": 0.7309,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T051",
-      "top_score": 0.8143,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T053",
-      "top_score": 0.5964,
-      "hit_at_1": false,
-      "hit_at_k": true
-    },
-    {
-      "id": "T101",
-      "top_score": 0.6474,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T102",
-      "top_score": 0.7341,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T103",
-      "top_score": 0.6841,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T104",
-      "top_score": 0.5494,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T105",
-      "top_score": 0.6528,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T106",
-      "top_score": 0.6934,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T107",
-      "top_score": 0.6723,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T108",
-      "top_score": 0.6614,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T109",
-      "top_score": 0.7142,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T110",
-      "top_score": 0.6918,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T111",
-      "top_score": 0.7669,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T112",
-      "top_score": 0.6537,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T113",
-      "top_score": 0.7633,
-      "hit_at_1": false,
-      "hit_at_k": true
-    },
-    {
-      "id": "T114",
-      "top_score": 0.6646,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T115",
-      "top_score": 0.714,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T116",
-      "top_score": 0.6897,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T117",
-      "top_score": 0.6709,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T118",
-      "top_score": 0.6784,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T119",
-      "top_score": 0.5771,
-      "hit_at_1": false,
-      "hit_at_k": true
-    },
-    {
-      "id": "T120",
-      "top_score": 0.6401,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T121",
-      "top_score": 0.7048,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T122",
-      "top_score": 0.7685,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T123",
-      "top_score": 0.6635,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T124",
-      "top_score": 0.716,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T125",
-      "top_score": 0.544,
-      "hit_at_1": false,
-      "hit_at_k": true
-    },
-    {
-      "id": "T126",
-      "top_score": 0.6205,
-      "hit_at_1": false,
-      "hit_at_k": true
-    },
-    {
-      "id": "T127",
-      "top_score": 0.7635,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T158",
-      "top_score": 0.7309,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T160",
-      "top_score": 0.6727,
-      "hit_at_1": true,
-      "hit_at_k": true
-    },
-    {
-      "id": "T161",
-      "top_score": 0.7203,
-      "hit_at_1": true,
-      "hit_at_k": true
+    "heldout": {
+      "chunks": 48,
+      "dim": 768,
+      "index_total_s": 2.62,
+      "per_chunk_s": {
+        "n": 6,
+        "mean": 0.055,
+        "p50": 0.054,
+        "p95": 0.06,
+        "min": 0.049,
+        "max": 0.061
+      },
+      "query_s": {
+        "n": 37,
+        "mean": 0.022,
+        "p50": 0.021,
+        "p95": 0.03,
+        "min": 0.015,
+        "max": 0.036
+      },
+      "hit_at_1": 0.8667,
+      "hit_at_4": 1.0,
+      "answerable_n": 30,
+      "score_gap": {
+        "separable": false,
+        "answerable_p10": 0.62,
+        "abstain_p90": 0.684,
+        "note": "score distributions overlap: a similarity threshold alone cannot separate them; keep the model-side abstention"
+      },
+      "rows": [
+        {
+          "id": "T101",
+          "top_score": 0.6474,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T102",
+          "top_score": 0.7341,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T103",
+          "top_score": 0.6841,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T104",
+          "top_score": 0.5494,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T105",
+          "top_score": 0.6528,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T106",
+          "top_score": 0.6934,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T107",
+          "top_score": 0.6723,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T108",
+          "top_score": 0.6614,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T109",
+          "top_score": 0.7142,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T110",
+          "top_score": 0.6918,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T111",
+          "top_score": 0.7669,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T112",
+          "top_score": 0.6537,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T113",
+          "top_score": 0.7633,
+          "hit_at_1": false,
+          "hit_at_k": true
+        },
+        {
+          "id": "T114",
+          "top_score": 0.6646,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T115",
+          "top_score": 0.714,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T116",
+          "top_score": 0.6897,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T117",
+          "top_score": 0.6709,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T118",
+          "top_score": 0.6784,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T119",
+          "top_score": 0.5771,
+          "hit_at_1": false,
+          "hit_at_k": true
+        },
+        {
+          "id": "T120",
+          "top_score": 0.6401,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T121",
+          "top_score": 0.7048,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T122",
+          "top_score": 0.7685,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T123",
+          "top_score": 0.6635,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T124",
+          "top_score": 0.716,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T125",
+          "top_score": 0.544,
+          "hit_at_1": false,
+          "hit_at_k": true
+        },
+        {
+          "id": "T126",
+          "top_score": 0.6205,
+          "hit_at_1": false,
+          "hit_at_k": true
+        },
+        {
+          "id": "T127",
+          "top_score": 0.7635,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T158",
+          "top_score": 0.7309,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T160",
+          "top_score": 0.6727,
+          "hit_at_1": true,
+          "hit_at_k": true
+        },
+        {
+          "id": "T161",
+          "top_score": 0.7203,
+          "hit_at_1": true,
+          "hit_at_k": true
+        }
+      ]
     }
-  ]
+  }
 }

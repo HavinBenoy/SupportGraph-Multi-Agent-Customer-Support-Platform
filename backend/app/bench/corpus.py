@@ -8,6 +8,7 @@ from app.evals.run import DATASETS_DIR
 from app.llm.lexical import tokens
 from app.rag.chunking import chunk_markdown
 from app.rag.documents import load_public_documents
+from app.rag.evaluate import _norm
 from app.rag.retrieval import RetrievedChunk
 
 DEV = "tickets_qspiders_v1.jsonl"
@@ -57,3 +58,25 @@ def lexical_top_k(question: str, chunks: list[BenchChunk], k: int = 4) -> list[B
     scored = sorted(((len(q & set(tokens(c.embedding_input))) / (1 + 0.02 * len(c.text.split())), i)
                      for i, c in enumerate(chunks)), reverse=True)
     return [chunks[i] for s, i in scored[:k] if s > 0]
+
+
+SPLIT_FILES = {"dev": DEV, "heldout": HELDOUT}
+
+
+def load_splits(tenant_id: str, names: list[str] | None = None) -> dict[str, list[dict]]:
+    """The labelled tickets, kept apart: {"dev": [...], "heldout": [...]}. They are never merged in any report."""
+    return {n: load_tickets(SPLIT_FILES[n], tenant_id) for n in (names or list(SPLIT_FILES))}
+
+
+def context_check(case: dict, ctx: list[BenchChunk]) -> dict:
+    """Is what the case needs actually in the context given to the model? Uses the same normaliser as the fact check.
+    Only meaningful for answerable cases: a must-abstain case has nothing it needs."""
+    if case["must_abstain"]:
+        return {"sufficient": None, "facts_missing_from_context": []}
+    text = _norm(" ".join(c.embedding_input for c in ctx))
+    if case["expected_facts"]:
+        missing = [f for f in case["expected_facts"] if _norm(f) not in text]
+    else:  # no phrase to look for: fall back to "was a required document retrieved at all"
+        have = {c.doc_id for c in ctx}
+        missing = [d for d in case["expected_docs"] if d not in have]
+    return {"sufficient": not missing, "facts_missing_from_context": missing}
