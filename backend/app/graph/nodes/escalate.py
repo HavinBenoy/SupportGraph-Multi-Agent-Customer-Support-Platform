@@ -45,5 +45,8 @@ def escalate(state: dict, config: RunnableConfig, *, reason: str) -> dict:
     except (SQLAlchemyError, write_repo.WriteError) as e:
         log.error("Escalation could not be recorded (%s)", type(e).__name__)
         return {**base, "escalation_id": None, "reply": replies.ESCALATE_UNRECORDED}
-    template = replies.ESCALATE_SIGNED_IN if student else replies.ESCALATE_ANONYMOUS
+    if reason == "human_request":
+        template = replies.HUMAN_SIGNED_IN if student else replies.HUMAN_ANONYMOUS
+    else:
+        template = replies.ESCALATE_SIGNED_IN if student else replies.ESCALATE_ANONYMOUS
     return {**base, "escalation_id": ref, "reply": template.format(team=team.replace("-", " "), ref=ref)}

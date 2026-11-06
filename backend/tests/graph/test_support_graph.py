@@ -115,7 +115,7 @@ def test_a_triager_that_crashes_is_not_swallowed_silently(ingested):
             raise RuntimeError("down")
 
     with pytest.raises(RuntimeError):
-        ask(build_support_graph(triager=Crash(), settings=settings()), "hi")
+        ask(build_support_graph(triager=Crash(), settings=settings()), "What is the fee for the Python full stack course?")
 
 
 def test_missing_tenant_fails_closed(graph):

@@ -145,12 +145,18 @@ async def voice_ws(ws: WebSocket) -> None:
                              today=getattr(ws.app.state, "today", None))
         record_event(tenant_id=tenant_id, ticket_id=ticket_id, signed_in=student_id != ANONYMOUS, out=out)
         return {"reply": resp.reply, "status": resp.status, "citations": [c.model_dump() for c in resp.citations],
-                "escalation_id": resp.escalation_id, "ticket_id": ticket_id}
+                "escalation_id": resp.escalation_id, "ticket_id": ticket_id, "end_call": bool(out.get("end_call"))}
 
     async def send_bytes(b: bytes) -> None:
         await ws.send_bytes(b)
 
-    session = VoiceSession(s=s, vad=vad, stt=stt, tts=tts, run_turn=turn, send_json=ws.send_json, send_bytes=send_bytes,
+    async def hang_up() -> None:  # the caller said goodbye: the closing was spoken, now end the call gracefully
+        try:
+            await ws.close(code=1000)
+        except Exception:  # noqa: BLE001 - already closed
+            pass
+
+    session = VoiceSession(s=s, vad=vad, stt=stt, tts=tts, run_turn=turn, send_json=ws.send_json, send_bytes=send_bytes, on_end=hang_up,
                            stt_prompt=f"{tenant_cfg.name}. PySpiders, QSpiders, batch, attendance, make-up class, fee, instalment.")
     await session.start()
     await ws.send_json({"type": "ready", "ticket_id": ticket_id, "signed_in": student_id != ANONYMOUS, "tenant_name": tenant_cfg.name,

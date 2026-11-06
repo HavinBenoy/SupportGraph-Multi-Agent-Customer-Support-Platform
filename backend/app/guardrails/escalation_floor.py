@@ -23,12 +23,25 @@ _RULES: list[tuple[str, str, re.Pattern]] = [
     ("payment_dispute", "high", re.compile(
         r"\b(double|twice|two times|2 times|duplicate|again)\b.{0,30}\b(charged|paid|payment|deducted|debited)\b"
         r"|\b(charged|paid|deducted|debited)\b.{0,30}\b(twice|double|two times|2 times)\b|\bwrong(ly)? (charged|deducted|debited)\b", re.I)),
-    # An explicit request for a person. Added in M1b: the real 1.7B triage answered "I want to talk to a person" as `other` at 0.5.
-    # Not urgent (priority stays as triage set it); the team comes from the tenant's escalation_teams for human_request.
+    # An explicit request for a person. Added in M1b (the real 1.7B triage answered "I want to talk to a person" as `other` at 0.5) and
+    # widened in M2.1 for spoken, imperfectly transcribed requests ("please forward this call towards your supporting"). Not urgent
+    # (priority stays as triage set it); the team comes from the tenant's escalation_teams for human_request.
     ("human_request", "low", re.compile(
-        r"\b(talk|speak|chat|connect|transfer)(ing)?\s+(me\s+)?(to|with)\s+(a|an|the|your)?\s*(real\s+|live\s+|actual\s+)?"
-        r"(person|human|agent|representative|executive|staff member|someone(?!\s+(who|else)))\b"
-        r"|\b(real|live|actual)\s+(person|human)\b|\bhuman\s+(agent|being|support)\b|\bnot\s+(a\s+)?(bot|robot|machine)\b", re.I)),
+        # talk / speak / chat / connect / transfer ... to a person, an agent, the support team, a counsellor
+        r"\b(talk|speak|chat|connect|transfer)(ing)?\s+(me\s+)?(to|with)\s+(a|an|the|your|our)?\s*(real\s+|live\s+|actual\s+|human\s+|customer\s+)?"
+        r"(person|human|agent|representative|executive|staff member|supporting|support|customer (care|support|service)|counsel+or|manager|supervisor|someone(?!\s+(who|else)))\b"
+        # forward / transfer / redirect / put me through ... to / towards the support, a person, an agent
+        r"|\b(forward|transfer|redirect|reroute|route|divert|patch|put|pass|hand|escalate|connect)\w*\b.{0,25}?\b(to|towards?|through to|over to|with)\s+"
+        r"(?:(?:your|the|a|an|our)\s+)?(?:(?:real|live|actual|human|customer|support|supporting)\s+)*"
+        r"(support|supporting|person|human|agent|representative|executive|staff|someone(?!\s+(who|else))|team|helpline|customer care|care|desk|counsel+or|manager|supervisor)\b"
+        # "I want / need / would like to contact / call / reach the support", "please contact support", "can you call someone"
+        r"|\b(i\s+(want|need|would like|wanna|have)\s+to|i'?d like to|please|can you|could you|will you|let me)\s+(contact|call|reach|ring|phone|get)\s+"
+        r"(?:(?:me|us|to|a|an|the|your|our)\s+)*(?:(?:real|live|actual|human|customer)\s+)*(support|supporting|person|human|agent|representative|executive|staff|someone(?!\s+(who|else))|helpline|customer care|counsel+or|manager|supervisor)\b"
+        # "get me a human", "give me an agent", "I need a real person"
+        r"|\b(get|give|find|bring)\s+me\s+(a|an|the|your)?\s*(real\s+|live\s+|human\s+)?(human|person|agent|representative|supervisor|manager)\b|\bi\s+(need|want)\s+(a|an)\s+(real\s+|live\s+)?(human|person|agent|representative)\b"
+        r"|\b(real|live|actual)\s+(person|human)\b|\bhuman\s+(agent|being|support)\b|\bnot\s+(a\s+)?(bot|robot|machine)\b"
+        r"|\b(don'?t|do not)\s+want\s+(to\s+)?(talk|speak|chat)(ing)?\s+(to|with)\s+(a\s+|an\s+)?(bot|robot|machine|ai|computer)\b"
+        r"|^\W*(please\s+)?(a\s+)?(human|agent|representative|operator|customer care|customer support|real person)(\s+please)?\W*$", re.I)),
 ]
 _ORDER = {"low": 0, "medium": 1, "high": 2, "urgent": 3}
 

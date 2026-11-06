@@ -31,9 +31,9 @@ def test_script_runs_end_to_end_against_the_mock(tmp_path):
         graph, rec = e2e.build_recording_graph(s)
         rows = e2e.run_cases(graph, ask_support, rec)
         by = {r["id"]: r for r in rows}
-        assert len(rows) == 12 and {r['id'] for r in rows} >= {'write-makeup'} and 'write' not in {r['id'] for r in rows} and all(r["seconds"] >= 0 for r in rows)
+        assert len(rows) == 17 and {r['id'] for r in rows} >= {'write-makeup'} and 'write' not in {r['id'] for r in rows} and all(r["seconds"] >= 0 for r in rows)
         assert not [r for r in rows if r["hard_why"].startswith("crashed")]
-        for cid in ("legal", "dispute", "human", "faq-unanswerable", "own-records-anon", "injection"):
+        for cid in ("legal", "dispute", "human", "faq-unanswerable", "own-records-anon", "injection", "greeting", "thanks", "goodbye", "just-testing", "forward-call"):
             assert by[cid]["hard_ok"], (cid, by[cid]["hard_why"], by[cid]["reply"])
         assert by["faq-fee"]["stages"]  # per-stage timing is collected
         retr = e2e.retrieval(s)

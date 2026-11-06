@@ -275,3 +275,107 @@ def test_status_endpoint_explains_missing_real_models(api):  # noqa: F811
     api.app.state.settings = api.app.state.settings.model_copy(update={"voice_provider": "real", "voice_tts_voice": ""})
     j = api.get("/api/voice/status").json()
     assert j["enabled"] and not j["ready"] and any("SG_VOICE_TTS_VOICE" in p for p in j["problems"])
+
+
+# ---- M2.1: natural conversation and call control, over the real graph --------------------------------------------------------------
+def test_a_greeting_by_voice_is_answered_warmly_and_spoken(api):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    _, tts = setup_parts(api, ["Hi."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, audio = say(ws)
+    r = reply_of(msgs)
+    assert r["reply"] in CONVERSE["greeting"] and r["status"] == "answered" and not r["citations"] and audio > 0
+    assert " ".join(tts.spoken) == r["reply"] and not r["end_call"]   # spoken in sentences
+
+
+def test_goodbye_by_voice_speaks_the_closing_then_ends_the_call(api):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    _, tts = setup_parts(api, ["Okay, thank you. That's it. You can stop the call."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, audio = say(ws)                       # up to the end of the bot's speech
+        r = reply_of(msgs)
+        assert r["reply"] in CONVERSE["goodbye"] and r["end_call"] is True and not r["citations"] and audio > 0
+        assert json.loads(ws.receive_text()) == {"type": "call_end", "reason": "goodbye"}
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()                       # the server hung up
+    assert tts.spoken and "knowledge base" not in tts.spoken[0].lower()
+
+
+def test_forward_my_call_to_support_escalates_instead_of_answering_from_the_faq(api):  # noqa: F811
+    stt, tts = setup_parts(api, ["Please forward this call towards your supporting."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, audio = say(ws)
+    r = reply_of(msgs)
+    assert r["status"] == "escalated" and r["escalation_id"] and not r["citations"] and audio > 0
+    assert "missed" not in r["reply"].lower()
+    assert "E S C dash" in " ".join(tts.spoken)                       # the reference is spelled out for the ear
+    with session_scope() as db:
+        (esc,) = db.scalars(select(Escalation)).all()
+    assert esc.reason == "human_request" and esc.id == r["escalation_id"]
+
+
+def test_interrupting_with_im_just_testing_is_acknowledged_and_the_call_continues(api):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    setup_parts(api, ["I am just testing.", "Can I pay the course fee in instalments?"])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, _ = say(ws)
+        r = reply_of(msgs)
+        assert r["reply"] in CONVERSE["interruption"] and not r["end_call"] and r["status"] == "answered"
+        msgs, _ = say(ws)                           # the same call carries on with a real question
+        assert reply_of(msgs)["citations"]
+
+
+def test_voice_and_text_give_the_same_replies_for_the_same_words(api):  # noqa: F811
+    sentences = ["Hi.", "Thank you.", "I am just testing.", "I want to talk to a person.", "Can I pay the course fee in instalments?"]
+    for text in sentences:
+        setup_parts(api, [text])
+        with api.websocket_connect("/api/voice/ws") as ws:
+            start(ws)
+            voice = reply_of(say(ws)[0])
+        typed = api.post("/api/chat", json={"text": text, "tenant": T}).json()
+        assert voice["status"] == typed["status"], text
+        if typed["status"] == "escalated":
+            assert voice["reply"].replace(voice["escalation_id"], "REF") == typed["reply"].replace(typed["escalation_id"], "REF")
+        else:
+            assert voice["reply"] == typed["reply"], text
+            assert [c["id"] for c in voice["citations"]] == [c["id"] for c in typed["citations"]]
+
+
+def test_text_chat_closes_politely_on_goodbye_and_nothing_ends(api):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    r = api.post("/api/chat", json={"text": "okay thank you, that's it", "tenant": T})
+    assert r.status_code == 200 and r.json()["reply"] in CONVERSE["goodbye"]
+    again = api.post("/api/chat", json={"text": "Can I pay the course fee in instalments?", "ticket_id": r.json()["ticket_id"], "tenant": T}).json()
+    assert again["citations"]                       # the chat simply continues
+
+
+def test_goodbye_by_voice_while_staff_approval_is_pending_keeps_the_request(api):  # noqa: F811
+    from app.graph.nodes.replies import GOODBYE_WHILE_PENDING
+
+    setup_parts(api, ["Please arrange a make-up class for the session I missed in PYD-301.", "Okay thank you, that's it, you can stop the call."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws, token=token_of(api, "meera"))
+        assert reply_of(say(ws)[0])["status"] == "awaiting_staff"
+        msgs, _ = say(ws)
+        assert reply_of(msgs)["reply"] == GOODBYE_WHILE_PENDING and reply_of(msgs)["end_call"]
+        assert json.loads(ws.receive_text())["type"] == "call_end"
+    with session_scope() as db:
+        (req,) = db.scalars(select(MakeupRequest)).all()
+    assert req.status == "pending"
+    assert len(api.get("/api/staff/approvals", headers=auth(api, "staff1")).json()) == 1
+
+
+def test_friendly_words_by_voice_do_not_unlock_records_for_a_visitor(api):  # noqa: F811
+    setup_parts(api, ["Hi, thanks. What is my attendance in PYF-101?"])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        r = reply_of(say(ws)[0])
+    assert r["status"] == "needs_detail" and "sign in" in r["reply"].lower() and "%" not in r["reply"]

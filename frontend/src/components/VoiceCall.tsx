@@ -39,7 +39,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   const [muted, setMuted] = useState(false);
   const [text, setText] = useState("");
   const [showLogin, setShowLogin] = useState(false);
-  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null);
+  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false);
   const live = phase !== "idle";
   const tenantArg = tenant ?? cfg?.tenant_id;
 
@@ -79,6 +79,12 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       case "audio_start": player.current?.start(m.sample_rate); break;
       case "audio_end": player.current?.end(); setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p)); break;
       case "interrupted": player.current?.stop(); break;
+      case "call_end": { // goodbye: let the spoken closing finish playing, then hang up cleanly (no "call ended" error)
+        ending.current = true;
+        const finish = () => { if (!ending.current) return; ending.current = false; hangUp(); setNotice("Call ended. Thanks for calling."); };
+        if (player.current) { player.current.onidle = finish; player.current.end(); setTimeout(finish, 20000); } else finish();
+        break;
+      }
       case "notice": if (m.detail !== "too_short") setNotice(m.detail); break;
       case "error": setError(m.detail); if (m.fatal) hangUp(); else setPhase((p) => (p === "idle" ? p : "listening")); break;
     }
@@ -100,7 +106,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     sock.current = deps.socket(deps.wsUrl(), {
       onopen: () => sock.current?.send(JSON.stringify({ type: "start", tenant: tenantArg, token, ticket_id: ticket })),
       onmessage: (d) => { if (typeof d === "string") { try { onMsg(JSON.parse(d) as ServerMsg); } catch { /* ignore a malformed message */ } } else player.current?.push(d); },
-      onclose: () => { if (sock.current) { setError((e) => e ?? "The call ended."); hangUp(); } },
+      onclose: () => { if (ending.current) return; if (sock.current) { setError((e) => e ?? "The call ended."); hangUp(); } },
       onerror: () => { setError("Cannot reach the voice service."); hangUp(); },
     });
   }

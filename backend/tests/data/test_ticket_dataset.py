@@ -14,7 +14,7 @@ PATH = ROOT / "evals" / "datasets" / "tickets_qspiders_v1.jsonl"
 DOCS = ROOT / "tenants" / "qspiders_sample" / "docs"
 TICKETS = [json.loads(line) for line in PATH.read_text(encoding="utf-8").splitlines()]
 
-ROUTES = {"knowledge", "action", "escalate", "clarify", "write"}
+ROUTES = {"knowledge", "action", "escalate", "clarify", "write", "converse"}  # converse (M2.1): greetings and thanks
 CATEGORIES = {"courses", "eligibility", "fees", "admissions", "placement", "attendance", "assessment", "schedule",
               "privacy", "other"}
 FIELDS = {"id", "tenant_id", "student_id", "persona", "channel", "language", "message", "category", "priority",
@@ -72,7 +72,7 @@ def test_every_batch_reference_matches_the_seed():
 
 def test_coverage_of_routes_and_adversarial_cases():
     routes = Counter(t["expected_route"] for t in TICKETS)
-    assert all(routes[r] >= 3 for r in ROUTES), routes
+    assert all(routes[r] >= 3 for r in ROUTES - {"converse"}), routes   # converse (M2.1) is covered by tests/graph/test_m21_conversation.py
     tags = Counter(tag for t in TICKETS for tag in t["tags"])
     for needed in ("injection", "cross_student", "cross_tenant", "pii_fishing", "hallucination_probe", "boundary",
                    "legal_threat", "safety_incident", "non_english", "internal_probe", "complaint"):

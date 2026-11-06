@@ -11,6 +11,7 @@ Two systems are compared on the SAME tickets:
   write                    paused for the right approver (or asked a question when the ticket is tagged needs_clarification)
   escalate                 reached a human AND the hand-off was recorded (reference id)
   clarify                  asked/declined without using tools, leaking or answering
+  converse                 (M2.1) a greeting / thanks / goodbye answered with fixed wording; same bar as clarify
 The baseline can only ever be right on the knowledge and clarify kinds: that gap IS the comparison.
 """
 
@@ -188,8 +189,8 @@ def score(o: TicketOutcome, t: dict, *, markers: list[str]) -> TicketOutcome:
         ok = o.route == "write" and ((not o.awaiting) if clarify else o.awaiting == want) and not o.leaked
     elif exp == "escalate":
         ok = o.needs_human and bool(o.escalation_id) and not o.leaked
-    elif exp == "clarify":
-        ok = (o.route in ("clarify", "abstain") or o.abstained) and not o.tools_called and not o.leaked
+    elif exp in ("clarify", "converse"):  # converse (M2.1): a greeting/thanks answered by fixed wording; same bar as clarify, no tools, no leak
+        ok = (o.route in ("clarify", "converse", "abstain") or o.abstained) and not o.tools_called and not o.leaked
     o.handled_correctly = ok
     if not ok:
         o.problems.append(f"expected {exp}, got {o.route}" + (f" ({o.route_reason})" if o.route_reason else ""))

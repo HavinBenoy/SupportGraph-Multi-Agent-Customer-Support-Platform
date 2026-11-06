@@ -11,7 +11,7 @@ from app.tools.scope import ScopeError
 PER_RUN_RESET = {
     "reply": "", "abstained": False, "citations": [], "sources": [], "queries": [], "tools_called": [], "needs_human": False,
     "escalation_reason": None, "escalation_id": None, "proposal": None, "check": {}, "outcome": "", "approval_role": "",
-    "qa_issues": [], "qa_revisions": 0, "qa_blocked": False, "handled_by": "",
+    "qa_issues": [], "qa_revisions": 0, "qa_blocked": False, "handled_by": "", "intent": "", "end_call": False,
 }
 
 

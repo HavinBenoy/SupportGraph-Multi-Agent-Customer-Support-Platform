@@ -10,6 +10,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.conversation.intents import GOODBYE, detect_intent
 from app.db.models import Ticket
 from app.db.session import session_scope
 from app.graph.nodes import replies
@@ -64,6 +65,8 @@ def converse(graph, text: str, *, tenant_id: str, student_id: str = ANONYMOUS, t
     if pending is None:
         return ask_support(graph, text, tenant_id=tenant_id, student_id=student_id, ticket_id=ticket_id, **extra)
     if pending["role"] == "staff":
+        if detect_intent(text) == GOODBYE:  # the caller may leave; the request stays pending and the outcome shows in the conversation
+            return {"reply": replies.GOODBYE_WHILE_PENDING, "awaiting": "staff", "pending": pending, "end_call": True}
         return {"reply": replies.AWAITING_STAFF, "awaiting": "staff", "pending": pending}
     answer = True if _YES.match(text) else False if _NO.match(text) else None
     if answer is None:

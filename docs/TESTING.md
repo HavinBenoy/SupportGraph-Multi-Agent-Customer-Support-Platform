@@ -43,3 +43,9 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 - `tests/voice/` runs in `make test-fast`: endpointer, spoken-text rules, session logic, real adapters against stand-ins, smoke logic, WebSocket conversations through the real graph with fake STT/TTS. `test_real_vad.py` uses the real Silero model and is skipped unless onnxruntime and faster-whisper are installed (`make voice-setup`); speech for it comes from espeak-ng when available.
 - `frontend`: `npm test` (VoiceCall, voice helpers).
 - `make voice-smoke`: real Piper/Silero/Whisper round trip on your machine (not part of any tier).
+
+## Conversation control (M2.1)
+- `tests/unit/test_intents.py`, `tests/unit/test_escalation_floor.py` (new human-request cases and look-alikes): pure code, fast.
+- `tests/graph/test_m21_conversation.py`: the full support graph with a triager that RAISES if called, proving pleasantries and requests for a person need no model; plus unchanged FAQ, abstention, escalation, sign-in and approval behaviour.
+- `tests/voice/test_voice_ws.py` (M2.1 block): the same words by voice and by text give the same replies; a goodbye ends the call after the closing is spoken.
+- `make e2e-local` now has 17 messages (5 new, code-handled).

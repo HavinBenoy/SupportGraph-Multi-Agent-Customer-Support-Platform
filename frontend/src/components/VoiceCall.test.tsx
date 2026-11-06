@@ -136,4 +136,23 @@ describe("VoiceCall", () => {
     renderWithAuth(<VoiceCall deps={rig().deps} />);
     expect(await screen.findByText(/for students and visitors/)).toBeInTheDocument();
   });
+
+  it("a goodbye ends the call after the closing has played, without an error", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start();
+    await r.open();
+    await r.serverSays(READY);
+    await r.serverSays({ type: "reply", reply: "Thanks for getting in touch. Take care, goodbye!", status: "answered", citations: [], escalation_id: null, ticket_id: "a-9.sig", end_call: true });
+    await r.serverSays({ type: "audio_start", sample_rate: 22050 });
+    await r.serverSays({ type: "audio_end" });
+    await r.serverSays({ type: "call_end", reason: "goodbye" });
+    expect(r.player.end).toHaveBeenCalled();              // waits for the queued speech instead of cutting it off
+    await act(async () => { r.player.onidle?.(); });      // playback finished
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start call" })).toBeInTheDocument());
+    expect(r.micStop).toHaveBeenCalled();
+    expect(screen.getByText(/Call ended/)).toBeInTheDocument();
+    await r.onclose();                                    // the server's close arrives afterwards: no error banner
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

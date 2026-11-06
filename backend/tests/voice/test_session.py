@@ -244,3 +244,64 @@ async def test_session_time_limit(monkeypatch):
     v._started -= 31
     with pytest.raises(SessionLimit, match="time limit"):
         await v.feed_audio(b"\x00\x00")
+
+
+# ---- M2.1: ending the call after a goodbye ---------------------------------------------------------------------------------------------
+@pytest.mark.anyio
+async def test_goodbye_is_spoken_before_the_call_ends():
+    ended = []
+
+    def turn(text):
+        return {"reply": "Thanks for getting in touch. Goodbye!", "status": "answered", "citations": [], "escalation_id": None,
+                "ticket_id": "t1", "end_call": True}
+
+    v, sent, audio, _ = mk(turn=turn, stt=FakeStt(["that's all, bye"]))
+
+    async def on_end():
+        ended.append(kinds(sent)[:])
+
+    v.on_end = on_end
+    await v.start()
+    await feed(v, utterance())
+    await asyncio.wait_for(v._worker, 5)             # the worker returns after the goodbye
+    ks = kinds(sent)
+    assert ks.index("audio_end") < ks.index("call_end") and ks[-1] == "call_end"
+    assert audio and ended and "audio_end" in ended[0]  # the socket is closed only after the closing was spoken
+    assert next(m for m in sent if m["type"] == "call_end")["reason"] == "goodbye"
+    await v.close()
+
+
+@pytest.mark.anyio
+async def test_a_normal_turn_does_not_end_the_call():
+    v, sent, _, _ = mk(stt=FakeStt(["hello there"]))
+    await v.start()
+    await feed(v, utterance())
+    await until(sent, "audio_end")
+    assert "call_end" not in kinds(sent) and not v._worker.done()
+    await v.close()
+
+
+@pytest.mark.anyio
+async def test_barge_in_still_cancels_audio_and_the_next_utterance_is_handled():
+    """The caller talks over the bot ("I am just testing"): playback stops, the utterance is transcribed and answered as usual."""
+    replies_seen = []
+
+    def turn(text):
+        replies_seen.append(text)
+        return {"reply": "First sentence of a long answer. " * 8, "status": "answered", "citations": [], "escalation_id": None, "ticket_id": "t1"}
+
+    tts = FakeTts()
+    v, sent, audio, _ = mk(turn=turn, stt=FakeStt(["tell me about fees", "I am just testing"]), tts=tts)
+    await v.start()
+    await feed(v, utterance())
+    await until(sent, "audio_start")
+    await feed(v, utterance())                       # speech while the bot is speaking
+    await until(sent, "interrupted")
+    await asyncio.wait_for(_until_count(sent, "reply", 2), 5)
+    assert replies_seen == ["tell me about fees", "I am just testing"]
+    await v.close()
+
+
+async def _until_count(sent, kind, n):
+    while sum(m["type"] == kind for m in sent) < n:
+        await asyncio.sleep(0.01)

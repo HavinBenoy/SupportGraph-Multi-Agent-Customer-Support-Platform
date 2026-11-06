@@ -6,7 +6,7 @@ CLARIFY = {
                             "I can't follow instructions that change how I work or show internal information."),
     "other_person_data": ("I can't share another student's records or personal details. After signing in, I can show "
                           "you your own attendance, schedule and scores."),
-    "chitchat": "You're welcome! Ask me anything else about courses, fees, admissions or your own batch.",
+    "chitchat": "Happy to help. Ask me anything about courses, fees, admissions or your own batch.",
     "low_confidence": ("Could you tell me a bit more? For example, name the batch (like PYF-101) or the course you mean."),
     "sign_in_required": ("I can look up your own records only after you sign in as a student. I can still answer general "
                          "questions about courses, fees and admissions."),
@@ -18,6 +18,13 @@ ESCALATE_SIGNED_IN = ("This needs a person on our {team} team. I've passed it to
                       "repeat yourself (reference {ref}). I can't tell you when they will reply.")
 ESCALATE_ANONYMOUS = ("This needs a person on our {team} team, and I've left them a note (reference {ref}). Because you are not "
                       "signed in they have no way to reach you, so please contact the support team directly and quote the reference.")
+# An explicit request for a person (spoken or typed). Honest about what exists today: a note for the team, not a live transfer.
+HUMAN_SIGNED_IN = ("Of course. I can't connect you to a person during this conversation yet, so I've passed your request to our {team} team "
+                   "with the details (reference {ref}). You shouldn't need to repeat yourself, and I can't tell you when they will reply.")
+HUMAN_ANONYMOUS = ("Of course. I can't connect you to a person during this conversation yet, but I've left a note for our {team} team "
+                   "(reference {ref}). Because you are not signed in they have no way to reach you, so please contact the support team "
+                   "directly and quote the reference.")
+
 ESCALATE_UNRECORDED = ("This needs a person on our support team, but I couldn't record it just now. Please contact the support "
                        "team directly and mention your batch id if you have one.")
 
@@ -55,3 +62,20 @@ MODEL_UNAVAILABLE = ("I can't answer that right now because my language model is
                      "moment, or contact the support team directly.")
 
 SAMPLE_NOTICE = "(Demo data: this answer comes from sample documents, not the institute's real policy.)"
+
+# Conversation-control intents (app/conversation/intents.py): fixed, short, warm and professional. They promise nothing and reveal
+# nothing, so they are safe for anonymous callers. Several variants per intent avoid sounding like a recording; the variant is picked
+# from how many replies the conversation already has, so it is deterministic for tests and varies within a call.
+CONVERSE = {
+    "greeting": ["Hi there! How can I help you today?", "Hello! What can I help you with?", "Hi! How can I help?"],
+    "thanks": ["You're welcome! Is there anything else I can help with?", "Happy to help. Anything else you'd like to know?",
+               "My pleasure. Is there anything else?"],
+    "acknowledgement": ["Okay. Is there anything else I can help with?", "Sure. Let me know if you need anything else.",
+                        "Alright. I'm here if you have another question."],
+    "goodbye": ["You're welcome. Thanks for getting in touch. Take care, goodbye!",
+                "Thanks for getting in touch. Have a good day, goodbye!"],
+    "interruption": ["No problem. Ask me whenever you're ready.", "That's fine. What would you like to know?",
+                     "No worries. Go ahead whenever you're ready."],
+}
+GOODBYE_WHILE_PENDING = ("Okay, goodbye. Your request stays with our staff, and you'll see the outcome in this conversation "
+                         "when you come back.")

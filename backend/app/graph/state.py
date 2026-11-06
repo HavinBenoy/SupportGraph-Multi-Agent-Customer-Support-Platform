@@ -40,3 +40,7 @@ class TicketState(TypedDict, total=False):
     qa_issues: list[dict]   # [{"code","detail"}] from the last QA pass
     qa_revisions: int       # how many times the reply was revised
     qa_blocked: bool        # true when the reply was replaced by the safe fallback
+
+    # --- M2.1 ---
+    intent: str             # conversation-control intent found by code (greeting/thanks/acknowledgement/goodbye/interruption), else ""
+    end_call: bool          # true for a goodbye: a voice call may hang up after speaking the reply (text chat ignores it)

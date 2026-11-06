@@ -68,3 +68,47 @@ def test_look_alikes_for_human_request_do_not_fire(text):
 
 def test_human_request_floor_does_not_raise_priority():
     assert escalation_floor("I want to talk to a person")[1] == "low"
+
+
+# M2.1: spoken, imperfectly transcribed requests for a person
+@pytest.mark.parametrize("text", [
+    "Please forward this call towards your supporting.",         # the real test call
+    "forward my call to the support executive",
+    "can you transfer the call to support?",
+    "please put me through to the support team",
+    "connect me with a support representative",
+    "connect this call with a human",
+    "redirect me to customer support",
+    "I need to contact support",
+    "please contact support for me",
+    "I want to speak to someone",
+    "let me talk to your manager",
+    "talk to a counsellor please",
+    "get me a human",
+    "I need a real person",
+    "human please",
+    "customer care",
+    "agent",
+    "I don't want to talk to a bot",
+])
+def test_spoken_human_support_requests_are_caught(text):
+    assert escalation_floor(text)[0] == "human_request"
+
+
+@pytest.mark.parametrize("text", [
+    "How can I contact the support team?",
+    "What support do you offer after the course?",
+    "Do you provide placement support?",
+    "I want to talk to someone who teaches Java",
+    "Can I talk to my trainer about the syllabus?",
+    "How do I transfer my batch?",
+    "transfer my fee to the next batch",
+    "Forward the fee receipt",
+    "connect to the wifi in the lab",
+    "How do I contact my trainer?",
+    "Can I pass the course with 60 percent?",
+    "Okay, thank you. That's it. You can stop the call.",
+    "hello",
+])
+def test_look_alikes_do_not_ask_for_a_person(text):
+    assert escalation_floor(text) is None

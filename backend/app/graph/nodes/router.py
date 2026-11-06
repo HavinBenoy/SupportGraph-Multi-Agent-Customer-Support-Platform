@@ -21,6 +21,7 @@ from app.guardrails.injection import looks_like_injection
 from app.tools.scope import ANONYMOUS
 
 KNOWLEDGE, ACTION, CLARIFY, ESCALATE, WRITE = "knowledge", "action", "clarify", "escalate", "write"
+CONVERSE = "converse"  # M2.1: a pure pleasantry / call-control phrase; chosen in graph/support.py (it needs the escalation floor first)
 
 
 def is_signed_in(student_id: str | None) -> bool:

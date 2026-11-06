@@ -44,6 +44,7 @@ class VoiceSession:
     run_turn: Callable[[str], dict]          # sync; returns {"reply","status","citations","escalation_id","ticket_id"} (see route)
     send_json: SendJson
     send_bytes: SendBytes
+    on_end: Callable[[], Awaitable[None]] | None = None   # called after a goodbye has been spoken (the route closes the socket)
     stt_prompt: str = ""
     turns: int = 0
     speaking: bool = False
@@ -115,7 +116,11 @@ class VoiceSession:
         while not self._closed:
             item = await self._queue.get()
             try:
-                await self._handle(item)
+                if await self._handle(item):  # the caller said goodbye: the closing has been spoken, end the call
+                    await self.send_json({"type": "call_end", "reason": "goodbye"})
+                    if self.on_end:
+                        await self.on_end()
+                    return
             except SessionLimit as e:
                 await self.send_json({"type": "error", "detail": str(e), "fatal": True})
                 return
@@ -125,7 +130,8 @@ class VoiceSession:
                 log.exception("voice turn failed (%s)", type(e).__name__)
                 await self.send_json({"type": "error", "detail": "Sorry, something went wrong with that turn. Please try again."})
 
-    async def _handle(self, item: bytes | str) -> None:
+    async def _handle(self, item: bytes | str) -> bool:
+        """One utterance. True when the call should end afterwards (the caller said goodbye)."""
         timing: dict[str, float] = {}
         if isinstance(item, bytes):
             await self.send_json({"type": "transcribing"})
@@ -134,12 +140,12 @@ class VoiceSession:
             except Exception as e:  # noqa: BLE001 - model missing/corrupt
                 log.warning("stt failed (%s: %s)", type(e).__name__, e)
                 await self.send_json({"type": "error", "detail": "Speech recognition is not available right now."})
-                return
+                return False
             timing["stt_ms"] = round(tr.seconds * 1000)
             text = tr.text
             if not text or tr.no_speech_prob > 0.85:  # silence/noise that slipped past the VAD
                 await self.send_json({"type": "transcript", "text": "", "ignored": True})
-                return
+                return False
         else:
             text = item
         await self.send_json({"type": "transcript", "text": text, "final": True})
@@ -151,6 +157,7 @@ class VoiceSession:
         timing["turn_ms"] = round((time.perf_counter() - t0) * 1000)
         await self.send_json({"type": "reply", **out, "timing": dict(timing)})
         await self._speak(out["reply"], timing)
+        return bool(out.get("end_call"))
 
     # ---- audio out -------------------------------------------------------------------------------------------------------
     async def _speak(self, reply: str, timing: dict) -> None:

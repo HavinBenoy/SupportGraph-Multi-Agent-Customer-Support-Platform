@@ -6,9 +6,10 @@ export type ServerMsg =
   | { type: "ready"; ticket_id: string; signed_in: boolean; tenant_name: string; sample_rate: number }
   | { type: "speech_start" | "transcribing" | "thinking" | "interrupted" }
   | { type: "transcript"; text: string; final?: boolean; ignored?: boolean }
-  | { type: "reply"; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; timing?: Record<string, number> }
+  | { type: "reply"; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Record<string, number> }
   | { type: "audio_start"; sample_rate: number }
   | { type: "audio_end"; interrupted?: boolean; timing?: Record<string, number> }
+  | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };
 

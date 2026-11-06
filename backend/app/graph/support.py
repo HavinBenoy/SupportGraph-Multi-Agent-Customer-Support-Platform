@@ -4,6 +4,7 @@
                                +--> action     step 0 ReAct agent + read-only tools (signed-in students only)
                                +--> write      propose -> prepare -> approval (PAUSES) -> execute   [step 4]
                                +--> clarify    fixed wording: refuse / ask / close
+                               +--> converse   fixed wording: greeting / thanks / goodbye (chosen by code before any model call)  [M2.1]
                                +--> escalate   persists a ticket + a brief for a human team          [step 4]
                                        \\--> qa -(pass)-> finalize -> END
                                              \\-(fixable)-> revise -> qa      (capped)
@@ -26,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.actions.proposer import Proposer
 from app.agents.schemas import TriageResult
+from app.conversation.intents import detect_intent
 from app.agents.triage import Triager
 from app.config import Settings, get_settings
 from app.graph.builder import build_graph
@@ -37,7 +39,8 @@ from app.graph.nodes.common import PER_RUN_RESET, cfg_of, text_of
 from app.graph.nodes.escalate import escalate
 from app.graph.nodes.qa import make_qa_nodes
 from app.guardrails.escalation_floor import escalation_floor, raise_priority
-from app.graph.nodes.router import ACTION, CLARIFY, ESCALATE, KNOWLEDGE, WRITE, decide_route, is_signed_in
+from app.guardrails.injection import looks_like_injection
+from app.graph.nodes.router import ACTION, CLARIFY, CONVERSE, ESCALATE, KNOWLEDGE, WRITE, decide_route, is_signed_in
 from app.graph.nodes.write import make_write_nodes
 from app.graph.state import TicketState
 from app.graph.subgraphs.knowledge import build_knowledge_graph
@@ -68,7 +71,16 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
     def triage(state: TicketState, config: RunnableConfig) -> dict:
         if not cfg_of(config).get("tenant_id"):
             raise ScopeError("Support graph run without tenant_id in config['configurable']")  # fail closed
-        return {**PER_RUN_RESET, "triage": triager.classify(text_of(state)).model_dump()}
+        text = text_of(state)
+        # M2.1: code recognises pleasantries and explicit requests for a person BEFORE spending a model call. Neither can be a knowledge
+        # question, and the router still applies the injection screen, the escalation floor and every other rule afterwards.
+        floor = None if looks_like_injection(text) else escalation_floor(text)
+        intent = "" if (floor or looks_like_injection(text)) else (detect_intent(text) or "")
+        if intent:
+            return {**PER_RUN_RESET, "intent": intent, "triage": TriageResult(category="chitchat", confidence=1.0, sentiment="positive").model_dump()}
+        if floor and floor[0] == "human_request":
+            return {**PER_RUN_RESET, "triage": TriageResult(category="human_request", confidence=1.0).model_dump()}
+        return {**PER_RUN_RESET, "triage": triager.classify(text).model_dump()}
 
     def route(state: TicketState, config: RunnableConfig) -> dict:
         decision, reason = decide_route(TriageResult.model_validate(state["triage"]), text=text_of(state),
@@ -80,6 +92,8 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
                 category, priority = floor
                 triage = {**state["triage"], "category": category, "priority": raise_priority(state["triage"].get("priority", "low"), priority)}
                 return {"route": ESCALATE, "route_reason": category, "triage": triage}
+            if state.get("intent"):  # a pure pleasantry; the floor and the injection screen had their say first
+                return {"route": CONVERSE, "route_reason": state["intent"]}
         return {"route": decision, "route_reason": reason}
 
     def knowledge_node(state: TicketState, config: RunnableConfig) -> dict:
@@ -103,6 +117,13 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
         called = [c["name"] for m in out["messages"] if isinstance(m, AIMessage) for c in m.tool_calls]
         return {"handled_by": ACTION, "reply": str(out["messages"][-1].content), "tools_called": called}
 
+    def converse_node(state: TicketState) -> dict:
+        """Fixed, short, warm replies for greetings, thanks, acknowledgements, "just testing" and goodbyes. No retrieval, no model."""
+        intent = state["intent"]
+        variants = replies.CONVERSE[intent]
+        spoken_before = sum(1 for m in state.get("messages", []) if isinstance(m, AIMessage))
+        return {"handled_by": CONVERSE, "reply": variants[spoken_before % len(variants)], "end_call": intent == "goodbye"}
+
     def clarify_node(state: TicketState) -> dict:
         return {"handled_by": CLARIFY, "reply": replies.CLARIFY[state["route_reason"]]}
 
@@ -120,15 +141,15 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
 
     g = StateGraph(TicketState)
     nodes = {"triage": triage, "route": route, KNOWLEDGE: knowledge_node, ACTION: action_node, CLARIFY: clarify_node,
-             ESCALATE: escalate_node, "propose": write["propose"], "prepare": write["prepare"], "approval": write["approval"],
+             CONVERSE: converse_node, ESCALATE: escalate_node, "propose": write["propose"], "prepare": write["prepare"], "approval": write["approval"],
              "execute": write["execute"], "qa": qa["qa"], "revise": qa["revise"], "fallback": qa["fallback"], "finalize": finalize}
     for name, fn in nodes.items():
         g.add_node(name, fn)
     g.add_edge(START, "triage")
     g.add_edge("triage", "route")
-    entry = {KNOWLEDGE: KNOWLEDGE, ACTION: ACTION, CLARIFY: CLARIFY, ESCALATE: ESCALATE, WRITE: "propose"}
+    entry = {KNOWLEDGE: KNOWLEDGE, ACTION: ACTION, CLARIFY: CLARIFY, CONVERSE: CONVERSE, ESCALATE: ESCALATE, WRITE: "propose"}
     g.add_conditional_edges("route", lambda st: st["route"], entry)
-    for branch in (KNOWLEDGE, ACTION, CLARIFY, ESCALATE):
+    for branch in (KNOWLEDGE, ACTION, CLARIFY, CONVERSE, ESCALATE):
         g.add_edge(branch, "qa")
     g.add_edge("propose", "prepare")
     g.add_conditional_edges("prepare", write["after_prepare"], {"approval": "approval", "done": "qa"})
