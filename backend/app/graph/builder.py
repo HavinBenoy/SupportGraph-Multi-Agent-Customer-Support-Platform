@@ -15,6 +15,7 @@ from app.graph.state import TicketState
 from app.config import get_settings
 from app.llm.gateway import get_chat_model
 from app.llm.guard import invoke_guarded
+from app.llm.reasoning import strip_message
 from app.tools.registry import get_tools
 
 
@@ -25,7 +26,7 @@ def build_graph(model: BaseChatModel | None = None, tools: list[BaseTool] | None
 
     def agent(state: TicketState) -> dict:
         reply = invoke_guarded(model_with_tools, [SystemMessage(SYSTEM_PROMPT), *state["messages"]], get_settings())
-        return {"messages": [reply]}
+        return {"messages": [strip_message(reply)]}  # a student never sees the model's reasoning
 
     graph = StateGraph(TicketState)
     graph.add_node("agent", agent)

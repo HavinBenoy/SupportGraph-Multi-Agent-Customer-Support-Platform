@@ -21,3 +21,15 @@ def visible_answer(text: str) -> tuple[str, bool]:
     if unfinished:
         text = re.split(r"<think>", text, flags=re.I)[0]
     return text.strip(), unfinished
+
+
+def strip_message(message):
+    """`message` (an AIMessage) with reasoning removed from its text content. Unfinished reasoning leaves no text (tool calls are kept)."""
+    content = getattr(message, "content", None)
+    if not isinstance(content, str):
+        return message
+    visible, unfinished = visible_answer(content)
+    if visible == content and not unfinished:
+        return message
+    extra = {**(getattr(message, "additional_kwargs", None) or {}), **({"reasoning_unfinished": True} if unfinished else {})}
+    return message.model_copy(update={"content": visible, "additional_kwargs": extra})

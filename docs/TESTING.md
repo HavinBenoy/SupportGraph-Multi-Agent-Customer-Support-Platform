@@ -32,3 +32,9 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 
 ## Adding `pytest-xdist`
 `pip install -e "backend[dev]"` (it is now in the `dev` extra) or `pip install pytest-xdist`. Without it `make test-fast` simply runs serially.
+
+
+## Real local stack (M1b)
+- `tests/graph/test_local_stack_mock.py`: real langchain-ollama clients against a mock Ollama server (runs in `make test-fast`). Proves plumbing and safety, not model quality.
+- `SG_TEST_OLLAMA=1 pytest tests/graph/test_real_ollama.py`: opt-in, real Ollama, safety assertions only.
+- `make e2e-local`: 12 synthetic messages + retrieval Hit@k + memory/latency on your machine (`evals/e2e/REPORT.md`). Not part of any tier.

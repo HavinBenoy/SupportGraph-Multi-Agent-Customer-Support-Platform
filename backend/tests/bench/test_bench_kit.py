@@ -65,7 +65,7 @@ def test_llm_and_triage_bench_through_real_ollama_client():
         assert chat_calls[0]["model"] == "qwen3:4b" and chat_calls[0]["think"] is False   # thinking is off
         t = llm_bench.bench_triage(s, "qwen3:4b", get_chat_model, splits=splits, limit=3)
         for sm in t["splits"].values():
-            assert sm["cases"] == 3 and sm["unusable_output_rate"] == 1.0   # the mock is not a classifier: bad output is COUNTED, not crashed on
+            assert sm["cases"] == 3 and sm["unusable_output_rate"] == 0.0   # the mock now answers the triage schema (M1b): output parses, nothing is unusable
             assert sm["escalation"]["false_n"] == 0                          # unusable output -> low-confidence fallback -> clarify, never escalate
 
 

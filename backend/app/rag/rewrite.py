@@ -18,6 +18,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.llm.lexical import STOPWORDS
+from app.llm.reasoning import visible_answer
 
 log = logging.getLogger(__name__)
 _WORD = re.compile(r"[a-z0-9]+")
@@ -65,7 +66,8 @@ class LlmRewriter:
         try:
             reply = self._model.invoke([SystemMessage(f"{_SYSTEM} {hint}\nVocabulary: {vocab}"),
                                         HumanMessage(f"<question>\n{question}\n</question>")])
-            query = " ".join(str(reply.content).split("\n")[0].split())[:MAX_QUERY_CHARS]
+            visible, unfinished = visible_answer(str(reply.content))
+            query = "" if unfinished else " ".join(visible.split("\n")[0].split())[:MAX_QUERY_CHARS]
             return query or question
         except Exception as e:  # noqa: BLE001 - rewriting is an optimisation; failing must not fail the ticket
             log.warning("Query rewrite failed (%s); searching with the original question", type(e).__name__)

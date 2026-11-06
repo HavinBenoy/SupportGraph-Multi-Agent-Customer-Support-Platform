@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local
 
 venv:
 	python3 -m venv .venv
@@ -67,6 +67,12 @@ bench-tts:
 	cd backend && ../.venv/bin/python scripts/bench.py tts --voice $(VOICE)
 
 # Human-review sheet of FAQ failures the strict scorer cannot judge on meaning (read-only; changes no score). DIR=bench-cmp to pick a folder.
+# Real local stack, end to end (Ollama chat + Nomic embeddings + database): 12 fixed synthetic messages with hard safety checks,
+# per-stage timing, retrieval Hit@k vs M0, memory/load. Needs SG_LLM_PROVIDER=ollama and SG_EMBEDDING_PROVIDER=ollama in YOUR .env.
+# make e2e-local [ARGS="--ingest"] [ARGS="--skip-retrieval"]. Writes evals/e2e/REPORT.md. Not part of any test tier.
+e2e-local:
+	cd backend && ../.venv/bin/python scripts/e2e_local.py $(ARGS)
+
 bench-review:
 	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/$(or $(DIR),bench) review
 

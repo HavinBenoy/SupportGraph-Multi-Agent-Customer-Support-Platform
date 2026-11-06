@@ -97,6 +97,13 @@ def describe_llm(settings: Settings) -> list[str]:
     lines = [f"LLM: {s.llm_provider} model={s.llm_model} endpoint={urlparse(s.llm_base_url).netloc} ({where})"]
     overrides = {r: getattr(s, f"llm_model_{r}") for r in
                  ("action", "faq", "triage", "rewrite", "proposer", "critic", "reviser", "judge") if getattr(s, f"llm_model_{r}")}
+    if s.embedding_provider != "fake":
+        from app.llm.gateway import effective_embedding_prefixes
+
+        qp, dp = effective_embedding_prefixes(s)
+        lines.append(f"Embeddings: {s.embedding_provider} model={s.embedding_model} prefixes={'on' if (qp or dp) else 'off'} "
+                     f"endpoint={urlparse(s.embedding_base_url).netloc} ({'local' if is_local_endpoint(s.embedding_base_url) else 'EXTERNAL'})")
+    lines.append(f"QA LLM critic: {'on' if s.qa_llm_critic else 'off'}; query rewriter: {s.rewriter_mode}")
     if overrides:
         lines.append("LLM role overrides: " + ", ".join(f"{r}={m}" for r, m in overrides.items()))
     if where == "EXTERNAL":

@@ -35,5 +35,5 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["postgres: needs a real Postgres (set SG_TEST_DATABASE_URL); skipped otherwise"]
+markers = ["ollama: needs a real Ollama (SG_TEST_OLLAMA=1); skipped otherwise", "postgres: needs a real Postgres (set SG_TEST_DATABASE_URL); skipped otherwise"]
 pythonpath = ["."]

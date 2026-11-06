@@ -1,50 +1,57 @@
-# CHANGES: M1a-6 (reasoning never shown; refusal guard refined after replaying your stored answers)
+# M1b - real local AI integration (delta on top of m1a6)
 
-Small delta on top of m1a ... m1a5. No `.env`, schema, migration, prompt, retrieval or model-default change (default stays `qwen3:1.7b`). Previous notes: `docs/history/CHANGES_M1a5.md`.
+Model choices are NOT touched (FAQ qwen3:1.7b, triage qwen3:1.7b, embeddings nomic-embed-text, Ollama, CPU). No benchmark, no triage redesign.
+No migration, no new dependency (httpx is already installed; langchain-ollama is in the `ollama` extra). `.env` is never read for writing; your database and volumes are untouched.
 
-## What your replay output showed
-1. The thinking-only `qwen3:4b` writes its chain of thought into the reply and ends it with `</think>`. The product had no handling for that: the student would have seen the reasoning, and
-   `[source#id]` markers inside it would have counted as citations. All 16 "ok" guard hits were this (the guard fired on the reasoning, not the answer; the final answers were correct).
-2. One genuine false positive from the instruct 4B (T161, a two-part question): "duration is not mentioned [..]" + a correct cited instalments answer. The first guard would have abstained on all of it.
-3. The remaining flags were `INSUFFICIENT_CONTEXT` replies, which already abstain.
+## What changed
+- `app/llm/preflight.py` (new): startup check (server reachable, every chat/embedding model pulled, external endpoints refused) with `SG_LLM_PREFLIGHT=off|warn|strict` (default warn), and background `warm_up` (`SG_LLM_WARMUP`, default true; only for the Ollama provider and only when the API builds its own graph).
+- `app/api/main.py`: lifespan runs preflight and starts the warm-up thread.
+- `app/llm/gateway.py`: Nomic task prefixes (`search_query: ` / `search_document: `) added automatically for `nomic-embed-text` on a real provider (`SG_EMBEDDING_PREFIX_MODE=auto|none`; explicit prefixes win). The setting is part of the stored embedding name (`...@px-xxxxxx`), so old vectors are ignored, never mixed. Fake embedder name unchanged. `get_critic` / `get_rewriter` honour new flags.
+- `app/config.py`: `embedding_prefix_mode`, `qa_llm_critic` (default false), `rewriter_mode` (glossary), `llm_preflight`, `llm_warmup`.
+- `app/llm/reasoning.py` + `app/graph/builder.py` + `app/rag/rewrite.py`: reasoning is removed for EVERY role (action agent and query rewriter too, not only FAQ); an unfinished `<think>` yields no answer.
+- `app/llm/guard.py`: banner shows embedding provider/prefix state and critic/rewriter state.
+- `scripts/e2e_local.py` + `make e2e-local` (new); `scripts/llm_smoke.py` now runs preflight + warm-up.
+- `.env.example`: comments/templates only. `docs/M1B.md` (new), `ROADMAP.md`, `TESTING.md`.
+- `tests/bench/mock_ollama.py`: answers the triage JSON schema, can emit `<think>` leaks (`reasoning-leak`) and unfinished reasoning (`reasoning-unfinished`). `tests/bench/test_bench_kit.py`: one assertion updated (mock triage output is now parseable, so unusable rate 0.0).
+- `pyproject.toml`: registers the `ollama` pytest marker.
 
-## Changed
-- `backend/app/llm/reasoning.py` (new): `visible_answer()` removes `<think>...</think>` blocks, or everything up to a lone `</think>`; an unclosed `<think>` means no answer.
-- `backend/app/rag/faq.py`: `generate` keeps only the visible answer; `validate` adds reason `unfinished_reasoning`; the own-words guard is now `declines_without_answer()` (a decline with NO other cited sentence; a trailing citation stays with its sentence). `declares_no_information()` is kept for the benchmark's informational field.
-- `backend/app/qa/critic.py`: the QA reviser also uses only the visible answer (an unfinished one is discarded).
-- Tests (`tests/rag/test_faq_truncation.py`): +8 (reasoning stripping, citations inside reasoning do not count, unfinished reasoning, two-part answers, bare refusals, trailing citations).
-- `docs/MODEL_SELECTION.md`, `docs/history/CHANGES_M1a5.md`.
-- Not changed: benchmark scoring (it still judges the raw text, so a thinking model's reasoning would be in what it scores; that model is excluded anyway).
+## Behaviour you should know about
+- Prefixes are ON by default for Nomic on a real provider. M0's Hit@1 (96% dev / 87% heldout) was measured WITHOUT prefixes. `make e2e-local` re-measures it through the real database path; if it drops by more than ~5 points set `SG_EMBEDDING_PREFIX_MODE=none` and re-run `make ingest`.
+- Because the name changed you must run `make ingest` after enabling Ollama embeddings (it adds vectors; nothing is deleted).
+- LLM critic and LLM rewriter stay off until measured (each adds seconds on CPU). Abstention remains model-side; `rag_min_score` is not tuned.
 
-## Executed (sandbox) / not executed
-| Check | Result | Where |
-|---|---|---|
-| Full SQLite backend suite | **702 passed, 28 skipped** (was 696; +6 net) | my sandbox |
-| Postgres + pgvector suite | **730 passed** (was 724) | my sandbox |
-| The replay snippet | ran on synthetic mock output only (shape check); **not on your real answers** | your laptop |
-| Real model behaviour | **not run** | your laptop |
+## Tests actually run (sandbox)
+| Run | Result |
+|---|---|
+| Full SQLite suite `pytest -n auto` | 728 passed, 30 skipped |
+| Full suite with Postgres (`SG_TEST_DATABASE_URL`, sandbox PG 16) | 756 passed, 2 skipped (the 2 opt-in real-Ollama tests) |
+| New: `tests/graph/test_local_stack_mock.py` (14), `tests/unit/test_local_ai_setup.py` (11), `tests/graph/test_e2e_local_script.py` (1) | pass; real langchain-ollama clients against a MOCK Ollama |
+| Real Ollama, real qwen3/nomic, real latency/memory, `make e2e-local` | **NOT run (sandbox has no models). This is your run.** |
+| `git diff --check` | not available in sandbox (no git); scanned changed files for trailing whitespace: none in changed files |
 
-## Run on your laptop
-```bash
-unzip -o supportgraph-m1a6.zip
-make test-fast                                      # expect: 702 passed, 28 skipped
-# Replay EVERY stored answer through the product's real validation logic (no model needed):
-cd backend && ../.venv/bin/python - <<'PY'
-import json, glob, collections
-from app.llm.reasoning import visible_answer
-from app.rag.faq import declines_without_answer
-from app.llm.fake_faq import SENTINEL
-c = collections.Counter(); odd = []
-for f in sorted(glob.glob("../evals/**/faq-*.json", recursive=True)):
-    for r in json.load(open(f))["rows"]:
-        if "text" not in r: continue
-        vis, unfinished = visible_answer(r["text"])
-        shown = not (r.get("truncated") or unfinished or not vis or SENTINEL in vis or declines_without_answer(vis))
-        c[(f.split("/")[-1], "must_abstain" if r.get("must_abstain") else "answerable", "shown" if shown else "abstained")] += 1
-        if r.get("must_abstain") and shown: odd.append(("UNANSWERABLE SHOWN", f.split("/")[-1], r["id"], vis[:160]))
-        if not r.get("must_abstain") and not shown and r["label"] == "ok": odd.append(("CORRECT ANSWER LOST", f.split("/")[-1], r["id"], vis[:160]))
-for k, v in sorted(c.items()): print(v, k)
-print("\nPROBLEMS:"); [print(" ", o) for o in odd] or print("  none")
-PY
+The mock proves plumbing and safety behaviour (prefixes sent, reasoning stripped, truncation/unfinished -> abstain, outage -> fixed reply, escalation floor beats a wrong triage, anonymous gets no records, injection refused). It says nothing about model quality or speed.
+
+## Verify locally
 ```
-Send me that output. "UNANSWERABLE SHOWN" is the dangerous direction; "CORRECT ANSWER LOST" is the cost.
+# 1. unit/integration (no models needed)
+make test-fast
+git diff --check
+
+# 2. turn the real stack on: edit YOUR .env (do not paste secrets anywhere)
+#      SG_LLM_PROVIDER=ollama
+#      SG_EMBEDDING_PROVIDER=ollama
+ollama pull qwen3:1.7b && ollama pull nomic-embed-text      # if not already pulled
+make db-up                                                    # if not running; no reset needed
+make ingest                                                   # embeds with the prefixed name; deletes nothing
+make llm-smoke                                                # expect: preflight notes "available", warm-up times, chat ok, embedding ok 768 dims
+make e2e-local                                                # ~3-6 min on CPU; writes evals/e2e/REPORT.md + results.json
+cd backend && SG_TEST_OLLAMA=1 ../.venv/bin/python -m pytest tests/graph/test_real_ollama.py -q   # optional, real models
+```
+Expected from `make e2e-local`: `HARD failures: 0` and exit 0; soft rows (answer quality, own-records via tools, write proposal) are observations only. Please send me `evals/e2e/REPORT.md` (and the console output). Retrieval Hit@1 should be near 96% dev / 87% heldout.
+Rollback: set both providers back to `fake` in your `.env`.
+
+## Files
+Added: `backend/app/llm/preflight.py`, `backend/scripts/e2e_local.py`, `backend/tests/graph/{test_local_stack_mock,test_e2e_local_script,test_real_ollama}.py`, `backend/tests/unit/test_local_ai_setup.py`, `docs/M1B.md`.
+Modified: `.env.example`, `Makefile`, `backend/pyproject.toml`, `backend/app/{api/main,config,graph/builder,llm/gateway,llm/guard,llm/reasoning,rag/rewrite}.py`, `backend/scripts/llm_smoke.py`, `backend/tests/bench/{mock_ollama,test_bench_kit}.py`, `docs/{ROADMAP,TESTING}.md`.
+Deleted: none.
+Security: no secrets handled; preflight/warm-up only contact endpoints allowed by the external-endpoint gate.

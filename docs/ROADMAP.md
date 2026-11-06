@@ -14,7 +14,8 @@ see `docs/decisions/0001-institute-domain.md`). Status of each build step for th
 | 6 | Evals: held-out + security sets, baseline comparison, groundedness judge + calibration, latency/cost, regression gates, fixes | built; sandbox-verified with offline fakes only; **awaiting your local run** | sandbox only (see CHANGES.md, docs/STEP6.md) |
 | M0 | Benchmark kit + model-gateway hardening, then measurement fixes after the first run (schema 2: full outputs, truncation = failure, per-split reports, route/escalation metrics, run manifest) | built; sandbox-verified (mock Ollama only); **awaiting your local test + benchmark run** | sandbox only (CHANGES.md, docs/BENCHMARKS.md, ADR 0005) |
 | M1a | Truncation-safe FAQ validator (blocking prerequisite met), default model qwen3:1.7b, configurable sampling, tiered tests (`docs/TESTING.md`), experiment tooling | built; sandbox-verified; **awaiting your local run** | sandbox only (CHANGES.md, docs/MODEL_SELECTION.md, ADR 0006) |
-| M1b-M9 | Real local models on the text path (M1b: decide 4B/sampling from the experiment, then triage prompt work); browser voice; low-latency path; live calls + takeover; trial verification; knowledge management; Edesy adapter (approval needed); closure | not started; M1b waits for the sampling experiment results | |
+| M1b | Real local AI on the text path: preflight/warm-up, Nomic prefixes, reasoning strip for every role, mock-Ollama integration tests, `make e2e-local` | built; sandbox-verified (mock Ollama only); **awaiting your `make e2e-local` run** | sandbox only (CHANGES.md, docs/M1B.md) |
+| M2-M9 | Browser voice; low-latency path; live calls + takeover; trial verification; knowledge management; Edesy adapter (approval needed); closure | not started | |
 
 The earlier "Steps 7-9" (generic multi-tenant onboarding, e-commerce pack) were dropped: this is a QSpiders-specific product.
 

@@ -22,6 +22,27 @@ def _vec(text: str) -> list[float]:
     return v
 
 
+def _triage_json(prompt: str) -> str:
+    """Structured-output reply for the triage schema, from simple keywords in the <message>. Not a classifier: a stand-in
+    that lets tests drive the REAL triage client and the REAL router."""
+    msg = (re.findall(r"<message>\n(.*?)\n</message>", prompt, re.S) or [prompt])[-1].lower()
+    own = False
+    if "force_knowledge" in msg:
+        cat, conf = "courses", 0.95
+    elif re.search(r"\bmy (attendance|marks)\b", msg):
+        cat, conf, own = "attendance", 0.9, True
+    elif "complain" in msg:
+        cat, conf = "complaint", 0.9
+    elif "talk to a person" in msg:
+        cat, conf = "human_request", 0.9
+    elif "fee" in msg or "instalment" in msg:
+        cat, conf = "fees", 0.9
+    else:
+        cat, conf = "courses", 0.9
+    return json.dumps({"category": cat, "priority": "low", "sentiment": "neutral", "language": "en", "confidence": conf,
+                       "wants_own_records": own})
+
+
 class _H(BaseHTTPRequestHandler):
     calls: list = []
 
@@ -57,7 +78,13 @@ class _H(BaseHTTPRequestHandler):
             ids = re.findall(r'<source id="([^"]+)"', prompt)
             question = (re.findall(r"<question>\n(.*?)\n</question>", prompt, re.S) or [""])[-1]
             done_reason = "stop"
-            if "ramble" in question.lower():  # never stops by itself: hits the token limit like a non-terminating model
+            if isinstance(body.get("format"), dict):  # structured output (triage)
+                text = _triage_json(prompt)
+            elif "reasoning-leak" in question.lower():  # a model that writes its chain of thought into the reply
+                text = f"<think>The source says so [{ids[0] if ids else 'x#0'}]. I should cite it.</think> Final answer [{ids[0] if ids else 'x#0'}]."
+            elif "reasoning-unfinished" in question.lower():
+                text = f"<think>Let me look [{ids[0] if ids else 'x#0'}] and then"
+            elif "ramble" in question.lower():  # never stops by itself: hits the token limit like a non-terminating model
                 limit = (body.get("options") or {}).get("num_predict", 50)
                 text = " ".join(["blah"] * limit)
                 done_reason = "length"

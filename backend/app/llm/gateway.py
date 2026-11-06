@@ -5,6 +5,8 @@ LangChain chat model back. Swapping Ollama for a paid API, or giving the QA crit
 stronger model than triage, is then a config change, not a code change.
 """
 
+import hashlib
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.config import Settings, get_settings
@@ -76,6 +78,29 @@ def get_chat_model(role: str = "default", settings: Settings | None = None) -> B
     raise ValueError(f"Unknown LLM provider: {s.llm_provider}")
 
 
+NOMIC_QUERY_PREFIX = "search_query: "
+NOMIC_DOCUMENT_PREFIX = "search_document: "
+
+
+def effective_embedding_prefixes(s: Settings) -> tuple[str, str]:
+    """(query_prefix, document_prefix) actually used. Explicit settings win; otherwise nomic-embed-text gets its documented
+    prefixes in "auto" mode. The fake embedder never gets automatic prefixes."""
+    if s.embedding_query_prefix or s.embedding_document_prefix:
+        return s.embedding_query_prefix, s.embedding_document_prefix
+    if s.embedding_provider != "fake" and s.embedding_prefix_mode == "auto" and s.embedding_model.lower().startswith("nomic-embed-text"):
+        return NOMIC_QUERY_PREFIX, NOMIC_DOCUMENT_PREFIX
+    return "", ""
+
+
+def _prefix_tag(query_prefix: str, document_prefix: str) -> str:
+    """Part of the stored embedding name. Vectors made with different prefixes live in different spaces, so a prefix change
+    must look like a different model: stale vectors are then never searched and `make ingest` re-embeds. No prefixes = no tag
+    (names, and therefore already-ingested vectors, stay as they were)."""
+    if not (query_prefix or document_prefix):
+        return ""
+    return "@px-" + hashlib.sha1(f"{query_prefix}|{document_prefix}".encode()).hexdigest()[:6]
+
+
 def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
     """Return the configured embedding model, wrapped so vectors are always the width the database stores.
 
@@ -87,7 +112,9 @@ def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
     s = settings or get_settings()
     if s.embedding_provider != "fake":
         check_endpoint_allowed(s.embedding_base_url, s.allow_external_llm, what="embedding model")
-    common = dict(dim=EMBEDDING_DIM, query_prefix=s.embedding_query_prefix, document_prefix=s.embedding_document_prefix)
+    qp, dp = effective_embedding_prefixes(s)
+    common = dict(dim=EMBEDDING_DIM, query_prefix=qp, document_prefix=dp)
+    tag = _prefix_tag(qp, dp)
 
     if s.embedding_provider == "fake":
         from app.llm.fake_embeddings import MODEL_NAME, HashingEmbeddings
@@ -100,7 +127,7 @@ def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
         except ImportError as e:
             raise RuntimeError('Ollama provider needs: pip install -e "backend[ollama]"') from e
         inner = OllamaEmbeddings(model=s.embedding_model, base_url=s.embedding_base_url)
-        return EmbeddingClient(inner=inner, name=f"ollama:{s.embedding_model}", **common)
+        return EmbeddingClient(inner=inner, name=f"ollama:{s.embedding_model}{tag}", **common)
 
     if s.embedding_provider == "openai_compat":
         try:
@@ -113,7 +140,7 @@ def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
             check_embedding_ctx_length=False,  # non-OpenAI servers do not accept pre-tokenised input
             **extra,
         )
-        return EmbeddingClient(inner=inner, name=f"openai_compat:{s.embedding_model}", **common)
+        return EmbeddingClient(inner=inner, name=f"openai_compat:{s.embedding_model}{tag}", **common)
 
     raise ValueError(f"Unknown embedding provider: {s.embedding_provider}")
 
@@ -138,6 +165,10 @@ def get_rewriter(settings: Settings | None = None):
         from app.rag.rewrite import GlossaryRewriter
 
         return GlossaryRewriter()
+    if s.rewriter_mode == "glossary":  # M1b: no model call for query rewriting unless asked for (unmeasured with the real model)
+        from app.rag.rewrite import GlossaryRewriter
+
+        return GlossaryRewriter()
     from app.rag.rewrite import LlmRewriter
 
     return LlmRewriter(get_chat_model("rewrite", s))
@@ -158,7 +189,7 @@ def get_proposer(settings: Settings | None = None):
 def get_critic(settings: Settings | None = None):
     """The optional LLM critic of the QA loop. None with the fake provider: the deterministic checks still run."""
     s = settings or get_settings()
-    if s.llm_provider == "fake":
+    if s.llm_provider == "fake" or not s.qa_llm_critic:  # M1b: the LLM critic is opt-in; the deterministic QA checks always run
         return None
     from app.qa.critic import LlmCritic
 

@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.llm.errors import ExternalEndpointRefused
 from app.llm.gateway import get_chat_model, get_embedding_client
 from app.llm.guard import describe_llm, invoke_guarded
+from app.llm.preflight import run_preflight, warm_up
 
 
 def main() -> int:
@@ -20,10 +21,17 @@ def main() -> int:
     for line in describe_llm(s):
         print(line)
     print(f"embeddings: {s.embedding_provider} model={s.embedding_model}")
+    pre = run_preflight(s)
+    for line in (*pre.notes, *("PROBLEM: " + p for p in pre.problems)):
+        print(" ", line)
+    if not pre.ok:
+        return 1
+    if s.llm_provider == "ollama":
+        print("warm-up (model load):", warm_up(s))
     try:
         t0 = time.perf_counter()
         out = invoke_guarded(get_chat_model("faq", s), "Reply with the single word: ready", s)
-        print(f"chat ok in {time.perf_counter() - t0:.1f}s (first call includes model load): {str(out.content).strip()[:60]!r}")
+        print(f"chat ok in {time.perf_counter() - t0:.1f}s (models are warm now): {str(out.content).strip()[:60]!r}")
         t0 = time.perf_counter()
         vec = get_embedding_client(s).embed_query("What is the fee for the Python course?")
         print(f"embedding ok in {time.perf_counter() - t0:.1f}s, {len(vec)} dimensions")

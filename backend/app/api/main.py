@@ -20,7 +20,10 @@ from app.config import Settings, get_settings
 from app.graph.checkpointer import get_checkpointer
 from app.graph.support import build_support_graph
 
+import threading
+
 from app.llm.guard import describe_llm
+from app.llm.preflight import enforce, warm_up
 
 log = logging.getLogger(__name__)
 MIN_SECRET_LENGTH = 32
@@ -36,6 +39,10 @@ def create_app(settings: Settings | None = None, graph=None) -> FastAPI:
     async def lifespan(app: FastAPI):
         for line in describe_llm(s):
             log.info(line)
+        if graph is None:  # real startup (tests inject a graph and must not touch the network)
+            enforce(s)  # off | warn | strict
+            if s.llm_warmup and (s.llm_provider == "ollama" or s.embedding_provider == "ollama"):
+                threading.Thread(target=lambda: log.info("warm-up: %s", warm_up(s)), daemon=True, name="llm-warmup").start()
         app.state.graph = graph or build_support_graph(settings=s, checkpointer=get_checkpointer(s))
         yield
 

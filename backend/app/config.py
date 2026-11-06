@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     embedding_base_url: str = "http://localhost:11434"
     embedding_api_key: str = ""
     # Some embedding models want a task prefix (nomic-embed-text: "search_query: " / "search_document: ").
+    # "auto": nomic-embed-text gets the prefixes its authors specify ("search_query: " / "search_document: ") unless you set
+    # the two prefixes yourself; any other model gets none. "none": never add prefixes. Real providers only (the fake embedder is unaffected).
+    embedding_prefix_mode: Literal["auto", "none"] = "auto"
     embedding_query_prefix: str = ""
     embedding_document_prefix: str = ""
     rag_top_k: int = Field(default=4, ge=1, le=20)
@@ -77,6 +80,12 @@ class Settings(BaseSettings):
     checkpointer: Literal["memory", "postgres"] = "memory"
     # QA loop: how many times a failing reply may be revised before it is replaced by a safe fallback.
     qa_max_revisions: int = Field(default=1, ge=0, le=3)
+    # M1b: roles outside the agreed final model configuration stay deterministic / off until they are measured with the real model.
+    qa_llm_critic: bool = False                      # the LLM groundedness critic on every answered reply (adds a model call; can block good answers)
+    rewriter_mode: Literal["glossary", "llm"] = "glossary"  # search-query rewriting: tenant synonym glossary (no model call) or the chat model
+    # Startup checks for a local Ollama: off | warn (log and continue) | strict (refuse to start). Warm-up loads the models in the background.
+    llm_preflight: Literal["off", "warn", "strict"] = "warn"
+    llm_warmup: bool = True
 
     # --- Evaluation (build step 6) ---
     # Price per 1M tokens, only used to turn measured token counts into "cost per ticket". 0 = local/free model (cost reported as 0).
