@@ -129,3 +129,48 @@ def test_validate_turns_a_cited_own_words_refusal_into_the_standard_abstention(e
     text = f"The sources do not mention anything about education loans or financial assistance options. [{cite}]"
     r = ask(embedder, MetaModel(reply=text, meta={"done_reason": "stop"}))
     assert r.abstained and r.reason == "model_declined" and r.answer == ABSTAIN_MESSAGE and r.citations == []
+
+
+# ---------- reasoning must never reach a person; mixed answers survive ----------
+
+from app.llm.reasoning import visible_answer  # noqa: E402
+from app.rag.faq import declines_without_answer  # noqa: E402
+
+
+def test_visible_answer_unit():
+    assert visible_answer("<think>draft [a#1]</think>\n\nFinal [b#2].") == ("Final [b#2].", False)
+    assert visible_answer("Okay, let me think... [a#1]\n</think>\n\nFinal [b#2].") == ("Final [b#2].", False)  # opener lived in the template
+    assert visible_answer("<think>never ends [a#1] and") == ("", True)
+    assert visible_answer("plain [a#1]") == ("plain [a#1]", False)
+    assert visible_answer("") == ("", False)
+
+
+def test_citation_inside_reasoning_does_not_make_an_uncited_final_answer_acceptable(embedder, cite):
+    r = ask(embedder, MetaModel(reply=f"<think>The source says 30 days [{cite}].</think>\n\nRefunds take 30 days.", meta={"done_reason": "stop"}))
+    assert r.abstained and r.reason == "uncited_answer"
+
+
+def test_reasoning_is_never_shown_and_the_final_answer_is_judged_alone(embedder, cite):
+    reasoning = "Okay, the sources don't mention a deadline at first glance but let me check. "
+    r = ask(embedder, MetaModel(reply=f"{reasoning}\n</think>\n\nWithin 30 days [{cite}].", meta={"done_reason": "stop"}))
+    assert not r.abstained and r.answer == f"Within 30 days [{cite}]." and "Okay" not in r.answer
+
+
+def test_unfinished_reasoning_is_never_an_answer(embedder, cite):
+    r = ask(embedder, MetaModel(reply=f"<think>Let me see [{cite}] so the answer is", meta={"done_reason": "stop"}))
+    assert r.abstained and r.reason == "unfinished_reasoning" and r.answer == ABSTAIN_MESSAGE
+
+
+def test_two_part_question_keeps_the_cited_part_but_a_bare_refusal_still_abstains(embedder, cite):
+    mixed = f"The testing course duration is not mentioned in the sources [{cite}].\nYes, you can pay in two instalments [{cite}]."
+    assert not declines_without_answer(mixed)
+    r = ask(embedder, MetaModel(reply=mixed, meta={"done_reason": "stop"}))
+    assert not r.abstained and "two instalments" in r.answer
+    assert declines_without_answer(f"The sources do not mention loans [{cite}].")
+    assert declines_without_answer(f"The sources do not mention loans [{cite}]. Please contact the support team.")  # uncited remainder
+    assert not declines_without_answer("Fees are paid in two instalments [fees-and-payments#2].")
+
+
+def test_citation_after_the_full_stop_stays_with_its_sentence():
+    assert declines_without_answer("The sources do not mention loans. [about-the-institute#5]")
+    assert not declines_without_answer("The sources do not mention X. [a#1] Fees are paid in two instalments. [fees-and-payments#2]")

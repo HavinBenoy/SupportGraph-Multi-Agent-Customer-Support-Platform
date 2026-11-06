@@ -50,6 +50,12 @@ I did not edit the triage prompt: without a way to run the model I would be tuni
   much larger model fix the FAQ failures, i.e. are they capacity or retrieval/prompt?), run `make bench-experiment` with an external base URL on **synthetic
   data only**; this needs your explicit go-ahead and your own key in `.env` (I never see it). Not enabled by this delivery.
 
+### Product safety fixes found by replaying your stored answers (M1a-6)
+The plain `qwen3:4b` (thinking-only) answers contain its chain of thought followed by `</think>`; before M1a-6 the product would have shown that reasoning to a
+student and counted citations inside it. `app/llm/reasoning.py` now removes reasoning (closed `<think>` blocks, or everything up to a lone `</think>`); reasoning
+that never closes is treated as no answer (`unfinished_reasoning`). The own-words refusal guard was refined after the replay: it abstains only when the reply
+declines and gives no other cited sentence, so a two-part question keeps its answered half (your T161).
+
 ## 5. What would bring the 4B back
 The T129 failure is a format failure, not a hallucination, and the product now closes it: `declares_no_information()` (app/rag/faq.py) sends a reply that says in its
 own words that the sources lack the answer to the standard abstention (reason `model_declined`). It only ever moves a reply towards abstention. The benchmark scorer is

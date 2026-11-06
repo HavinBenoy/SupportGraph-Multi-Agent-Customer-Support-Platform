@@ -1,42 +1,50 @@
-# CHANGES: M1a-5 (refusals in the model's own words now take the abstention path)
+# CHANGES: M1a-6 (reasoning never shown; refusal guard refined after replaying your stored answers)
 
-Small delta on top of m1a ... m1a4. No `.env`, schema, migration, prompt or retrieval change; default model stays `qwen3:1.7b`. Previous notes: `docs/history/CHANGES_M1a4.md`.
+Small delta on top of m1a ... m1a5. No `.env`, schema, migration, prompt, retrieval or model-default change (default stays `qwen3:1.7b`). Previous notes: `docs/history/CHANGES_M1a5.md`.
 
-## Finding (your T129 output)
-"Can I get an education loan through you?" -> 4B answered "The sources do not mention anything about education loans or financial assistance options. [about-the-institute#5]".
-That is an honest refusal, not an invented policy, but it is not the exact `INSUFFICIENT_CONTEXT` marker. The benchmark scorer counted it as `answered_unanswerable`, and the product
-validator would have shown it as a cited answer (no standard abstention wording, no handoff, logged as answered). The pre-stated revert rule stays honoured (FAQ default = 1.7b).
+## What your replay output showed
+1. The thinking-only `qwen3:4b` writes its chain of thought into the reply and ends it with `</think>`. The product had no handling for that: the student would have seen the reasoning, and
+   `[source#id]` markers inside it would have counted as citations. All 16 "ok" guard hits were this (the guard fired on the reasoning, not the answer; the final answers were correct).
+2. One genuine false positive from the instruct 4B (T161, a two-part question): "duration is not mentioned [..]" + a correct cited instalments answer. The first guard would have abstained on all of it.
+3. The remaining flags were `INSUFFICIENT_CONTEXT` replies, which already abstain.
 
 ## Changed
-- `backend/app/rag/faq.py`: `declares_no_information()` + `validate` reason **`model_declined`**: a reply that says, in its own words, that the sources do not contain the answer becomes the standard abstention, even with a valid citation. Narrow patterns; only ever moves a reply TOWARDS abstention. Known cost: a mixed reply ("the sources don't mention X, but Y") also abstains (fail closed).
-- `backend/app/bench/llm_bench.py`: each FAQ row records `declines_in_own_words` (the product's own check; informational only). **Scoring criteria unchanged.**
-- `backend/app/bench/report.py`: `REVIEW.md` also lists `answered_unanswerable` rows.
-- Tests: 11 new in `tests/rag/test_faq_truncation.py` (6 refusals detected, 5 ordinary/negative answers not flagged, validator path), 1 extended in `tests/bench/test_bench_kit.py`.
-- `docs/MODEL_SELECTION.md`: T129 detail; what re-qualifying the 4B needs. `docs/history/CHANGES_M1a4.md`: previous notes.
+- `backend/app/llm/reasoning.py` (new): `visible_answer()` removes `<think>...</think>` blocks, or everything up to a lone `</think>`; an unclosed `<think>` means no answer.
+- `backend/app/rag/faq.py`: `generate` keeps only the visible answer; `validate` adds reason `unfinished_reasoning`; the own-words guard is now `declines_without_answer()` (a decline with NO other cited sentence; a trailing citation stays with its sentence). `declares_no_information()` is kept for the benchmark's informational field.
+- `backend/app/qa/critic.py`: the QA reviser also uses only the visible answer (an unfinished one is discarded).
+- Tests (`tests/rag/test_faq_truncation.py`): +8 (reasoning stripping, citations inside reasoning do not count, unfinished reasoning, two-part answers, bare refusals, trailing citations).
+- `docs/MODEL_SELECTION.md`, `docs/history/CHANGES_M1a5.md`.
+- Not changed: benchmark scoring (it still judges the raw text, so a thinking model's reasoning would be in what it scores; that model is excluded anyway).
 
 ## Executed (sandbox) / not executed
 | Check | Result | Where |
 |---|---|---|
-| Full SQLite backend suite | **696 passed, 28 skipped** (was 684; +12) | my sandbox |
-| Postgres + pgvector suite | **724 passed** (was 712) | my sandbox |
-| The false-positive snippet below | runs on synthetic mock output only (0 flags); **not run on your real answers** | your laptop |
-| Real model behaviour with the guard | **not run** | your laptop |
+| Full SQLite backend suite | **702 passed, 28 skipped** (was 696; +6 net) | my sandbox |
+| Postgres + pgvector suite | **730 passed** (was 724) | my sandbox |
+| The replay snippet | ran on synthetic mock output only (shape check); **not on your real answers** | your laptop |
+| Real model behaviour | **not run** | your laptop |
 
 ## Run on your laptop
 ```bash
-unzip -o supportgraph-m1a5.zip
-make test-fast                                       # expect: 696 passed, 28 skipped
-# Free false-positive check of the new guard on EVERY answer you already have (no model needed):
+unzip -o supportgraph-m1a6.zip
+make test-fast                                      # expect: 702 passed, 28 skipped
+# Replay EVERY stored answer through the product's real validation logic (no model needed):
 cd backend && ../.venv/bin/python - <<'PY'
 import json, glob, collections
-from app.rag.faq import declares_no_information
-n = collections.Counter(); hits = []
-for f in glob.glob("../evals/**/faq-*.json", recursive=True):
+from app.llm.reasoning import visible_answer
+from app.rag.faq import declines_without_answer
+from app.llm.fake_faq import SENTINEL
+c = collections.Counter(); odd = []
+for f in sorted(glob.glob("../evals/**/faq-*.json", recursive=True)):
     for r in json.load(open(f))["rows"]:
         if "text" not in r: continue
-        flag = declares_no_information(r["text"]); n[(r["label"], flag)] += 1
-        if flag and r["label"] not in ("answered_unanswerable",) and not r.get("must_abstain"): hits.append((f.split("/")[-1], r["id"], r["label"], r["text"][:140]))
-print(dict(n)); print("answerable questions the guard would turn into abstentions:"); [print(" ", h) for h in hits]
+        vis, unfinished = visible_answer(r["text"])
+        shown = not (r.get("truncated") or unfinished or not vis or SENTINEL in vis or declines_without_answer(vis))
+        c[(f.split("/")[-1], "must_abstain" if r.get("must_abstain") else "answerable", "shown" if shown else "abstained")] += 1
+        if r.get("must_abstain") and shown: odd.append(("UNANSWERABLE SHOWN", f.split("/")[-1], r["id"], vis[:160]))
+        if not r.get("must_abstain") and not shown and r["label"] == "ok": odd.append(("CORRECT ANSWER LOST", f.split("/")[-1], r["id"], vis[:160]))
+for k, v in sorted(c.items()): print(v, k)
+print("\nPROBLEMS:"); [print(" ", o) for o in odd] or print("  none")
 PY
 ```
-Send me that output: it shows how many currently-correct answers the guard would have abstained on (the cost) and how many unanswerable ones it catches (the benefit).
+Send me that output. "UNANSWERABLE SHOWN" is the dangerous direction; "CORRECT ANSWER LOST" is the cost.

@@ -11,6 +11,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.llm.reasoning import visible_answer
 from app.llm.truncation import is_truncated
 from app.qa.checks import QaIssue
 
@@ -68,7 +69,8 @@ class LlmReviser:
             if is_truncated(out):  # a half-written revision must not replace the reply
                 log.warning("QA reviser output was truncated; discarding it")
                 return ""
-            return " ".join(str(out.content).split())
+            visible, unfinished = visible_answer(str(out.content))
+            return "" if unfinished else " ".join(visible.split())
         except Exception as e:  # noqa: BLE001
             log.warning("QA reviser failed (%s)", type(e).__name__)
             return ""
