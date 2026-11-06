@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SG_", env_file=_REPO_ROOT_ENV, extra="ignore", populate_by_name=True)
 
     llm_provider: Literal["fake", "ollama", "openai_compat"] = "fake"
-    llm_model: str = "qwen3:4b-instruct-2507-q4_K_M"  # M1 decision (docs/decisions/0006): non-thinking 4B for FAQ and the other roles; triage uses the 1.7B (below)
+    llm_model: str = "qwen3:1.7b"  # M1 decision (docs/decisions/0006): safest measured model; qwen3:4b-instruct-2507-q4_K_M is an opt-in candidate
     llm_base_url: str = "http://localhost:11434"
     llm_api_key: str = ""
     # --- Model gateway hardening (milestone 0) ---
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # reviser, judge. Empty = use SG_LLM_MODEL. A role override never changes the provider or endpoint.
     llm_model_action: str = ""
     llm_model_faq: str = ""
-    llm_model_triage: str = "qwen3:1.7b"  # 0 false escalations on dev, ~2x faster; the 4B escalated 12% of ordinary tickets (docs/MODEL_SELECTION.md)
+    llm_model_triage: str = ""  # empty = use llm_model. (The 4B instruct escalated 12-15% of ordinary tickets, so triage should stay on the 1.7B.)
     llm_model_rewrite: str = ""
     llm_model_proposer: str = ""
     llm_model_critic: str = ""
