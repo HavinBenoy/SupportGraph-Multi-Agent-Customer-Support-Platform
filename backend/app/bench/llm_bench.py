@@ -30,6 +30,16 @@ _GEN_ATTRS = ("model", "temperature", "num_ctx", "num_predict", "top_p", "top_k"
               "seed", "max_tokens", "request_timeout", "base_url")
 
 
+_ROLE_FIELDS = ("llm_model_action", "llm_model_faq", "llm_model_triage", "llm_model_rewrite", "llm_model_proposer", "llm_model_critic",
+                "llm_model_reviser", "llm_model_judge")
+
+
+def settings_for_model(settings: Settings, model_name: str) -> Settings:
+    """The settings under which `model_name` is benchmarked in EVERY role: the model under test, with the product's per-role
+    overrides cleared. Without this, a role default (e.g. triage on the small model) would silently replace the model being tested."""
+    return settings.model_copy(update={"llm_model": model_name, **{f: "" for f in _ROLE_FIELDS}})
+
+
 def describe_chat_model(model) -> dict:
     """The generation options the client object was built with (what is sent to the provider). Never includes keys."""
     out = {"class": type(model).__name__}
@@ -87,7 +97,7 @@ def _speed(rows: list[dict]) -> dict:
 def bench_faq(settings: Settings, model_name: str, factory: ModelFactory, *, splits: dict[str, list[dict]], chunks,
               limit: int | None = None, institute_name: str = "QSpiders", on_progress=None) -> dict:
     """`splits` maps a split name to its tickets. `limit` applies to each split. Context is the same lexical top-k for every model."""
-    s = settings.model_copy(update={"llm_model": model_name})
+    s = settings_for_model(settings, model_name)
     model = factory("faq", s)
     rows: list[dict] = []
     summaries: dict[str, dict] = {}
@@ -124,7 +134,7 @@ def bench_triage(settings: Settings, model_name: str, factory: ModelFactory, *, 
                  limit: int | None = None, on_progress=None, triager=None, route_fn=None) -> dict:
     """Triage every ticket in each split. Routes come from the support graph's real route node (decide_route + escalation
     floor) using your SG_TRIAGE_MIN_CONFIDENCE. `triager` / `route_fn` can be injected for tests."""
-    s = settings.model_copy(update={"llm_model": model_name})
+    s = settings_for_model(settings, model_name)
     gen = {}
     if triager is None:
         model = factory("triage", s)
@@ -154,7 +164,7 @@ def cold_start(settings: Settings, model_name: str, factory: ModelFactory, unloa
     done_reason: a one-word request that produces hundreds of tokens is a finding in itself."""
     if unload:
         unload(model_name)
-    s = settings.model_copy(update={"llm_model": model_name})
+    s = settings_for_model(settings, model_name)
     from langchain_core.messages import HumanMessage
 
     try:

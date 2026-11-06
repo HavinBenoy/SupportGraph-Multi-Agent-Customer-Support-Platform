@@ -85,3 +85,12 @@ def test_describe_llm_has_no_key_and_flags_external():
     text = "\n".join(describe_llm(s))
     assert "EXTERNAL" in text and "WARNING" in text and "SECRET" not in text
     assert "fake" in describe_llm(Settings(_env_file=None))[0]
+
+
+def test_m1_default_models_are_the_non_thinking_4b_and_the_small_triage_model():
+    from app.llm.gateway import _role_model
+
+    s = Settings(_env_file=None)
+    assert s.llm_model == "qwen3:4b-instruct-2507-q4_K_M" and s.llm_model_triage == "qwen3:1.7b"
+    assert _role_model("faq", s) == s.llm_model and _role_model("triage", s) == "qwen3:1.7b"
+    assert "thinking" not in s.llm_model and s.llm_model != "qwen3:4b"  # plain qwen3:4b is the thinking-only build

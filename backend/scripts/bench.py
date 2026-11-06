@@ -2,7 +2,7 @@
 the local Ollama server. Results go to evals/bench/ (JSON) and evals/bench/SUMMARY.md.
 
     make bench-check                                   # is Ollama up, which models are pulled, what is missing
-    make bench-llm MODELS="qwen3:4b qwen3:1.7b"        # FAQ + triage per model, dev AND held-out reported separately
+    make bench-llm MODELS="qwen3:4b-instruct-2507-q4_K_M qwen3:1.7b"        # FAQ + triage per model, dev AND held-out reported separately
     make bench-llm ARGS="--splits dev --limit 10"      # quick pass
     make bench-embed                                   # embedding speed + retrieval quality
     make bench-stt AUDIO=~/my-wavs MODEL=base.en       # optional (voice milestone)
@@ -26,7 +26,7 @@ from app.llm.guard import check_endpoint_allowed
 RUN_ID = uuid.uuid4().hex[:8]
 
 OUT = DATASETS_DIR.parent / "bench"
-DEFAULT_MODELS = ["qwen3:4b", "qwen3:1.7b"]
+DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "qwen3:1.7b"]
 DEFAULT_EMBED = ["nomic-embed-text"]
 
 

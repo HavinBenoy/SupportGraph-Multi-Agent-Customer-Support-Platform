@@ -279,3 +279,23 @@ def test_review_sheet_lists_only_judgement_failures_and_changes_nothing():
     assert "T3" in md and "Both online and offline" in md and "Nothing here changes any score" in md
     assert "T9" not in md and "T1 " not in md and "[ ] correct (paraphrase)" in md
     assert "No failures" in report.render_review([{"suite": "faq", "model": "m", "rows": rows[2:]}])
+
+
+def test_benchmark_uses_the_model_under_test_in_every_role_despite_product_role_defaults():
+    from app.llm.gateway import _role_model
+    s = Settings(_env_file=None, llm_provider="ollama")
+    assert _role_model("triage", s) == "qwen3:1.7b"            # the product default for triage
+    t = llm_bench.settings_for_model(s, "other:model")
+    assert all(_role_model(r, t) == "other:model" for r in ("faq", "triage", "rewrite", "critic"))
+    seen = {}
+
+    def factory(role, st):
+        seen[role] = _role_model(role, st)
+        raise RuntimeError("stop")  # no model needed: we only look at which model would be built
+    for fn in (lambda: llm_bench.bench_triage(s, "other:model", factory, splits={"dev": []}),
+               lambda: llm_bench.cold_start(s, "other:model", factory, None)):
+        try:
+            fn()
+        except RuntimeError:
+            pass
+    assert seen == {"triage": "other:model", "faq": "other:model"}
