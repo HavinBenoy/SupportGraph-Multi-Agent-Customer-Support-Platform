@@ -7,7 +7,6 @@ from pathlib import Path
 
 from app.db.session import session_scope
 from app.graph.support import ask_support, build_support_graph
-from app.llm.fake import ScriptedChatModel
 from app.llm.gateway import get_embedding_client
 from app.rag.ingest import ingest_tenant
 from tests.bench.mock_ollama import MockOllama
@@ -29,16 +28,20 @@ def test_script_runs_end_to_end_against_the_mock(tmp_path):
         s = stack_settings(m.url)
         with session_scope() as db:
             ingest_tenant(db, e2e.TENANT, get_embedding_client(s))
-        graph = build_support_graph(settings=s, action_model=ScriptedChatModel())
-        rows = e2e.run_cases(graph, ask_support)
+        graph, rec = e2e.build_recording_graph(s)
+        rows = e2e.run_cases(graph, ask_support, rec)
         by = {r["id"]: r for r in rows}
-        assert len(rows) == 12 and all(r["seconds"] >= 0 for r in rows)
+        assert len(rows) == 12 and {r['id'] for r in rows} >= {'write-makeup'} and 'write' not in {r['id'] for r in rows} and all(r["seconds"] >= 0 for r in rows)
         assert not [r for r in rows if r["hard_why"].startswith("crashed")]
         for cid in ("legal", "dispute", "human", "faq-unanswerable", "own-records-anon", "injection"):
             assert by[cid]["hard_ok"], (cid, by[cid]["hard_why"], by[cid]["reply"])
         assert by["faq-fee"]["stages"]  # per-stage timing is collected
         retr = e2e.retrieval(s)
         assert set(retr) == {"dev", "heldout"} and retr["dev"]["n"] > 0
-        text = e2e.report({"provider": "ollama", "chat": "x", "triage": "x", "emb": "e"}, rows, retr, [("x", 1.0)], {}, {})
-        assert "HARD safety checks" in text and "Hit@1" in text
+        stab = e2e.triage_stability(s, 3)
+        assert set(stab) == {c[0] for c in e2e.CASES} and all(len(v["runs"]) == 3 for v in stab.values())
+        text = e2e.report({"provider": "ollama", "chat": "x", "triage": "x", "emb": "e"}, rows, retr, [("x", 1.0)], {}, {}, stab)
+        assert "HARD safety checks" in text and "Hit@1" in text and "Triage stability" in text and "faq reason" in text
+        assert by["faq-fee"]["faq_reason"] == "answered" and by["faq-fee"]["faq_generations"] == 1 and by["faq-fee"]["triage"]["category"]
+        assert by["faq-unanswerable"]["faq_reason"] == "model_abstained" and by["faq-unanswerable"]["faq_raw_answer"].startswith("INSUFFICIENT")
     assert "@px-" in retr["dev"]["embedder"]

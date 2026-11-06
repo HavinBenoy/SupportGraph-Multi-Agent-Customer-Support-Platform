@@ -1,34 +1,48 @@
-# M1b fix batch 2 of 3 - FAQ citation reliability (delta on top of batch 1)
+# M1b fixes after the first real-model run - consolidated (batches 1-3; apply batch 1, 2, then this ZIP)
 
-Models, Nomic prefixes, abstention, escalation, RBAC, tenant isolation, approval flow, `.env`, database, schema and volumes are untouched.
+Preserved throughout: Qwen3 1.7B, Nomic with prefixes, citation validation, abstention, escalation floor (additive only), RBAC, tenant isolation,
+approval pause. No model benchmark, no schema/migration, no dependency, `.env`/database/volumes untouched.
 
-## Hotfix included: tests no longer depend on your `.env` (found by your batch-1 `make test-fast` run)
-`test_faq_workflow_expects_...` failed on your machine only: your `.env` now has `SG_EMBEDDING_PROVIDER=ollama`, and code reading `get_settings()` looked for vectors under the real embedding name while the test had ingested with the fakes. `tests/conftest.py` already forced `SG_LLM_PROVIDER=fake`; it now forces `SG_EMBEDDING_PROVIDER=fake` too (environment outranks `.env`). I reproduced the failure in the sandbox with `SG_EMBEDDING_PROVIDER=ollama` and verified the fix under both providers set to ollama. Your `.env` is not read or changed.
+## Findings and fixes (from your e2e report + read-only diagnostic)
+| # | Case | Root cause | Type | Fix (batch) |
+|---|---|---|---|---|
+| 1 | `faq-unanswerable` | triage `other` 0.5 < 0.6 -> "name the batch"; FAQ would have abstained (`INSUFFICIENT_CONTEXT`) | graph routing | `other` at 0.4..<0.6 -> grounded FAQ (1) |
+| 2 | `faq-outside` | same | graph routing | same (1) |
+| 3 | `human` | triage `other` 0.5; no floor rule | model classification + missing floor rule | `human_request` floor rule + prompt (1) |
+| 4 | `faq-fee` | same text gave `other` 0.8 in the diagnostic, but escalated in e2e: 1.7B triage unstable run to run | model classification (unstable) | prompt definitions (1); instability now reported (3) |
+| 5 | `faq-courses` | correct answer without citation -> `uncited_answer` | model compliance, caught by the validator | one validated citation retry (2) |
+| 6 | `write` | invented "reschedule" request: no such action | test-data error (mine) | e2e uses labelled T038 (3) |
+Also fixed: tests depended on your `.env` embedding provider (found by your batch-1 `make test-fast`): `tests/conftest.py` forces fake embeddings (2).
 
-## Finding addressed
-`faq-courses`: the 1.7B model wrote a correct answer ("Python Full Stack and Data Science with Python") with no citation. The validator correctly rejected it (`uncited_answer`), but the student got an abstention.
+## Behaviour changes
+- Router: category `other`, confidence >= `SG_TRIAGE_OTHER_FLOOR` (0.4) and < `SG_TRIAGE_MIN_CONFIDENCE` (0.6) -> knowledge (reason `other_low_confidence`). Below 0.4 and parse failures (0.0): still clarify. Other categories unchanged. Injection and escalation first.
+- Floor: `human_request` rule (talk/speak/connect/transfer to a person/human/agent/representative/someone; real person; human agent; not a bot).
+- FAQ: an `uncited_answer` is regenerated once with a citation reminder; same validator; abstain if it fails again. Nothing else is retried; code never adds a citation. `SG_FAQ_CITATION_RETRIES=0` disables.
+- Triage prompt: defines human_request, concession_request (discount/waiver only), other; confidence is about the category.
+- Offline eval reference refreshed in batch 1 (heldout handled-correctly 59.7% -> 64.5%, correct abstention 42.9% -> 71.4%, over-abstain 16.7% -> 20.0% due to the fake FAQ on T110; escalation recall 100%).
 
-## Change (`app/rag/faq.py`, `app/config.py`)
-- After `validate`, ONLY `reason == "uncited_answer"` triggers one `regenerate`: same messages plus one reminder ("your previous reply contained no source citation... end every factual sentence with an id such as [<a real retrieved id>]... or reply exactly INSUFFICIENT_CONTEXT").
-- The retry output goes through the identical `visible_answer` (reasoning strip) and `validate` (truncation, unfinished reasoning, sentinel, own-words decline, uncited, unknown citation). If it fails again the bot abstains with the standard message. At most one retry (`SG_FAQ_CITATION_RETRIES`, default 1, 0 = off).
-- No other failure is retried (truncated, unfinished reasoning, sentinel, decline, unknown citation). Code never adds a citation: the shown text is exactly what the model wrote.
-- Cost: one extra model call (~2-3 s on your CPU) only when the model forgot to cite.
-- State field `generation_attempts` (1 or 2) is available for diagnostics (used by e2e in batch 3).
+## This batch (3): e2e and final verification
+- `scripts/e2e_local.py`: write case is now labelled ticket T038 (`stu_meera`, make-up class for PYD-301) with a HARD check that a write route must pause for approval; per-case soft "as hoped / differs" column; report shows triage category+confidence, FAQ validator reason, number of generations and the raw answer of every non-answered FAQ result (via a recording wrapper; nothing extra is stored in product state); `--stability-runs N` (default 3, 0 = skip) classifies each message N times through the real triager and the real route node and reports category/route variation; `today` now follows the labelled-ticket rule (`today_for`) so make-up windows match your seeded data.
+- `tests/graph/test_m1b_six_cases.py` (new, 11 cases): the six findings through the full support graph with triage scripted to what the real model returned, plus guards: model escalation is not overridden, uncited smuggling fails, anonymous make-up is not written, unsupported "reschedule" writes nothing.
+- `tests/graph/test_e2e_local_script.py`: dry run covers the new report fields and stability.
+- `docs/M1B.md`, `docs/ROADMAP.md` updated.
 
-## Tests actually run (sandbox)
+## Tests actually run (sandbox, final)
 | Run | Result |
 |---|---|
-| `tests/rag/test_faq_citation_retry.py` (new, 17 cases) | pass |
-| 2 new mock-Ollama cases in `tests/graph/test_local_stack_mock.py` (real langchain-ollama client: forgets once -> cited on retry; never cites -> abstains after exactly one retry) | pass |
-| Full SQLite suite, with `SG_LLM_PROVIDER=ollama SG_EMBEDDING_PROVIDER=ollama` exported to prove env-independence | 779 passed, 30 skipped |
-| PostgreSQL suite, real Ollama | not in this batch (PostgreSQL in batch 3; real models are your run) |
+| SQLite full suite (`pytest -n auto`, with `SG_LLM_PROVIDER=ollama SG_EMBEDDING_PROVIDER=ollama` exported) | 790 passed, 30 skipped |
+| PostgreSQL full suite (`SG_TEST_DATABASE_URL`, sandbox PG 16) | 818 passed, 2 skipped (opt-in real-Ollama tests) |
+| New six-case file | 11 passed |
+| Real Ollama / real latency | NOT run here: your `make e2e-local` |
 
 ## Verify locally
 ```
 make test-fast
+make test-pg
 git diff --check
-cd backend && ../.venv/bin/python -m pytest -q tests/rag/test_faq_citation_retry.py
-make e2e-local      # faq-courses should now answer with a citation (watch its latency: ~2 calls when the model forgets)
+make e2e-local              # ~5-8 min now (3 extra triage calls per message for the stability table; use ARGS="--stability-runs 0" to skip)
 ```
-Files modified: `app/rag/faq.py`, `app/config.py`, `tests/conftest.py`, `tests/bench/mock_ollama.py` (two test-only modes), `tests/graph/test_local_stack_mock.py`, `.env.example` (comments). Added: `tests/rag/test_faq_citation_retry.py`. Deleted: none.
-Note: `app/config.py` also contains batch 1's `triage_other_floor` (already applied by you).
+Expect: `HARD failures: 0` (the three earlier failures were human + two abstain checks, now `human` escalates and both out-of-scope cases route to knowledge and abstain). Soft column: faq-courses should answer with a citation (generations 2 if the model forgot), write-makeup should show route write + staff. If faq-fee escalates again, the triage table will show the category; send me the report.
+Optional rollbacks: `SG_TRIAGE_OTHER_FLOOR=0.6`, `SG_FAQ_CITATION_RETRIES=0`.
+
+Files (this ZIP): modified `docs/M1B.md`, `docs/ROADMAP.md`, `backend/scripts/e2e_local.py`, `backend/tests/graph/test_e2e_local_script.py`; added `backend/tests/graph/test_m1b_six_cases.py`; `CHANGES.md` replaced. Deleted: none.

@@ -20,3 +20,13 @@ SG_EMBEDDING_PROVIDER=ollama
 ```
 Then `make ingest` (adds vectors under the new embedding name; deletes nothing), `make llm-smoke`, `make e2e-local`.
 Rolling back = set both back to `fake`. No migration, no new dependency.
+
+## Fixes after the first real-model e2e run (batches 1-3)
+| Finding | Cause | Fix |
+|---|---|---|
+| `human` clarified | triage `other` 0.5; no floor rule | floor rule `human_request` |
+| out-of-scope / unanswerable clarified | triage `other` 0.5 < 0.6 | router: `other` at 0.4..<0.6 -> grounded FAQ (`SG_TRIAGE_OTHER_FLOOR`) |
+| `faq-courses` abstained | correct answer, no citation (`uncited_answer`) | one validated citation retry (`SG_FAQ_CITATION_RETRIES`) |
+| `faq-fee` escalated once | 1.7B triage unstable between runs; prompt left `concession_request` undefined | prompt definitions; `make e2e-local` now reports triage stability |
+| `write` | test used an action that does not exist | e2e uses labelled ticket T038 (make-up class) |
+Known limit: the 1.7B triage can still vary between runs; the escalation floor, router rules and the validated FAQ path keep the outcome safe whatever it returns.
