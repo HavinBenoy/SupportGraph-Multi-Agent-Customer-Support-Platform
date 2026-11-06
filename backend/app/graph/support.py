@@ -73,7 +73,7 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
     def route(state: TicketState, config: RunnableConfig) -> dict:
         decision, reason = decide_route(TriageResult.model_validate(state["triage"]), text=text_of(state),
                                         signed_in=is_signed_in(cfg_of(config).get("student_id")),
-                                        min_confidence=s.triage_min_confidence)
+                                        min_confidence=s.triage_min_confidence, other_floor=s.triage_other_floor)
         if decision != ESCALATE and reason != "injection_suspected":
             floor = escalation_floor(text_of(state))  # model-independent safety net: it can only ADD an escalation
             if floor:

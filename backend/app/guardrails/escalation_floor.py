@@ -23,6 +23,12 @@ _RULES: list[tuple[str, str, re.Pattern]] = [
     ("payment_dispute", "high", re.compile(
         r"\b(double|twice|two times|2 times|duplicate|again)\b.{0,30}\b(charged|paid|payment|deducted|debited)\b"
         r"|\b(charged|paid|deducted|debited)\b.{0,30}\b(twice|double|two times|2 times)\b|\bwrong(ly)? (charged|deducted|debited)\b", re.I)),
+    # An explicit request for a person. Added in M1b: the real 1.7B triage answered "I want to talk to a person" as `other` at 0.5.
+    # Not urgent (priority stays as triage set it); the team comes from the tenant's escalation_teams for human_request.
+    ("human_request", "low", re.compile(
+        r"\b(talk|speak|chat|connect|transfer)(ing)?\s+(me\s+)?(to|with)\s+(a|an|the|your)?\s*(real\s+|live\s+|actual\s+)?"
+        r"(person|human|agent|representative|executive|staff member|someone(?!\s+(who|else)))\b"
+        r"|\b(real|live|actual)\s+(person|human)\b|\bhuman\s+(agent|being|support)\b|\bnot\s+(a\s+)?(bot|robot|machine)\b", re.I)),
 ]
 _ORDER = {"low": 0, "medium": 1, "high": 2, "urgent": 3}
 

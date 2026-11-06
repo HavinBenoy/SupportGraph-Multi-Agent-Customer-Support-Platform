@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # --- Triage, routing and corrective RAG (build step 3) ---
     # Below this triage confidence the router asks a clarifying question instead of acting.
     triage_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    # Category `other` with confidence from this value up to triage_min_confidence goes to the grounded FAQ (answer with a citation or
+    # abstain) instead of a clarifying question. Below it, and for parse failures (0.0), the router still asks. Escalation always wins.
+    triage_other_floor: float = Field(default=0.4, ge=0.0, le=1.0)
     # Knowledge agent: first search + at most (attempts - 1) corrective retries. The cap prevents runaway loops and cost.
     knowledge_max_attempts: int = Field(default=2, ge=1, le=3)
 

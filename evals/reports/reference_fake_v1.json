@@ -4,7 +4,7 @@
       "meta": {
         "tickets": 57,
         "file": "tickets_qspiders_v1.jsonl",
-        "today": "2026-11-04"
+        "today": "2026-10-24"
       },
       "systems": {
         "graph": {
@@ -78,35 +78,35 @@
           },
           "performance": {
             "latency_ms": {
-              "p50": 21,
-              "p95": 35,
-              "max": 38
+              "p50": 25,
+              "p95": 41,
+              "max": 46
             },
             "latency_by_route": {
               "action": {
                 "n": 9,
-                "p50": 15,
-                "p95": 23
+                "p50": 13,
+                "p95": 17
               },
               "clarify": {
                 "n": 8,
-                "p50": 5,
-                "p95": 12
+                "p50": 6,
+                "p95": 8
               },
               "escalate": {
                 "n": 6,
-                "p50": 17,
-                "p95": 28
+                "p50": 12,
+                "p95": 14
               },
               "knowledge": {
                 "n": 31,
-                "p50": 25,
-                "p95": 35
+                "p50": 31,
+                "p95": 42
               },
               "write": {
                 "n": 3,
-                "p50": 17,
-                "p95": 38
+                "p50": 10,
+                "p95": 26
               }
             },
             "llm_calls_per_ticket": 0.807,
@@ -321,20 +321,20 @@
           },
           "performance": {
             "latency_ms": {
-              "p50": 7,
-              "p95": 10,
-              "max": 10
+              "p50": 10,
+              "p95": 12,
+              "max": 17
             },
             "latency_by_route": {
               "abstain": {
                 "n": 25,
-                "p50": 5,
-                "p95": 10
+                "p50": 8,
+                "p95": 14
               },
               "knowledge": {
                 "n": 32,
-                "p50": 7,
-                "p95": 10
+                "p50": 10,
+                "p95": 12
               }
             },
             "llm_calls_per_ticket": 0.0,
@@ -646,13 +646,13 @@
       "meta": {
         "tickets": 62,
         "file": "tickets_qspiders_v2_heldout.jsonl",
-        "today": "2026-11-04"
+        "today": "2026-10-24"
       },
       "systems": {
         "graph": {
           "tickets": 62,
           "system": "graph",
-          "handled_correctly_rate": 0.5968,
+          "handled_correctly_rate": 0.6452,
           "handled_by_route": {
             "action": {
               "n": 9,
@@ -668,14 +668,14 @@
             },
             "knowledge": {
               "n": 37,
-              "handled_correctly": 0.4054
+              "handled_correctly": 0.4865
             },
             "write": {
               "n": 2,
               "handled_correctly": 0.5
             }
           },
-          "route_accuracy": 0.8065,
+          "route_accuracy": 0.8387,
           "triage": {
             "category_accuracy": 0.6481,
             "category_scored": 54,
@@ -684,16 +684,16 @@
           },
           "knowledge": {
             "answerable": 30,
-            "correct_rate": 0.4,
-            "over_abstain_rate": 0.1667,
-            "wrong_answer_rate": 0.3684,
+            "correct_rate": 0.4333,
+            "over_abstain_rate": 0.2,
+            "wrong_answer_rate": 0.381,
             "must_abstain": 7,
-            "abstain_rate": 0.4286
+            "abstain_rate": 0.7143
           },
           "groundedness": {
-            "answers": 20,
+            "answers": 22,
             "unsupported_number_rate": 0.0,
-            "judge_scored": 20,
+            "judge_scored": 22,
             "judge_grounded_rate": 1.0,
             "judge_relevant_rate": 1.0
           },
@@ -705,7 +705,7 @@
             "awaiting_staff_approval": 0,
             "escalations_recorded": 1.0,
             "automation_rate": 0.871,
-            "correct_automation_rate": 0.4839
+            "correct_automation_rate": 0.5323
           },
           "safety": {
             "leaks": [],
@@ -718,39 +718,39 @@
           },
           "performance": {
             "latency_ms": {
-              "p50": 17,
-              "p95": 31,
-              "max": 35
+              "p50": 25,
+              "p95": 42,
+              "max": 43
             },
             "latency_by_route": {
               "action": {
                 "n": 7,
-                "p50": 14,
-                "p95": 14
+                "p50": 12,
+                "p95": 13
               },
               "clarify": {
-                "n": 16,
-                "p50": 4,
-                "p95": 5
+                "n": 8,
+                "p50": 5,
+                "p95": 6
               },
               "escalate": {
                 "n": 8,
-                "p50": 15,
-                "p95": 17
+                "p50": 10,
+                "p95": 11
               },
               "knowledge": {
-                "n": 30,
-                "p50": 24,
-                "p95": 32
+                "n": 38,
+                "p50": 32,
+                "p95": 43
               },
               "write": {
                 "n": 1,
-                "p50": 14,
-                "p95": 14
+                "p50": 8,
+                "p95": 8
               }
             },
-            "llm_calls_per_ticket": 0.71,
-            "tokens_per_ticket": 57.5,
+            "llm_calls_per_ticket": 0.758,
+            "tokens_per_ticket": 59.5,
             "tokens_estimated": true,
             "cost_per_ticket_usd": 0.0
           },
@@ -816,7 +816,7 @@
             "persona": {
               "prospect": {
                 "n": 42,
-                "handled_correctly": 0.5
+                "handled_correctly": 0.5714
               },
               "student": {
                 "n": 20,
@@ -826,7 +826,7 @@
             "language": {
               "en": {
                 "n": 60,
-                "handled_correctly": 0.5833
+                "handled_correctly": 0.6333
               },
               "hi-Latn": {
                 "n": 2,
@@ -837,11 +837,12 @@
           "confusion": {
             "action->action": 7,
             "action->knowledge": 2,
-            "clarify->clarify": 7,
+            "clarify->clarify": 4,
+            "clarify->knowledge": 3,
             "escalate->escalate": 7,
-            "knowledge->clarify": 8,
+            "knowledge->clarify": 3,
             "knowledge->escalate": 1,
-            "knowledge->knowledge": 28,
+            "knowledge->knowledge": 33,
             "write->clarify": 1,
             "write->write": 1
           },
@@ -864,7 +865,7 @@
               "id": "T110",
               "message": "Do you teach Selenium?",
               "problems": [
-                "expected knowledge, got clarify (low_confidence)"
+                "expected knowledge, got knowledge (other_low_confidence)"
               ]
             },
             {
@@ -878,7 +879,7 @@
               "id": "T112",
               "message": "Are weekend classes available?",
               "problems": [
-                "expected knowledge, got clarify (low_confidence)"
+                "expected knowledge, got knowledge (other_low_confidence)"
               ]
             },
             {
@@ -900,13 +901,6 @@
               "message": "What papers should I carry on the day of registration?",
               "problems": [
                 "expected knowledge, got knowledge (admissions)"
-              ]
-            },
-            {
-              "id": "T117",
-              "message": "Can I try a class before paying?",
-              "problems": [
-                "expected knowledge, got clarify (low_confidence)"
               ]
             },
             {
@@ -963,20 +957,6 @@
               "message": "What salary did last year's students get on average?",
               "problems": [
                 "expected knowledge, got clarify (other_person_data)"
-              ]
-            },
-            {
-              "id": "T132",
-              "message": "Is there a branch in Mumbai?",
-              "problems": [
-                "expected knowledge, got clarify (low_confidence)"
-              ]
-            },
-            {
-              "id": "T133",
-              "message": "What time does the library close?",
-              "problems": [
-                "expected knowledge, got clarify (low_confidence)"
               ]
             },
             {
@@ -1054,17 +1034,17 @@
           "knowledge": {
             "answerable": 30,
             "correct_rate": 0.4,
-            "over_abstain_rate": 0.2667,
-            "wrong_answer_rate": 0.4545,
+            "over_abstain_rate": 0.3,
+            "wrong_answer_rate": 0.4286,
             "must_abstain": 7,
             "abstain_rate": 0.8571
           },
           "groundedness": {
-            "answers": 28,
+            "answers": 27,
             "unsupported_number_rate": 0.0,
-            "judge_scored": 28,
+            "judge_scored": 27,
             "judge_grounded_rate": 1.0,
-            "judge_relevant_rate": 0.9643
+            "judge_relevant_rate": 0.963
           },
           "human": {
             "escalation_precision": null,
@@ -1087,24 +1067,24 @@
           },
           "performance": {
             "latency_ms": {
-              "p50": 6,
-              "p95": 7,
-              "max": 7
+              "p50": 11,
+              "p95": 15,
+              "max": 19
             },
             "latency_by_route": {
               "abstain": {
-                "n": 34,
-                "p50": 3,
-                "p95": 7
+                "n": 35,
+                "p50": 8,
+                "p95": 16
               },
               "knowledge": {
-                "n": 28,
-                "p50": 6,
-                "p95": 7
+                "n": 27,
+                "p50": 11,
+                "p95": 15
               }
             },
             "llm_calls_per_ticket": 0.0,
-            "tokens_per_ticket": 52.9,
+            "tokens_per_ticket": 52.4,
             "tokens_estimated": true,
             "cost_per_ticket_usd": 0.0
           },
@@ -1271,7 +1251,7 @@
               "id": "T120",
               "message": "Will you get me a job after the course?",
               "problems": [
-                "expected knowledge, got knowledge (answered)"
+                "expected knowledge, got abstain (model_declined)"
               ]
             },
             {
@@ -1632,8 +1612,8 @@
     "labeler_note": "drafted by Claude, awaiting human review"
   },
   "meta": {
-    "run_id": "53ea9c",
-    "today": "2026-11-04",
+    "run_id": "38ef6b",
+    "today": "2026-10-24",
     "llm_provider": "fake",
     "embedding_provider": "fake",
     "judge": "rule",

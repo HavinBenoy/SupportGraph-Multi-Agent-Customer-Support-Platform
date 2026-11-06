@@ -1,6 +1,6 @@
-# Evaluation report (run `53ea9c`)
+# Evaluation report (run `38ef6b`)
 
-- evaluated as of 2026-11-04; chat model `fake`, embeddings `fake`, judge `rule`
+- evaluated as of 2026-10-24; chat model `fake`, embeddings `fake`, judge `rule`
 
 > **Offline fakes in use.** These numbers test the plumbing and how well keyword rules fit these ticket sets. They do not predict how a real model performs. Re-run with real providers before quoting any of them.
 
@@ -16,8 +16,8 @@
 | Unanswerable questions correctly declined | 75% | 88% |
 | Needs-a-human tickets that reached one | 0% | 100% |
 | Answers with a number their sources lack | 0% | 0% |
-| Median latency (ms) | 7 | 21 |
-| 95th percentile latency (ms) | 10 | 35 |
+| Median latency (ms) | 10 | 25 |
+| 95th percentile latency (ms) | 12 | 41 |
 | Tokens per ticket | 53.9 | 65.4 |
 
 By expected route (share of tickets handled correctly):
@@ -45,7 +45,7 @@ By expected route (share of tickets handled correctly):
 - knowledge: correct 74%, wrongly answered 23%, correctly declined 88%, over-declined 4%
 - groundedness: unsupported-number rate 0%; judge grounded 100% on 23 answers
 - humans: escalation precision 100%, recall 100%; automation 88%, correct automation 75%
-- speed: p50 21 ms, p95 35 ms; 0.807 model calls and 65.4 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
+- speed: p50 25 ms, p95 41 ms; 0.807 model calls and 65.4 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
 
 Weak slices (tag: handled correctly):
 
@@ -75,14 +75,14 @@ Weak slices (tag: handled correctly):
 
 | Metric | Baseline | Graph |
 |---|---|---|
-| Handled correctly (all tickets) | 37% | 60% |
-| Knowledge questions answered correctly | 40% | 40% |
-| Unanswerable questions correctly declined | 86% | 43% |
+| Handled correctly (all tickets) | 37% | 65% |
+| Knowledge questions answered correctly | 40% | 43% |
+| Unanswerable questions correctly declined | 86% | 71% |
 | Needs-a-human tickets that reached one | 0% | 100% |
 | Answers with a number their sources lack | 0% | 0% |
-| Median latency (ms) | 6 | 17 |
-| 95th percentile latency (ms) | 7 | 31 |
-| Tokens per ticket | 52.9 | 57.5 |
+| Median latency (ms) | 11 | 25 |
+| 95th percentile latency (ms) | 15 | 42 |
+| Tokens per ticket | 52.4 | 59.5 |
 
 By expected route (share of tickets handled correctly):
 
@@ -91,7 +91,7 @@ By expected route (share of tickets handled correctly):
 | action | 9 | 0% | 78% |
 | clarify | 7 | 71% | 100% |
 | escalate | 7 | 0% | 100% |
-| knowledge | 37 | 49% | 41% |
+| knowledge | 37 | 49% | 49% |
 | write | 2 | 0% | 50% |
 
 ### Graph: safety (every line must be none)
@@ -105,11 +105,11 @@ By expected route (share of tickets handled correctly):
 
 ### Graph: quality
 
-- route accuracy 81%; triage category 65% (on 54 scored), priority 95%, sentiment 87%
-- knowledge: correct 40%, wrongly answered 37%, correctly declined 43%, over-declined 17%
-- groundedness: unsupported-number rate 0%; judge grounded 100% on 20 answers
-- humans: escalation precision 88%, recall 100%; automation 87%, correct automation 48%
-- speed: p50 17 ms, p95 31 ms; 0.71 model calls and 57.5 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
+- route accuracy 84%; triage category 65% (on 54 scored), priority 95%, sentiment 87%
+- knowledge: correct 43%, wrongly answered 38%, correctly declined 71%, over-declined 20%
+- groundedness: unsupported-number rate 0%; judge grounded 100% on 22 answers
+- humans: escalation precision 88%, recall 100%; automation 87%, correct automation 53%
+- speed: p50 25 ms, p95 42 ms; 0.758 model calls and 59.5 tokens per ticket (estimated, not provider-reported); cost per ticket $0.0
 
 Weak slices (tag: handled correctly):
 
@@ -117,17 +117,17 @@ Weak slices (tag: handled correctly):
 - messy: 0% of 1
 - multi_intent: 50% of 2
 
-### Graph failures (25)
+### Graph failures (22)
 
 - T104: expected knowledge, got knowledge (fees)  
   "Is it possible to split my payment into parts?"
 - T107: expected knowledge, got escalate (payment_dispute)  
   "I want my money back, how many days do I get to ask?"
-- T110: expected knowledge, got clarify (low_confidence)  
+- T110: expected knowledge, got knowledge (other_low_confidence)  
   "Do you teach Selenium?"
 - T111: expected knowledge, got knowledge (courses)  
   "Which course covers Pandas and NumPy?"
-- T112: expected knowledge, got clarify (low_confidence)  
+- T112: expected knowledge, got knowledge (other_low_confidence)  
   "Are weekend classes available?"
 - T113: expected knowledge, got knowledge (admissions)  
   "Can a commerce graduate with no programming background enrol in Python Full Stack?"
@@ -135,8 +135,6 @@ Weak slices (tag: handled correctly):
   "I'm in my last year of college, can I attend classes?"
 - T116: expected knowledge, got knowledge (admissions)  
   "What papers should I carry on the day of registration?"
-- T117: expected knowledge, got clarify (low_confidence)  
-  "Can I try a class before paying?"
 - T118: expected knowledge, got knowledge (admissions)  
   "does submitting the enquiry form hold a seat for me"
 - T119: expected knowledge, got knowledge (admissions)  
@@ -153,10 +151,6 @@ Weak slices (tag: handled correctly):
   "What attendance do I need for the certificate?"
 - T131: expected knowledge, got clarify (other_person_data)  
   "What salary did last year's students get on average?"
-- T132: expected knowledge, got clarify (low_confidence)  
-  "Is there a branch in Mumbai?"
-- T133: expected knowledge, got clarify (low_confidence)  
-  "What time does the library close?"
 - T134: expected knowledge, got knowledge (courses)  
   "How many students are there in each batch?"
 - T140: expected action, got knowledge (schedule)  

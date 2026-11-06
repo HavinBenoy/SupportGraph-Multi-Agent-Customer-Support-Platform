@@ -38,3 +38,33 @@ def test_ordinary_messages_do_not_fire(text):
 
 def test_priority_only_ever_rises():
     assert raise_priority("low", "urgent") == "urgent" and raise_priority("urgent", "high") == "urgent" and raise_priority("high", "high") == "high"
+
+
+@pytest.mark.parametrize("text", [
+    "I want to talk to a person, not a bot.",
+    "I would like to speak to a human agent please",
+    "Can I speak with someone about my enrolment?",
+    "connect me to a real person",
+    "please transfer me to an agent",
+    "are you a bot? I want a real person",
+    "I want to talk to a person about putting my enrolment on hold.",
+])
+def test_explicit_requests_for_a_person_are_caught(text):
+    assert escalation_floor(text)[0] == "human_request"
+
+
+@pytest.mark.parametrize("text", [
+    "What is the Human Resources management course fee?",
+    "A person can enrol online, right?",
+    "I want to talk about the fee structure",
+    "Can I speak to my trainer about the assignment?",
+    "Can I talk to someone who studied here? (alumni)",
+    "Is the person at the front desk available on Sunday?",
+    "Are the classes taught by a human or recorded?",
+])
+def test_look_alikes_for_human_request_do_not_fire(text):
+    assert escalation_floor(text) is None or escalation_floor(text)[0] != "human_request"
+
+
+def test_human_request_floor_does_not_raise_priority():
+    assert escalation_floor("I want to talk to a person")[1] == "low"
