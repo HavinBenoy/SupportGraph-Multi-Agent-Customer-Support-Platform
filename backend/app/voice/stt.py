@@ -4,6 +4,7 @@ The model is loaded once, lazily, and shared by all calls (loading takes seconds
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -71,12 +72,14 @@ class FasterWhisperStt:
 class FakeStt:
     """Returns the scripted texts in order (the last one repeats). `calls` records the audio sizes it was given."""
 
-    def __init__(self, script: list[str] | None = None) -> None:
-        self.script, self.calls = list(script or ["what is the fee for the python course"]), []
+    def __init__(self, script: "list[str] | Callable[[bytes], str] | None" = None) -> None:
+        """`script`: texts in order, or a function of the audio (so a test can answer differently for one segment and for merged segments)."""
+        self.fn = script if callable(script) else None
+        self.script, self.calls = ([] if self.fn else list(script or ["what is the fee for the python course"])), []
 
     def transcribe(self, pcm16: bytes, *, prompt: str = "") -> Transcript:
         self.calls.append(len(pcm16))
-        text = self.script[min(len(self.calls), len(self.script)) - 1]
+        text = self.fn(pcm16) if self.fn else self.script[min(len(self.calls), len(self.script)) - 1]
         return Transcript(text=text, seconds=0.0, audio_seconds=len(pcm16) / 2 / SAMPLE_RATE)
 
 def get_stt(s: Settings) -> Transcriber:

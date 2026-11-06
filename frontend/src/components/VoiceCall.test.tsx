@@ -10,7 +10,8 @@ function rig(opts: { status?: unknown; micError?: string } = {}) {
   const sent: (string | ArrayBuffer)[] = [];
   let h: Parameters<VoiceDeps["socket"]>[1] | null = null;
   const micStop = vi.fn(), mute = vi.fn(), pushed: ArrayBuffer[] = [];
-  const player = { start: vi.fn(), push: (b: ArrayBuffer) => pushed.push(b), stop: vi.fn(), end: vi.fn(), playing: false, onidle: undefined as undefined | (() => void) };
+  const player = { begin: vi.fn(), push: (_turn: number, b: ArrayBuffer) => pushed.push(b), stop: vi.fn(), end: vi.fn(), playing: false, current: null as number | null,
+    onidle: undefined as undefined | (() => void), onplayed: undefined as undefined | ((t: number) => void) };
   const close = vi.fn();
   let frame: ((p: ArrayBuffer) => void) | null = null;
   const deps: VoiceDeps = {
@@ -23,7 +24,7 @@ function rig(opts: { status?: unknown; micError?: string } = {}) {
     "GET /api/voice/status": () => ({ json: opts.status ?? { enabled: true, ready: true, problems: [] } }),
   });
   const serverSays = (m: ServerMsg) => act(() => h!.onmessage(JSON.stringify(m)));
-  return { deps, sent, serverSays, micStop, mute, player, pushed, close, f, open: () => act(() => h!.onopen()), mic: (p: ArrayBuffer) => frame!(p), onclose: () => act(() => h!.onclose(false)) };
+  return { deps, sent, serverSays, serverAudio: (b: ArrayBuffer) => act(() => h!.onmessage(b)), micStop, mute, player, pushed, close, f, open: () => act(() => h!.onopen()), mic: (p: ArrayBuffer) => frame!(p), onclose: () => act(() => h!.onclose(false)) };
 }
 const start = async () => userEvent.click(await screen.findByRole("button", { name: "Start call" }));
 const READY: ServerMsg = { type: "ready", ticket_id: "a-9.sig", signed_in: false, tenant_name: "Test Institute", sample_rate: 22050 };
@@ -43,27 +44,73 @@ describe("VoiceCall", () => {
 
     await r.serverSays({ type: "speech_start" });
     expect(screen.getByText(/Hearing you/)).toBeInTheDocument();
-    await r.serverSays({ type: "transcript", text: "what is the fee", final: true });
-    await r.serverSays({ type: "thinking" });
-    await r.serverSays({ type: "reply", reply: "The fee is 60% at registration.", status: "answered", citations: [{ id: "fees#2", heading: "Fees" }], escalation_id: null, ticket_id: "a-9.sig" });
-    await r.serverSays({ type: "audio_start", sample_rate: 22050 });
+    await r.serverSays({ type: "transcript", turn_id: 1, text: "what is the fee", final: true });
+    await r.serverSays({ type: "thinking", turn_id: 1 });
+    await r.serverSays({ type: "reply", reply: "The fee is 60% at registration.", status: "answered", citations: [{ id: "fees#2", heading: "Fees" }], escalation_id: null, ticket_id: "a-9.sig", turn_id: 1 });
+    await r.serverSays({ type: "audio_start", turn_id: 1, sample_rate: 22050 });
     expect(await screen.findByText("what is the fee")).toBeInTheDocument();
     expect(screen.getByText("The fee is 60% at registration.")).toBeInTheDocument();
     expect(screen.getByText("Fees")).toBeInTheDocument();
-    expect(r.player.start).toHaveBeenCalledWith(22050);
-    await r.serverSays({ type: "audio_end" });
+    expect(r.player.begin).toHaveBeenCalledWith(1, 22050);
+    await r.serverSays({ type: "audio_end", turn_id: 1 });
+    expect(r.player.end).toHaveBeenCalledWith(1);
     await waitFor(() => expect(screen.getByText(/Listening/)).toBeInTheDocument());
   });
 
-  it("speech from the caller stops the bot's playback immediately (barge-in)", async () => {
+  it("raw speech_start does NOT stop playback; the server's interrupted{turn_id} does (M2.2 barge-in)", async () => {
     const r = rig();
     renderWithAuth(<VoiceCall deps={r.deps} />);
     await start(); await r.open(); await r.serverSays(READY);
-    await r.serverSays({ type: "audio_start", sample_rate: 22050 });
-    await r.serverSays({ type: "speech_start" });
-    expect(r.player.stop).toHaveBeenCalled();
-    await r.serverSays({ type: "interrupted" });
-    expect(r.player.stop.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await r.serverSays({ type: "audio_start", turn_id: 4, sample_rate: 22050 });
+    await r.serverSays({ type: "speech_start" });                 // a cough, a click, the bot's own echo
+    expect(r.player.stop).not.toHaveBeenCalled();
+    await r.serverSays({ type: "interrupted", turn_id: 4 });      // the server decided it was real
+    expect(r.player.stop).toHaveBeenCalledWith(4);
+  });
+
+  it("audio frames are parsed (turn, seq, pcm) and routed to the player by turn", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    const frame = new Uint8Array(8 + 4); new DataView(frame.buffer).setUint32(0, 7, true); new DataView(frame.buffer).setUint32(4, 3, true); frame.set([1, 0, 2, 0], 8);
+    const push = vi.spyOn(r.player, "push");
+    await r.serverAudio(frame.buffer);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push.mock.calls[0][0]).toBe(7);
+    expect(new Uint8Array(push.mock.calls[0][1])).toEqual(new Uint8Array([1, 0, 2, 0]));
+    await r.serverAudio(new ArrayBuffer(3));                       // shorter than the header: ignored, no crash
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  it("an interrupted audio_end stops that response instead of letting it drain", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays({ type: "audio_end", turn_id: 2, interrupted: true });
+    expect(r.player.stop).toHaveBeenCalledWith(2);
+    expect(r.player.end).not.toHaveBeenCalled();
+  });
+
+  it("tells the server when a response has finished playing", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    r.player.onplayed?.(9);
+    expect(r.sent.map(String).some((m) => m.includes('"playback"') && m.includes('"turn_id":9') && m.includes('"ended"'))).toBe(true);
+  });
+
+  it("a merged utterance is ONE transcript line, updated in place; a stale answer is shown but marked", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays({ type: "transcript", turn_id: 3, text: "I want to know about the course", final: false, segments: 1 });
+    await r.serverSays({ type: "transcript", turn_id: 3, text: "I want to know about the course duration and eligibility", final: false, segments: 2 });
+    await r.serverSays({ type: "transcript", turn_id: 3, text: "I want to know about the course duration and eligibility", final: true, segments: 2 });
+    expect(screen.queryByText("I want to know about the course")).toBeNull();
+    expect(screen.getAllByText("I want to know about the course duration and eligibility")).toHaveLength(1);
+    await r.serverSays({ type: "reply", turn_id: 2, stale: true, reply: "An old answer.", status: "answered", citations: [], escalation_id: null, ticket_id: "a-9.sig" });
+    expect(screen.getByText("An old answer.")).toBeInTheDocument();
+    expect(screen.getByText(/Not spoken/)).toBeInTheDocument();
   });
 
   it("signed-in student: token goes in the start message and the saved ticket is resumed", async () => {
@@ -144,10 +191,11 @@ describe("VoiceCall", () => {
     await r.open();
     await r.serverSays(READY);
     await r.serverSays({ type: "reply", reply: "Thanks for getting in touch. Take care, goodbye!", status: "answered", citations: [], escalation_id: null, ticket_id: "a-9.sig", end_call: true });
-    await r.serverSays({ type: "audio_start", sample_rate: 22050 });
-    await r.serverSays({ type: "audio_end" });
+    await r.serverSays({ type: "audio_start", turn_id: 1, sample_rate: 22050 });
+    await r.serverSays({ type: "audio_end", turn_id: 1 });
+    r.player.playing = true;                              // the closing is still being played in the browser
     await r.serverSays({ type: "call_end", reason: "goodbye" });
-    expect(r.player.end).toHaveBeenCalled();              // waits for the queued speech instead of cutting it off
+    expect(screen.queryByRole("button", { name: "Start call" })).toBeNull();   // waits for the queued speech instead of cutting it off
     await act(async () => { r.player.onidle?.(); });      // playback finished
     await waitFor(() => expect(screen.getByRole("button", { name: "Start call" })).toBeInTheDocument());
     expect(r.micStop).toHaveBeenCalled();

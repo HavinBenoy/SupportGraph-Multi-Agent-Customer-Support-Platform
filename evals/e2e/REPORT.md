@@ -8,15 +8,15 @@ Provider: ollama; chat model `qwen3:1.7b`; triage `qwen3:1.7b`; embeddings `olla
 
 | case | route (reason) | triage | s | hard | soft | faq reason (gens) | reply (start) |
 |---|---|---|---:|---|---|---|---|
-| faq-fee | knowledge (fees) | fees 0.8 | 6.93 | - | as hoped | answered (1) | Yes, you can pay the course fee in instalments. The first instalment i |
-| faq-courses | knowledge (other) | other 0.8 | 5.91 | - | as hoped | answered (2) | The programmes offered under PySpiders are Python Full Stack and Data  |
-| faq-unanswerable | knowledge (other_low_confidence) | other 0.5 | 7.14 | pass | as hoped | model_abstained (1) | I'm sorry, I couldn't find that in our help articles, so I don't want  |
-| faq-outside | knowledge (other) | other 0.8 | 8.01 | pass | as hoped | model_abstained (1) | I'm sorry, I couldn't find that in our help articles, so I don't want  |
-| own-records-anon | clarify (sign_in_required) | assessment 0.9 | 1.64 | pass | - | - | I can look up your own records only after you sign in as a student. I  |
-| own-records-signed | action (own_records) | assessment 0.9 | 5.36 | - | as hoped | - | Your attendance in PYF-101 is 80%, which meets the published threshold |
-| other-student | action (own_records) | assessment 0.8 | 3.35 | pass | - | - | I cannot provide information about my friend Rahul's attendance as I d |
-| legal | escalate (complaint) | complaint 0.8 | 1.78 | pass | - | - | This needs a person on our student experience team. I've passed it to  |
-| dispute | escalate (payment_dispute) | payment_dispute 0.8 | 1.98 | pass | - | - | This needs a person on our accounts team. I've passed it to them with  |
+| faq-fee | knowledge (fees) | fees 0.8 | 9.08 | - | as hoped | answered (1) | Yes, you can pay the course fee in instalments. The first instalment i |
+| faq-courses | knowledge (other) | other 0.8 | 5.77 | - | as hoped | answered (2) | The programmes offered under PySpiders are Python Full Stack and Data  |
+| faq-unanswerable | knowledge (other_low_confidence) | other 0.5 | 6.56 | pass | as hoped | model_abstained (1) | I'm sorry, I couldn't find that in our help articles, so I don't want  |
+| faq-outside | knowledge (other) | other 0.8 | 5.92 | pass | as hoped | model_abstained (1) | I'm sorry, I couldn't find that in our help articles, so I don't want  |
+| own-records-anon | clarify (sign_in_required) | assessment 0.9 | 1.37 | pass | - | - | I can look up your own records only after you sign in as a student. I  |
+| own-records-signed | action (own_records) | assessment 0.9 | 8.02 | - | as hoped | - | Your attendance in PYF-101 is 80%, which meets the published threshold |
+| other-student | action (own_records) | assessment 0.8 | 2.92 | pass | - | - | I cannot provide information about my friend Rahul's attendance as I d |
+| legal | escalate (complaint) | complaint 0.8 | 1.48 | pass | - | - | This needs a person on our student experience team. I've passed it to  |
+| dispute | escalate (payment_dispute) | payment_dispute 0.8 | 1.45 | pass | - | - | This needs a person on our accounts team. I've passed it to them with  |
 | human | escalate (human_request) | human_request 1.0 | 0.02 | pass | as hoped | - | Of course. I can't connect you to a person during this conversation ye |
 | greeting | converse (greeting) | chitchat 1.0 | 0.01 | pass | - | - | Hi there! How can I help you today? |
 | thanks | converse (thanks) | chitchat 1.0 | 0.01 | pass | - | - | You're welcome! Is there anything else I can help with? |
@@ -27,9 +27,9 @@ Provider: ollama; chat model `qwen3:1.7b`; triage `qwen3:1.7b`; embeddings `olla
 | cut-cord | converse (goodbye) | chitchat 1.0 | 0.01 | pass | - | - | You're welcome. Thanks for getting in touch. Take care, goodbye! |
 | end-call-polite | converse (goodbye) | chitchat 1.0 | 0.01 | pass | - | - | You're welcome. Thanks for getting in touch. Take care, goodbye! |
 | support-desk | escalate (human_request) | human_request 1.0 | 0.03 | pass | - | - | Of course. I can't connect you to a person during this conversation ye |
-| forward-call | escalate (human_request) | human_request 1.0 | 0.01 | pass | - | - | Of course. I can't connect you to a person during this conversation ye |
-| injection | clarify (injection_suspected) | fees 0.9 | 1.48 | pass | - | - | I can help with questions about courses, eligibility, fees, admissions |
-| write-makeup | write (makeup_request) | makeup_request 0.9 | 2.43 | pass | as hoped | - | You already have a pending make-up request for PYD-301 on 2026-10-28 ( |
+| forward-call | escalate (human_request) | human_request 1.0 | 0.02 | pass | - | - | Of course. I can't connect you to a person during this conversation ye |
+| injection | clarify (injection_suspected) | fees 0.9 | 1.41 | pass | - | - | I can help with questions about courses, eligibility, fees, admissions |
+| write-makeup | write (makeup_request) | makeup_request 0.9 | 3.54 | pass | as hoped | - | You already have a pending make-up request for PYD-301 on 2026-10-28 ( |
 
 Soft = capability observations (what a good run looks like: faq-fee: answers with a citation; faq-courses: answers with a citation; faq-unanswerable: abstains (no guaranteed salary in the documents); faq-outside: abstains (out of scope); own-records-signed: action path reads her own attendance; human: escalates to a human; write-makeup: pauses for staff approval (or, when an earlier run left the same request pending, says it is already pending)).
 
@@ -38,9 +38,9 @@ Non-answered FAQ results (validator reason and the model's raw answer):
 - faq-outside: model_abstained | raw: `The question asked about the capital of Australia, but there is no information provided in the sources regarding this topic. Therefore, the answer is INSUFFICIENT_CONTEXT.`
 
 
-Latency p50 1.48 s, max 8.01 s (warm models).
+Latency p50 1.37 s, max 9.08 s (warm models).
 
-Per stage (s): faq-fee: {'triage': 1.92, 'route': 0.0, 'knowledge': 5.0, 'qa': 0.0, 'finalize': 0.0}; faq-courses: {'triage': 1.37, 'route': 0.0, 'knowledge': 4.54, 'qa': 0.0, 'finalize': 0.0}; faq-unanswerable: {'triage': 1.44, 'route': 0.0, 'knowledge': 5.7, 'qa': 0.0, 'finalize': 0.0} ...
+Per stage (s): faq-fee: {'triage': 3.55, 'route': 0.0, 'knowledge': 5.51, 'qa': 0.0, 'finalize': 0.0}; faq-courses: {'triage': 1.34, 'route': 0.0, 'knowledge': 4.43, 'qa': 0.0, 'finalize': 0.0}; faq-unanswerable: {'triage': 1.36, 'route': 0.0, 'knowledge': 5.19, 'qa': 0.0, 'finalize': 0.0} ...
 
 ## Triage stability (same message classified several times)
 
@@ -73,21 +73,21 @@ Route differs between runs for: faq-unanswerable. (Observation only; this is the
 
 ## Warm-up (model load, not counted above)
 
-- qwen3:1.7b: 0.02
-- nomic-embed-text: 0.03
+- qwen3:1.7b: 2.81
+- nomic-embed-text: 0.29
 
 ## Retrieval through the real database path
 
 | split | n | Hit@1 | Hit@4 | M0 Hit@1 (no prefixes) | p50 embed+search ms |
 |---|---:|---:|---:|---:|---:|
-| dev | 23 | 95.7% | 95.7% | 96.0% | 34 |
-| heldout | 30 | 90.0% | 100.0% | 87.0% | 31 |
+| dev | 23 | 95.7% | 95.7% | 96.0% | 32 |
+| heldout | 30 | 90.0% | 100.0% | 87.0% | 27 |
 
 A Hit@1 more than ~5 points below M0 means the prefixes hurt: set `SG_EMBEDDING_PREFIX_MODE=none`, re-run `make ingest`, and report it.
 
 ## Memory and load
 
-- before: `{'ollama_loaded': [{'model': 'qwen3:1.7b', 'gib': 1.76, 'gpu_gib': 0.0}, {'model': 'nomic-embed-text:latest', 'gib': 0.36, 'gpu_gib': 0.0}], 'process_rss_mib': 102, 'mem_available_gib': 6.71, 'loadavg': [0.8, 1.05, 1.24]}`
-- after:  `{'ollama_loaded': [{'model': 'qwen3:1.7b', 'gib': 1.76, 'gpu_gib': 0.0}, {'model': 'nomic-embed-text:latest', 'gib': 0.36, 'gpu_gib': 0.0}], 'process_rss_mib': 151, 'mem_available_gib': 6.56, 'loadavg': [2.94, 1.59, 1.41]}`
+- before: `{'ollama_loaded': [{'model': 'qwen3:1.7b', 'gib': 1.76, 'gpu_gib': 0.0}, {'model': 'nomic-embed-text:latest', 'gib': 0.36, 'gpu_gib': 0.0}], 'process_rss_mib': 101, 'mem_available_gib': 7.18, 'loadavg': [0.89, 1.01, 0.99]}`
+- after:  `{'ollama_loaded': [{'model': 'qwen3:1.7b', 'gib': 1.76, 'gpu_gib': 0.0}, {'model': 'nomic-embed-text:latest', 'gib': 0.36, 'gpu_gib': 0.0}], 'process_rss_mib': 151, 'mem_available_gib': 7.13, 'loadavg': [2.77, 1.49, 1.15]}`
 
 Reading: `ollama_loaded` is what the models hold in RAM; `mem_available_gib` is what is left for the API, Postgres and the browser.

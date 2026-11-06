@@ -72,6 +72,8 @@ CONVERSE = {
                "My pleasure. Is there anything else?"],
     "acknowledgement": ["Okay. Is there anything else I can help with?", "Sure. Let me know if you need anything else.",
                         "Alright. I'm here if you have another question."],
+    # a bare "yes" / "of course" / "go ahead" with nothing pending (a pending confirmation or approval is resolved before the graph)
+    "affirm": ["Okay. What would you like to know?", "Sure. Go ahead, I'm listening.", "Alright. What can I help you with?"],
     "goodbye": ["You're welcome. Thanks for getting in touch. Take care, goodbye!",
                 "Thanks for getting in touch. Have a good day, goodbye!"],
     "interruption": ["No problem. Ask me whenever you're ready.", "That's fine. What would you like to know?",

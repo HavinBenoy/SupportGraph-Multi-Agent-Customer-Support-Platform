@@ -77,7 +77,7 @@ def test_unrelated_uses_of_stop_end_cut_and_mixed_sentences_are_not_intents(text
     "okay so what about the python course",
     "thank you for the fee details and also what about placement",
     "I'm done with the fee, what about the course",
-    "yes", "no", "yes please", "yeah",                           # answers to a pending confirmation, never a pleasantry
+    "no", "no please",                                           # a bare "no" answers a pending confirmation; it is never a pleasantry
     "stop", "please stop",                                       # barge-in / "stop talking", not "end the call"
     "hmm", "um", "",                                             # hesitation: the normal flow decides
     "I want to talk to a person",                                # handled by the escalation floor, not here
@@ -91,3 +91,33 @@ def test_anything_with_content_is_not_an_intent(text):
 
 def test_long_utterances_are_never_pleasantries():
     assert detect_intent("okay " * 40) is None
+
+
+@pytest.mark.parametrize("text", ["yes", "yeah", "yes please", "Of course.", "sure thing", "absolutely", "go ahead"])
+def test_m22_affirmations(text):
+    assert detect_intent(text) == "affirm"
+
+
+@pytest.mark.parametrize("text,want", [
+    ("Hi, hello, how are you?", "greeting"),
+    ("Okay, I think that's it.", "goodbye"),
+    ("I guess we're done", "goodbye"),
+    ("No thanks, you may proceed to cut the call.", "goodbye"),
+    ("Please feel free to end the call", "goodbye"),
+    ("You can end the call it's file.", "goodbye"),
+    ("Thanks for having me. Bye-bye.", "goodbye"),
+    ("Thanks for everything", "thanks"),
+    ("I didn't ask you regarding the instalments. Why did you say that in the first place?", "correction"),
+    ("Why did you mention that at all?", "correction"),
+    ("testing, one, two, three", "interruption"),
+])
+def test_m22_real_call_phrases(text, want):
+    assert detect_intent(text) == want
+
+
+@pytest.mark.parametrize("text", [
+    "I think the fee is high, what are the instalments", "Hi, what is the fee", "Of course, what is the duration", "proceed to enrol me in PYF-101",
+    "I didn't ask for a refund, I want the fee structure", "go ahead and cancel my enrolment",
+])
+def test_m22_widened_phrases_still_leave_real_requests_alone(text):
+    assert detect_intent(text) is None

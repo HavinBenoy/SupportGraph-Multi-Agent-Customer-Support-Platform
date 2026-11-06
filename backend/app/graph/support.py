@@ -27,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.actions.proposer import Proposer
 from app.agents.schemas import TriageResult
+from app.conversation.context import resolve as resolve_context
 from app.conversation.intents import detect_intent
 from app.agents.triage import Triager
 from app.config import Settings, get_settings
@@ -35,7 +36,7 @@ import logging
 
 from app.llm.errors import ModelUnavailable
 from app.graph.nodes import replies
-from app.graph.nodes.common import PER_RUN_RESET, cfg_of, text_of
+from app.graph.nodes.common import PER_RUN_RESET, cfg_of, prior_texts, text_of
 from app.graph.nodes.escalate import escalate
 from app.graph.nodes.qa import make_qa_nodes
 from app.guardrails.escalation_floor import escalation_floor, raise_priority
@@ -80,7 +81,12 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
             return {**PER_RUN_RESET, "intent": intent, "triage": TriageResult(category="chitchat", confidence=1.0, sentiment="positive").model_dump()}
         if floor and floor[0] == "human_request":
             return {**PER_RUN_RESET, "triage": TriageResult(category="human_request", confidence=1.0).model_dump()}
-        return {**PER_RUN_RESET, "triage": triager.classify(text).model_dump()}
+        # M2.2: a follow-up ("Are there any discounts?") or correction ("Actually I meant Data Science") is classified and retrieved WITH the course
+        # from the caller's earlier question. Injection, the floor, RBAC and QA keep using what was actually said.
+        resolved, kind = ("", "") if looks_like_injection(text) else resolve_context(text, prior_texts(state), looks_like_injection)
+        if kind == "":
+            resolved = ""
+        return {**PER_RUN_RESET, "resolved": resolved, "context_kind": kind, "triage": triager.classify(resolved or text).model_dump()}
 
     def route(state: TicketState, config: RunnableConfig) -> dict:
         decision, reason = decide_route(TriageResult.model_validate(state["triage"]), text=text_of(state),
@@ -98,7 +104,7 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
 
     def knowledge_node(state: TicketState, config: RunnableConfig) -> dict:
         try:
-            out = knowledge.invoke({"question": text_of(state)}, config)
+            out = knowledge.invoke({"question": state.get("resolved") or text_of(state)}, config)
         except ModelUnavailable as e:
             log.warning("knowledge: model unavailable (%s)", e.reason)
             return {"handled_by": KNOWLEDGE, "reply": replies.MODEL_UNAVAILABLE, "abstained": True,

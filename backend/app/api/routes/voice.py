@@ -4,6 +4,9 @@ Protocol (JSON text messages unless noted):
   client -> server   {"type":"start","tenant":"qspiders_sample","token":"<bearer or null>","ticket_id":"<or null>"}   (must be first)
                      binary: PCM16 little-endian mono 16 kHz microphone audio, any chunk size <= 64 KB
                      {"type":"text","text":"..."}   typed fallback        {"type":"stop"}
+                     {"type":"playback","turn_id":N,"state":"ended"}   the browser finished playing response N (M2.2)
+  M2.2: every event of a turn carries "turn_id". Audio frames are binary: uint32-LE turn_id, uint32-LE sequence, then PCM16.
+        "transcript" is sent twice per turn (final false, then true after the aggregation grace period); "reply" has "stale" and "turn".
   server -> client   {"type":"ready","ticket_id","signed_in","tenant_name","sample_rate"}   speech_start / transcribing / transcript / thinking
                      {"type":"reply","reply","status","citations","escalation_id","ticket_id","timing"}
                      {"type":"audio_start","sample_rate"} + binary PCM16 chunks + {"type":"audio_end","interrupted"}   {"type":"interrupted"}
@@ -145,7 +148,8 @@ async def voice_ws(ws: WebSocket) -> None:
                              today=getattr(ws.app.state, "today", None))
         record_event(tenant_id=tenant_id, ticket_id=ticket_id, signed_in=student_id != ANONYMOUS, out=out)
         return {"reply": resp.reply, "status": resp.status, "citations": [c.model_dump() for c in resp.citations],
-                "escalation_id": resp.escalation_id, "ticket_id": ticket_id, "end_call": bool(out.get("end_call"))}
+                "escalation_id": resp.escalation_id, "ticket_id": ticket_id, "end_call": bool(out.get("end_call")),
+                "intent": out.get("intent") or "", "context": out.get("context_kind") or ""}
 
     async def send_bytes(b: bytes) -> None:
         await ws.send_bytes(b)
@@ -176,6 +180,9 @@ async def voice_ws(ws: WebSocket) -> None:
                 kind = data.get("type")
                 if kind == "stop":
                     break
+                if kind == "playback" and data.get("state") == "ended" and isinstance(data.get("turn_id"), int):
+                    session.playback_ended(data["turn_id"])   # the browser finished playing that response
+                    continue
                 if kind == "text" and isinstance(data.get("text"), str) and data["text"].strip():
                     await session.submit_text(data["text"].strip()[:MAX_TEXT])
     except SessionLimit as e:

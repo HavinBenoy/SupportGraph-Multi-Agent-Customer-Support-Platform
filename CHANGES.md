@@ -1,49 +1,53 @@
-# M2.1.1 - Natural intent coverage and the e2e write-makeup regression
+# M2.2 - Voice turn management, utterance aggregation, sequential response playback
 
-Apply: `unzip -o ../supportgraph-m2-1-1.zip` over the project (M2.1 already applied). No migration, no schema change, no dependency, no model change, `.env`, database and volumes untouched. Design notes: `docs/M2_1.md` (new section).
+Apply: `unzip -o ../supportgraph-m2-2.zip` over the project (M2.1.1 already applied). No migration, no schema change, no new dependency, no model change. `.env`, databases and volumes untouched (new settings are optional, defaults below; `.env.example` lists them commented out).
+Full write-up, root cause, protocol, observability and manual test steps: **`docs/M2_2.md`**.
 
-## 1. The `write-makeup` failure: root cause
-Your first `make e2e-local` of the M1b final run created a real pending make-up request (stu_meera, PYD-301, 2026-10-28). The second run (this M2.1 check) answered
-"You already have a pending make-up request ... " : outcome `duplicate`, route `write`, **no new row written, nothing approved**. That is the duplicate guard doing its job.
-The hard check only accepted "paused for approval" (`awaiting`), so it flagged the correct reply: **the evaluation checked the wrong state for a second run**. The graph, the pending state and persistence are fine.
+## 1. Root cause (summary)
+Two independent causes (plus four contributing defects); VAD was only one.
+1. **Browser player overlap.** `createPlayer.start()` reset the clock and never stopped audio still scheduled from the previous response; the server streams far faster than real time, so a whole answer is already scheduled when the next one starts: two answers sound together. Reproduced with a fake AudioContext (R1 0.05-6.05 s, R2 2.05-5.05 s).
+2. **Segments became independent turns.** Every Silero utterance (after 700 ms silence) was its own STT -> graph -> TTS turn. Reproduced: a 0.8 s pause gave 2 graph runs, 2 replies, 2 `audio_start`.
+3. `speaking` ended when bytes were sent, not when they were heard. 4. The browser stopped playback on every raw `speech_start` (noise, echo). 5. A single shared cancel event, cleared per `_speak`. 6. No staleness check. 7. The knowledge branch saw only the last message, so follow-ups lost the course.
 
-| Question | Answer |
+## 2. What changed
+| Area | Change |
 |---|---|
-| Did the graph fail to create the pending approval? | No: it was created by the earlier run and still pends; this run must not create a second one |
-| Was approval state/event not persisted? | It was persisted (that is exactly why the guard fired) |
-| Expected response wrong? | No, "already pending" is the correct reply |
-| Assertion checking the wrong state? | Yes |
+| `backend/app/voice/session.py` (rewritten) | `Turn` aggregation of segments with adaptive grace; one runner + queue + graph lock; unique turn ids; per-response cancel token; one `_speak` at a time (lock); paced audio and drain wait; browser `playback` ack; stale-reply logic (hand-offs/approvals never stale; ack/thanks do not supersede); barge-in via `interrupted{turn_id}`; framed audio; structured events and counters; safe `close()` |
+| `backend/app/voice/turns.py` (new) | completeness (complete/short/incomplete), grace, `Turn` |
+| `backend/app/voice/stt.py` | `FakeStt` accepts a function of the audio (tests) |
+| `backend/app/api/routes/voice.py` | handles `playback`; passes `intent`/`context`; protocol docs |
+| `backend/app/config.py` | `voice_silence_ms` 700 -> 600; new `voice_grace_complete_ms` 250, `voice_grace_short_ms` 700, `voice_grace_incomplete_ms` 1600, `voice_max_turn_s` 30, `voice_max_pending_turns` 3, `voice_pace_audio` true, `voice_pace_lead_ms` 1500 |
+| `backend/app/conversation/context.py` (new) | deterministic follow-up / correction resolution (<= 5 added words, from the caller's own earlier question) |
+| `backend/app/graph/{support,state}.py`, `nodes/common.py` | `resolved`, `context_kind` (reset per run); triage classifies and knowledge retrieves with the resolved text; injection, floor, RBAC, QA use the original text |
+| `backend/app/conversation/intents.py`, `nodes/replies.py` | `affirm` intent; comma-separated pleasantries; "I think that's it"; "proceed to / feel free to ..."; trailing "it's fine/file"; "thanks for having me"; correction topic tails and "why did you mention that" |
+| `frontend/src/lib/voice.ts`, `components/VoiceCall.tsx` | turn-aware player (`begin/push/end/stop(turn)`, late and older turns dropped, never two responses), `parseAudioFrame`, stop only on `interrupted{turn_id}`, playback ack, one transcript line per turn (updated in place), stale replies marked |
+| `backend/tests/conftest.py` | `SG_VOICE_PACE_AUDIO=false` for tests (pacing tests switch it on) |
+| docs | `docs/M2_2.md` (new), ROADMAP, TESTING, `docs/M2.md` protocol, `.env.example` |
 
-Fix without weakening: for outcome `duplicate` the check now looks in the DATABASE: the referenced request must exist, belong to this student and still be `pending`. Tests prove it still fails for a missing reference, a nonexistent id, another student's request, an approved request, and a write that neither paused nor is a duplicate. Reproduced in the sandbox with two runs on one database (second = duplicate, row count stays 1).
-To exercise the pause again, approve/reject the old request in the staff console (`/agent`); nothing is deleted or reset by this patch.
+## 3. Bugs found by the new tests while building (fixed)
+- A sealed (maximum length) turn's timer was cancelled by the next turn: the turn was lost. Turns now keep their own settle task and commit in order.
+- A hand-off (`escalated`) reply was marked not stale but `_speak` still skipped it when a newer question existed. `must` outcomes are now always spoken.
 
-## 2. Natural phrasing (all in the shared graph, so text and voice agree)
-| You said | Now |
-|---|---|
-| "I didn't ask anything in the first place for you to say." | new `correction` intent: brief apology, no retrieval |
-| "Okay, please proceed towards your support desk." | escalation floor (`human_request`): escalates before any FAQ |
-| "I'm actually just testing you." | `interruption` intent (adverbs allowed): acknowledged |
-| "Okay, that's everything. You can just cut the cord." / "You may please end the call." | `goodbye`: closing spoken, call ends |
+## 4. Tests added / sandbox results (actual runs in the sandbox; fakes only)
+- `tests/voice/test_turns.py` (43): aggregation, grace, max length, silence, two questions, one graph run at a time, stale/hand-off/light follow-up, sequential playback, simultaneous responses, new turn during TTS, stale chunks after cancel, cancel cannot leak, barge-in by voice, cough ignored, no talking over the caller, pacing + ack + cut, disconnect during playback, timer cleanup, close during graph, events without words, bounded queue.
+- `tests/graph/test_m22_context.py` (27): resolver and full graph (follow-up, correction, unrelated, no leakage, injection/escalation/RBAC unchanged).
+- `tests/voice/test_voice_ws.py` +7 (real WebSocket route and graph), `tests/unit/test_intents.py` (+ M2.2 phrases and look-alike guards; the three M2.1 tests that listed yes/yeah/yes please as non-intents were updated: they are now `affirm`, a bare "no" is still not an intent), `tests/voice/test_session.py` / `test_voice_ws.py` updated for the partial+final `transcript`.
+- Frontend: `voice.test.ts` (fake AudioContext) and `VoiceCall.test.tsx`.
+- Results: **SQLite 1245 passed / 30 skipped; PostgreSQL 1273 passed / 2 skipped; no-numpy simulation of the voice/intent/context suites 173 passed; frontend vitest 54 passed, `tsc --noEmit` clean.**
 
-More paraphrases covered: that's everything / that'll do / I have no more questions / you can hang up / disconnect the call / cut the line / we can wrap up; correction variants ("you didn't have to say that", "that's not what I meant", "why did you say that"); support-desk variants ("send me to your support team", "hand me over to support", "let a human handle this", "have someone from support call me", "support desk please").
-Guards: a command to end the call needs a call word (call, chat, line, cord, ...) or "hang up"; "stop the course fee payment", "when does the session end", "how do I end my enrolment", bare "stop"/"end"/"cut" are NOT call-ending. Weak movement verbs (go/send/take/proceed...) need "your/our", so "Can I go to the support centre?" and "Where is the support desk?" stay questions. A correction or goodbye that carries a real question ("I didn't ask about attendance, I asked what is the fee ...") is not swallowed. Precedence is unchanged: injection screen, then escalation, then pleasantries; "yes"/"no" are never intents.
-
-## Files
-Changed: `backend/app/conversation/intents.py`, `backend/app/guardrails/escalation_floor.py`, `backend/app/graph/nodes/replies.py` (correction replies), `backend/scripts/e2e_local.py` (duplicate-aware hard check, `duplicate_is_genuine`, 5 more code-handled cases = 22 messages),
-tests: `backend/tests/unit/test_intents.py`, `backend/tests/unit/test_escalation_floor.py`, `backend/tests/graph/test_m21_conversation.py`, `backend/tests/graph/test_e2e_local_script.py`, `backend/tests/voice/test_voice_ws.py`, docs: `docs/{M2_1,ROADMAP,TESTING}.md`, `CHANGES.md`.
-No frontend change.
-
-## Tests actually run (sandbox)
-- SQLite: 1142 passed, 30 skipped. PostgreSQL 16: 1170 passed, 2 skipped. With numpy blocked: 1064 passed, 30 skipped. Offline eval regression gate passes (reference unchanged).
-- New: exact failing utterances and paraphrases through the real support graph with a triager that raises if called (no model for pleasantries/person requests); unrelated "stop/end/cut" and mixed sentences stay in the normal flow; FAQ, abstention, escalation, sign-in RBAC, student isolation, injection, pending staff approval re-checked; the same new phrasings by voice WebSocket and by text give identical replies; the duplicate-aware e2e check (positive and negative).
-- NOT run here: your Ollama, microphone, Whisper transcripts, PostgreSQL.
-
-## Verify locally
+## 5. Run locally
 ```
-unzip -o ../supportgraph-m2-1-1.zip
+unzip -o ../supportgraph-m2-2.zip
 make test-fast && git diff --check
 make test-pg
-make e2e-local      # 22 messages. write-makeup should now be [ok ] (it will say "already pending" until you decide the old request in /agent)
-make api            # restart, then say the five sentences above at /voice
+cd frontend && npm test && npx tsc --noEmit && cd ..
+make e2e-local            # unchanged scenarios; expect 22 messages, 0 hard failures
+make api   # and make frontend-dev, open /voice; follow docs/M2_2.md section 9
 ```
-Not changed: the "somebody is getting discounts" answer from your transcript (a legitimate knowledge/concession question, out of this patch's scope).
+
+## 6. Remaining limitations (honest)
+- **No real microphone, speaker, echo or browser audio timing was tested.** Real Silero/Whisper/Piper were not run here (downloads blocked). The grace periods are tuned by reasoning, not by your voice; if sentences still split, raise `SG_VOICE_GRACE_INCOMPLETE_MS`.
+- Completeness is heuristic (trailing words, openers, punctuation Whisper produces). A long pause after a finished-looking sentence ("What is the fee.") will be answered, and the next part becomes a follow-up; that is the intended trade-off against waiting too long.
+- A complete sentence waits at most ~250 ms (less, since STT time counts); an unfinished one up to 1.6 s. This is not the M3 latency work.
+- Context resolution only handles a named course/batch from the last three usable messages; anything else goes through unchanged.
+- Observations deliberately not touched (model behaviour): the ungrounded "check your account settings" reply to "How do you know whether I'm a student?", and abstention on "Are you sure ... somebody is getting some discounts".

@@ -12,6 +12,7 @@ PER_RUN_RESET = {
     "reply": "", "abstained": False, "citations": [], "sources": [], "queries": [], "tools_called": [], "needs_human": False,
     "escalation_reason": None, "escalation_id": None, "proposal": None, "check": {}, "outcome": "", "approval_role": "",
     "qa_issues": [], "qa_revisions": 0, "qa_blocked": False, "handled_by": "", "intent": "", "end_call": False,
+    "resolved": "", "context_kind": "",
 }
 
 
@@ -22,6 +23,12 @@ def cfg_of(config: RunnableConfig) -> dict:
 def text_of(state: dict) -> str:
     human = [m for m in state.get("messages", []) if isinstance(m, HumanMessage)]
     return " ".join(str(human[-1].content).split())[:MAX_TRIAGE_CHARS] if human else ""
+
+
+def prior_texts(state: dict) -> list[str]:
+    """What the caller said BEFORE the current message in this conversation (oldest first)."""
+    human = [str(m.content) for m in state.get("messages", []) if isinstance(m, HumanMessage)]
+    return human[:-1]
 
 
 def ticket_of(config: RunnableConfig) -> str:

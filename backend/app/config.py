@@ -121,7 +121,14 @@ class Settings(BaseSettings):
     voice_vad: Literal["auto", "silero", "energy"] = "auto"   # auto: Silero with real models, a crude energy gate with the fake provider (tests)
     voice_vad_model: str = ""                       # path to a Silero VAD .onnx; empty = the copy that ships inside faster-whisper
     voice_vad_threshold: float = Field(default=0.5, ge=0.1, le=0.95)   # speech probability to START speech; it ends below threshold - 0.15
-    voice_silence_ms: int = Field(default=700, ge=200, le=3000)        # silence that ends an utterance
+    voice_silence_ms: int = Field(default=600, ge=200, le=3000)        # silence that ends one SEGMENT (a turn may merge several; see the grace settings)
+    voice_grace_complete_ms: int = Field(default=250, ge=0, le=5000)   # extra wait after a segment whose transcript looks like a finished sentence
+    voice_grace_short_ms: int = Field(default=700, ge=0, le=5000)      # ... one or two words
+    voice_grace_incomplete_ms: int = Field(default=1600, ge=0, le=8000)  # ... trailing "and"/"about", a comma, "I want to know about"
+    voice_max_turn_s: int = Field(default=30, ge=5, le=120)            # merged audio of one turn is never longer than this
+    voice_max_pending_turns: int = Field(default=3, ge=1, le=10)       # finished turns waiting for the (single) graph runner
+    voice_pace_audio: bool = True                                      # stream the reply at ~real time (tests switch it off)
+    voice_pace_lead_ms: int = Field(default=1500, ge=200, le=10000)    # how far ahead of playback the server may send
     voice_min_utterance_ms: int = Field(default=300, ge=100, le=2000)  # shorter blips (clicks, coughs) are ignored
     voice_max_utterance_s: int = Field(default=15, ge=3, le=60)        # a longer monologue is cut and transcribed
     voice_barge_in_ms: int = Field(default=250, ge=0, le=2000)         # speech this long while the bot talks interrupts it

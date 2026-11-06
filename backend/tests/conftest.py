@@ -8,6 +8,7 @@ os.environ["SG_LLM_PROVIDER"] = "fake"
 # otherwise code that reads get_settings() looks for vectors under the real embedding name and finds none.
 os.environ["SG_EMBEDDING_PROVIDER"] = "fake"
 os.environ["SG_VOICE_PROVIDER"] = "fake"  # voice tests never load real speech models unless a test builds them explicitly
+os.environ["SG_VOICE_PACE_AUDIO"] = "false"  # tests do not wait for real-time audio pacing; the pacing tests switch it on themselves
 
 from datetime import date  # noqa: E402
 

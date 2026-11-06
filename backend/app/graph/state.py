@@ -44,3 +44,7 @@ class TicketState(TypedDict, total=False):
     # --- M2.1 ---
     intent: str             # conversation-control intent found by code (greeting/thanks/acknowledgement/goodbye/interruption), else ""
     end_call: bool          # true for a goodbye: a voice call may hang up after speaking the reply (text chat ignores it)
+
+    # --- M2.2 ---
+    resolved: str           # the caller's text with the course from an earlier question added (follow-up/correction), else ""
+    context_kind: str       # "follow_up" | "correction" | ""

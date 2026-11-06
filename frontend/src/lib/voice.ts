@@ -4,11 +4,13 @@
 
 export type ServerMsg =
   | { type: "ready"; ticket_id: string; signed_in: boolean; tenant_name: string; sample_rate: number }
-  | { type: "speech_start" | "transcribing" | "thinking" | "interrupted" }
-  | { type: "transcript"; text: string; final?: boolean; ignored?: boolean }
-  | { type: "reply"; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Record<string, number> }
-  | { type: "audio_start"; sample_rate: number }
-  | { type: "audio_end"; interrupted?: boolean; timing?: Record<string, number> }
+  | { type: "speech_start"; turn_id?: number }
+  | { type: "transcribing" | "thinking"; turn_id?: number }
+  | { type: "interrupted"; turn_id?: number; reason?: string }
+  | { type: "transcript"; turn_id?: number; text: string; final?: boolean; ignored?: boolean; segments?: number }
+  | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Record<string, number>; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
+  | { type: "audio_start"; turn_id?: number; sample_rate: number }
+  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; timing?: Record<string, number> }
   | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };
@@ -45,25 +47,47 @@ export const browserSocket: SocketFactory = (url, h) => {
   return { send: (d) => ws.send(d), close: () => ws.close() };
 };
 
-export interface Player {
-  start(sampleRate: number): void;
-  push(pcm16: ArrayBuffer): void;
-  stop(): void;          // drop everything queued (barge-in / interruption)
-  end(): void;           // the server finished sending
-  readonly playing: boolean;
-  onidle?: () => void;
+/** Every binary audio message from the server: uint32-LE turn id, uint32-LE sequence number, then PCM16 (M2.2). */
+export function parseAudioFrame(buf: ArrayBuffer): { turn: number; seq: number; pcm: ArrayBuffer } | null {
+  if (buf.byteLength < 8) return null;
+  const v = new DataView(buf);
+  return { turn: v.getUint32(0, true), seq: v.getUint32(4, true), pcm: buf.slice(8) };
 }
 
-/** Plays PCM16 chunks back to back with Web Audio. Chunks are scheduled on the audio clock so there are no gaps between sentences. */
+export interface Player {
+  begin(turn: number, sampleRate: number): void;   // a new response: whatever else was playing is stopped first
+  push(turn: number, pcm16: ArrayBuffer): void;    // ignored unless `turn` is the response being played
+  end(turn: number): void;                         // the server finished sending this response
+  stop(turn?: number): void;                       // cancel that response (or the current one); late chunks of it are ignored for good
+  readonly playing: boolean;
+  readonly current: number | null;
+  onidle?: () => void;                             // nothing is playing or queued any more
+  onplayed?: (turn: number) => void;               // a response finished playing naturally (not when it was cut)
+}
+
+/** Plays ONE response at a time with Web Audio. Chunks are scheduled on the audio clock (no gaps between sentences). Every chunk carries its
+ *  turn: a chunk of a response that was stopped, replaced or never started is dropped, and a new response always stops the previous one's
+ *  scheduled sources first, so two responses can never sound together. */
 export function createPlayer(ctxFactory: () => AudioContext = () => new AudioContext()): Player {
   let ctx: AudioContext | null = null;
-  let rate = 22050, nextAt = 0, active = new Set<AudioBufferSourceNode>(), finished = true;
+  let rate = 22050, nextAt = 0, cur: number | null = null, finished = true, latest = 0;
+  let active = new Set<AudioBufferSourceNode>();
+  const retired = new Set<number>();
+  const silence = () => { for (const s of active) { try { s.onended = null; s.stop(); } catch { /* already stopped */ } } active = new Set(); };
+  const drained = (turn: number) => { cur = null; p.onplayed?.(turn); p.onidle?.(); };
   const p: Player = {
-    get playing() { return active.size > 0; },
-    start(sampleRate) { ctx ??= ctxFactory(); rate = sampleRate; nextAt = ctx.currentTime + 0.05; finished = false; },
-    push(pcm) {
-      if (!ctx) return;
+    get playing() { return active.size > 0 || (cur !== null && !finished); },
+    get current() { return cur; },
+    begin(turn, sampleRate) {
+      if (retired.has(turn) || turn < latest) return;          // an old or cancelled response must never (re)start
+      if (cur !== null && cur !== turn) { silence(); retired.add(cur); }
+      ctx ??= ctxFactory(); rate = sampleRate; latest = turn; cur = turn; finished = false;
+      nextAt = ctx.currentTime + 0.05;
+    },
+    push(turn, pcm) {
+      if (!ctx || turn !== cur || finished) return;
       const f32 = int16ToFloat32(pcm);
+      if (f32.length === 0) return;
       const buf = ctx.createBuffer(1, f32.length, rate);
       buf.copyToChannel(f32 as unknown as Float32Array<ArrayBuffer>, 0);
       const src = ctx.createBufferSource();
@@ -71,10 +95,21 @@ export function createPlayer(ctxFactory: () => AudioContext = () => new AudioCon
       const at = Math.max(nextAt, ctx.currentTime);
       src.start(at); nextAt = at + buf.duration;
       active.add(src);
-      src.onended = () => { active.delete(src); if (active.size === 0 && finished) p.onidle?.(); };
+      src.onended = () => { active.delete(src); if (active.size === 0 && finished && cur === turn) drained(turn); };
     },
-    stop() { for (const s of active) { try { s.onended = null; s.stop(); } catch { /* already stopped */ } } active = new Set(); finished = true; p.onidle?.(); },
-    end() { finished = true; if (active.size === 0) p.onidle?.(); },
+    stop(turn) {
+      if (turn !== undefined && turn !== cur) { retired.add(turn); return; }   // a response that is not playing: just make sure it never will
+      const was = cur;
+      silence();
+      if (was !== null) retired.add(was);
+      cur = null; finished = true;
+      p.onidle?.();
+    },
+    end(turn) {
+      if (turn !== cur) return;
+      finished = true;
+      if (active.size === 0) drained(turn);
+    },
   };
   return p;
 }

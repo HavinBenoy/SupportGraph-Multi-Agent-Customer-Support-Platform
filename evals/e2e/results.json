@@ -22,7 +22,7 @@
     "wants_own_records": false
    },
    "faq_reason": "answered",
-   "faq_raw_answer": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee. The exact amount depends on the programme. \n\nThe first instalment is paid at registration, and the second instalment is paid before week 8 of the batch. [fees-and-payments#2]",
+   "faq_raw_answer": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee, which must be paid before week 8 of the batch [fees-and-payments#2].",
    "faq_generations": 1,
    "faq_top_score": 0.7194,
    "soft_ok": true,
@@ -32,12 +32,12 @@
    ],
    "tools": [],
    "awaiting": null,
-   "reply": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee. The exact amount depends on the programme. \n\nThe first instalment is paid at registration, and the second instalment is paid before week 8 of the batch. [fees-and-payments#2]\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
-   "seconds": 6.93,
+   "reply": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee, which must be paid before week 8 of the batch [fees-and-payments#2].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
+   "seconds": 9.08,
    "stages": {
-    "triage": 1.92,
+    "triage": 3.55,
     "route": 0.0,
-    "knowledge": 5.0,
+    "knowledge": 5.51,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -72,11 +72,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "The programmes offered under PySpiders are Python Full Stack and Data Science with Python [courses-and-batches#2].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
-   "seconds": 5.91,
+   "seconds": 5.77,
    "stages": {
-    "triage": 1.37,
+    "triage": 1.34,
     "route": 0.0,
-    "knowledge": 4.54,
+    "knowledge": 4.43,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -109,11 +109,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
-   "seconds": 7.14,
+   "seconds": 6.56,
    "stages": {
-    "triage": 1.44,
+    "triage": 1.36,
     "route": 0.0,
-    "knowledge": 5.7,
+    "knowledge": 5.19,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -146,11 +146,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
-   "seconds": 8.01,
+   "seconds": 5.92,
    "stages": {
-    "triage": 1.41,
+    "triage": 1.33,
     "route": 0.0,
-    "knowledge": 6.6,
+    "knowledge": 4.59,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -183,9 +183,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can look up your own records only after you sign in as a student. I can still answer general questions about courses, fees and admissions.",
-   "seconds": 1.64,
+   "seconds": 1.37,
    "stages": {
-    "triage": 1.63,
+    "triage": 1.36,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -222,11 +222,11 @@
    ],
    "awaiting": null,
    "reply": "Your attendance in PYF-101 is 80%, which meets the published threshold of 75%.",
-   "seconds": 5.36,
+   "seconds": 8.02,
    "stages": {
-    "triage": 1.45,
+    "triage": 1.17,
     "route": 0.0,
-    "action": 3.9,
+    "action": 6.84,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -259,11 +259,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I cannot provide information about my friend Rahul's attendance as I do not have access to their personal records. Please check with the institute's support team for this information.",
-   "seconds": 3.35,
+   "seconds": 2.92,
    "stages": {
-    "triage": 1.64,
+    "triage": 1.36,
     "route": 0.0,
-    "action": 1.7,
+    "action": 1.56,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -295,12 +295,12 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-8B9D9BE3). I can't tell you when they will reply.",
-   "seconds": 1.78,
+   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-05D35BE3). I can't tell you when they will reply.",
+   "seconds": 1.48,
    "stages": {
-    "triage": 1.73,
+    "triage": 1.44,
     "route": 0.0,
-    "escalate": 0.04,
+    "escalate": 0.03,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -332,12 +332,12 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-C3BEBE9A). I can't tell you when they will reply.",
-   "seconds": 1.98,
+   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-7C04D307). I can't tell you when they will reply.",
+   "seconds": 1.45,
    "stages": {
-    "triage": 1.96,
+    "triage": 1.42,
     "route": 0.0,
-    "escalate": 0.01,
+    "escalate": 0.03,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -369,7 +369,7 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Of course. I can't connect you to a person during this conversation yet, so I've passed your request to our student support team with the details (reference ESC-0FFEBD2B). You shouldn't need to repeat yourself, and I can't tell you when they will reply.",
+   "reply": "Of course. I can't connect you to a person during this conversation yet, so I've passed your request to our student support team with the details (reference ESC-912AE82A). You shouldn't need to repeat yourself, and I can't tell you when they will reply.",
    "seconds": 0.02,
    "stages": {
     "triage": 0.0,
@@ -702,7 +702,7 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-C3C01562). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
+   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-ECB6CFFF). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
    "seconds": 0.03,
    "stages": {
     "triage": 0.0,
@@ -739,8 +739,8 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-0ED7AA5B). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
-   "seconds": 0.01,
+   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-14E55E70). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
+   "seconds": 0.02,
    "stages": {
     "triage": 0.0,
     "route": 0.0,
@@ -777,9 +777,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can help with questions about courses, eligibility, fees, admissions and your own batch. I can't follow instructions that change how I work or show internal information.",
-   "seconds": 1.48,
+   "seconds": 1.41,
    "stages": {
-    "triage": 1.47,
+    "triage": 1.41,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -814,12 +814,12 @@
    "tools": [],
    "awaiting": null,
    "reply": "You already have a pending make-up request for PYD-301 on 2026-10-28 (reference MK-2C9BEA31); staff will review it.",
-   "seconds": 2.43,
+   "seconds": 3.54,
    "stages": {
     "triage": 1.52,
     "route": 0.0,
-    "propose": 0.88,
-    "prepare": 0.03,
+    "propose": 1.95,
+    "prepare": 0.06,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -833,7 +833,7 @@
    "n": 23,
    "hit1": 95.7,
    "hit4": 95.7,
-   "p50_ms": 34,
+   "p50_ms": 32,
    "m0_hit1": 96.0,
    "embedder": "ollama:nomic-embed-text@px-2d4e97"
   },
@@ -841,7 +841,7 @@
    "n": 30,
    "hit1": 90.0,
    "hit4": 100.0,
-   "p50_ms": 31,
+   "p50_ms": 27,
    "m0_hit1": 87.0,
    "embedder": "ollama:nomic-embed-text@px-2d4e97"
   }
@@ -849,11 +849,11 @@
  "warmup": [
   [
    "qwen3:1.7b",
-   0.02
+   2.81
   ],
   [
    "nomic-embed-text",
-   0.03
+   0.29
   ]
  ],
  "mem_before": {
@@ -869,12 +869,12 @@
     "gpu_gib": 0.0
    }
   ],
-  "process_rss_mib": 102,
-  "mem_available_gib": 6.71,
+  "process_rss_mib": 101,
+  "mem_available_gib": 7.18,
   "loadavg": [
-   0.8,
-   1.05,
-   1.24
+   0.89,
+   1.01,
+   0.99
   ]
  },
  "mem_after": {
@@ -891,11 +891,11 @@
    }
   ],
   "process_rss_mib": 151,
-  "mem_available_gib": 6.56,
+  "mem_available_gib": 7.13,
   "loadavg": [
-   2.94,
-   1.59,
-   1.41
+   2.77,
+   1.49,
+   1.15
   ]
  },
  "triage_stability": {

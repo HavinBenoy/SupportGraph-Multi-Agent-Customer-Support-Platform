@@ -49,3 +49,10 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 - `tests/graph/test_m21_conversation.py`: the full support graph with a triager that RAISES if called, proving pleasantries and requests for a person need no model; plus unchanged FAQ, abstention, escalation, sign-in and approval behaviour.
 - `tests/voice/test_voice_ws.py` (M2.1 block): the same words by voice and by text give the same replies; a goodbye ends the call after the closing is spoken.
 - `make e2e-local` now has 22 messages (10 new, code-handled). Its make-up case accepts "already pending" only after confirming the pending request in the database (re-runs on the same database).
+
+## Voice turn management (M2.2)
+- `tests/voice/test_turns.py`: aggregation (pause inside a sentence, many frames, completed utterance, max length, silence, two questions, grace), one graph run at a time, stale replies, hand-offs never stale, sequential playback, simultaneous responses, new turn during TTS, barge-in, stale chunks after cancel, pacing, disconnect/cleanup, events carry no words.
+- `tests/graph/test_m22_context.py`: follow-up, correction, unrelated question, no leakage, injection/escalation/RBAC unchanged, through the full graph.
+- `tests/voice/test_voice_ws.py` (M2.2 block) and `tests/unit/test_intents.py` (M2.2 block): the same through the real WebSocket route; the real-call phrases.
+- `frontend`: `voice.test.ts` (fake AudioContext: no overlap, stale turns dropped), `VoiceCall.test.tsx` (barge-in only on `interrupted`, merged transcript line, playback ack).
+- Not covered by any test: real microphone/speaker timing. See docs/M2_2.md section 9.

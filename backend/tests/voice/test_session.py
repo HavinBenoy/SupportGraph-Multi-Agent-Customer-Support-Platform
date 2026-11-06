@@ -56,7 +56,8 @@ async def test_full_turn_audio_in_text_out_audio_out():
     await v.start()
     await feed(v, utterance())
     await until(sent, "audio_end")
-    assert kinds(sent)[:6] == ["speech_start", "transcribing", "transcript", "thinking", "reply", "audio_start"]
+    assert kinds(sent)[:7] == ["speech_start", "transcribing", "transcript", "transcript", "thinking", "reply", "audio_start"]
+    assert [m["final"] for m in sent if m["type"] == "transcript"] == [False, True]
     assert calls == ["hello there"] and audio and kinds(sent)[-1] == "audio_end"
     reply = next(m for m in sent if m["type"] == "reply")
     assert "ESC-ABC123" in reply["reply"] and reply["timing"]["turn_ms"] >= 0 and "stt_ms" in reply["timing"]
@@ -129,7 +130,7 @@ async def test_barge_in_stops_the_bot_and_the_caller_is_heard():
     await until(sent, "audio_end")
     end = [m for m in sent if m["type"] == "audio_end"][0]
     assert end["interrupted"] is True and len(audio) < n_before + 40
-    await asyncio.sleep(0.3)
+    await asyncio.wait_for(_until_calls(calls, 2), 5)
     assert calls[-1] == "second question"             # the interrupting speech became the next turn
     await v.close()
 
@@ -304,4 +305,9 @@ async def test_barge_in_still_cancels_audio_and_the_next_utterance_is_handled():
 
 async def _until_count(sent, kind, n):
     while sum(m["type"] == kind for m in sent) < n:
+        await asyncio.sleep(0.01)
+
+
+async def _until_calls(calls, n):
+    while len(calls) < n:
         await asyncio.sleep(0.01)

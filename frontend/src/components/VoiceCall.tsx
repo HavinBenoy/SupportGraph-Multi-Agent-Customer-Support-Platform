@@ -3,11 +3,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { ChatStatus, Citation, PublicConfig } from "@/lib/types";
-import { browserMic, browserSocket, createPlayer, voiceWsUrl, type Mic, type MicFactory, type Player, type ServerMsg, type Socket, type SocketFactory } from "@/lib/voice";
+import { browserMic, browserSocket, createPlayer, parseAudioFrame, voiceWsUrl, type Mic, type MicFactory, type Player, type ServerMsg, type Socket, type SocketFactory } from "@/lib/voice";
 import { LoginForm } from "./LoginForm";
 
 type Phase = "idle" | "connecting" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
-interface Line { id: number; role: "user" | "assistant"; text: string; citations?: Citation[]; status?: ChatStatus }
+interface Line { id: number; turn?: number; role: "user" | "assistant"; text: string; citations?: Citation[]; status?: ChatStatus; stale?: boolean; partial?: boolean }
 let nextId = 1;
 
 const PHASE_LABEL: Record<Phase, string> = {
@@ -65,24 +65,33 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       case "ready":
         try { sessionStorage.setItem(storeKey, m.ticket_id); } catch { /* ignore */ }
         setPhase("listening"); break;
-      case "speech_start": setPhase("hearing"); player.current?.stop(); break; // the caller is talking: stop the bot at once, locally too
+      // M2.2: the browser no longer stops the bot on every raw "speech_start" (a cough or the bot's own echo would cut it off). The server decides
+      // whether it is a real interruption (sustained speech) and says so with `interrupted{turn_id}`; only then does playback stop.
+      case "speech_start": setPhase("hearing"); break;
       case "transcribing": setPhase("transcribing"); break;
       case "transcript":
-        if (m.text && !m.ignored) setLines((l) => [...l, { id: nextId++, role: "user", text: m.text }]);
-        else setPhase("listening");
+        if (m.ignored || !m.text) { setPhase("listening"); break; }
+        // one line per user turn: a partial transcript is updated in place when the same turn is merged or finalised
+        setLines((l) => {
+          const i = m.turn_id === undefined ? -1 : l.findIndex((x) => x.role === "user" && x.turn === m.turn_id);
+          if (i < 0) return [...l, { id: nextId++, turn: m.turn_id, role: "user", text: m.text, partial: m.final === false }];
+          const copy = l.slice(); copy[i] = { ...copy[i], text: m.text, partial: m.final === false }; return copy;
+        });
         break;
       case "thinking": setPhase("thinking"); setNotice(null); break;
       case "reply":
         setStatus(m.status as ChatStatus);
-        setLines((l) => [...l, { id: nextId++, role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus }]);
-        setPhase("speaking"); break;
-      case "audio_start": player.current?.start(m.sample_rate); break;
-      case "audio_end": player.current?.end(); setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p)); break;
-      case "interrupted": player.current?.stop(); break;
+        setLines((l) => [...l, { id: nextId++, turn: m.turn_id, role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus, stale: m.stale }]);
+        setPhase(m.stale ? "listening" : "speaking"); break;      // a stale answer (a newer question exists) is shown but never spoken
+      case "audio_start": if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
+      case "audio_end":
+        if (m.turn_id !== undefined) { if (m.interrupted) player.current?.stop(m.turn_id); else player.current?.end(m.turn_id); }
+        setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p)); break;
+      case "interrupted": player.current?.stop(m.turn_id); break;
       case "call_end": { // goodbye: let the spoken closing finish playing, then hang up cleanly (no "call ended" error)
         ending.current = true;
         const finish = () => { if (!ending.current) return; ending.current = false; hangUp(); setNotice("Call ended. Thanks for calling."); };
-        if (player.current) { player.current.onidle = finish; player.current.end(); setTimeout(finish, 20000); } else finish();
+        if (player.current?.playing) { player.current.onidle = finish; setTimeout(finish, 20000); } else finish();
         break;
       }
       case "notice": if (m.detail !== "too_short") setNotice(m.detail); break;
@@ -95,6 +104,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     try {
       player.current = deps.player();
       player.current.onidle = () => setPhase((p) => (p === "speaking" ? "listening" : p));
+      player.current.onplayed = (turn) => { try { sock.current?.send(JSON.stringify({ type: "playback", turn_id: turn, state: "ended" })); } catch { /* closed */ } };
       mic.current = await deps.mic((pcm) => sock.current?.send(pcm));
     } catch (e) {
       setPhase("idle"); player.current = null;
@@ -105,7 +115,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     try { ticket = sessionStorage.getItem(storeKey); } catch { /* ignore */ }
     sock.current = deps.socket(deps.wsUrl(), {
       onopen: () => sock.current?.send(JSON.stringify({ type: "start", tenant: tenantArg, token, ticket_id: ticket })),
-      onmessage: (d) => { if (typeof d === "string") { try { onMsg(JSON.parse(d) as ServerMsg); } catch { /* ignore a malformed message */ } } else player.current?.push(d); },
+      onmessage: (d) => { if (typeof d === "string") { try { onMsg(JSON.parse(d) as ServerMsg); } catch { /* ignore a malformed message */ } } else { const f = parseAudioFrame(d); if (f) player.current?.push(f.turn, f.pcm); } },
       onclose: () => { if (ending.current) return; if (sock.current) { setError((e) => e ?? "The call ended."); hangUp(); } },
       onerror: () => { setError("Cannot reach the voice service."); hangUp(); },
     });
@@ -145,8 +155,9 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       <div className="log" role="log" aria-live="polite" aria-label="Call transcript">
         {lines.length === 0 && <p className="muted empty">Press “Start call”, allow the microphone, then ask your question. Everything said appears here as text too.</p>}
         {lines.map((m) => (
-          <div key={m.id} className={`msg ${m.role}`}>
+          <div key={m.id} className={`msg ${m.role}${m.partial ? " partial" : ""}`}>
             <span className="sr-only">{m.role === "user" ? "You" : "Assistant"}: </span><p>{m.text}</p>
+            {m.stale && <p className="muted tiny">Not spoken: you had already asked something newer.</p>}
             {m.citations && m.citations.length > 0 && <ul className="cites" aria-label="Sources">{m.citations.map((c) => <li key={c.id}>{c.heading || c.id}</li>)}</ul>}
           </div>
         ))}

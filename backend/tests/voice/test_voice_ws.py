@@ -69,7 +69,7 @@ def test_anonymous_faq_conversation_with_citation_and_audio(api):  # noqa: F811
         assert ready["type"] == "ready" and ready["signed_in"] is False and ready["ticket_id"] and ready["sample_rate"] == 22050
         msgs, audio = say(ws)
     kinds = [m["type"] for m in msgs]
-    assert kinds[:4] == ["speech_start", "transcribing", "transcript", "thinking"]
+    assert kinds[:5] == ["speech_start", "transcribing", "transcript", "transcript", "thinking"]
     r = reply_of(msgs)
     assert r["status"] == "answered" and r["citations"] and audio > 0
     assert next(m for m in msgs if m["type"] == "transcript")["text"] == "Can I pay the course fee in instalments?"
@@ -420,3 +420,105 @@ def test_new_phrasings_give_identical_replies_by_text_and_voice(api):  # noqa: F
         assert voice["status"] == typed["status"]
         norm = lambda r, ref: r["reply"].replace(ref or "\0", "REF")  # noqa: E731
         assert norm(voice, voice["escalation_id"]) == norm(typed, typed["escalation_id"]), text
+
+
+# ---- M2.2: turn management through the real WebSocket route, graph and fakes --------------------------------------------------------------
+def collect(ws, until_kind="audio_end", limit=400):
+    """(json messages, audio frames [(turn_id, seq, nbytes)]) up to the first `until_kind`."""
+    msgs, frames = [], []
+    for _ in range(limit):
+        m = ws.receive()
+        if m.get("bytes") is not None:
+            tid, seq = sess.AUDIO_HEADER.unpack(m["bytes"][:8])
+            frames.append((tid, seq, len(m["bytes"]) - 8))
+            continue
+        d = json.loads(m["text"])
+        msgs.append(d)
+        if d["type"] == until_kind:
+            break
+    return msgs, frames
+
+
+def send_audio(ws, pcm):
+    for c in chunks(pcm):
+        ws.send_bytes(c)
+
+
+def test_m22_a_pause_inside_a_sentence_gives_one_reply_and_one_audio(api):  # noqa: F811
+    from tests.voice.audio import silence, tone
+    stt = FakeStt(lambda a: "Can I pay" if len(a) < 70000 else "Can I pay the course fee in instalments?")
+    api.app.state.voice_parts = (lambda: EnergyVad(), stt, FakeTts())
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        send_audio(ws, tone(700) + silence(800) + tone(700) + silence(900))
+        msgs, frames = collect(ws)
+        kinds = [m["type"] for m in msgs]
+    assert kinds.count("reply") == 1 and kinds.count("audio_start") == 1 and kinds.count("thinking") == 1
+    r = reply_of(msgs)
+    assert r["turn"]["segments"] == 2 and r["turn"]["merged"] and r["status"] == "answered" and r["citations"]
+    finals = [m for m in msgs if m["type"] == "transcript" and m.get("final")]
+    assert len(finals) == 1 and finals[0]["text"] == "Can I pay the course fee in instalments?"
+    assert frames and {f[0] for f in frames} == {r["turn_id"]} and [f[1] for f in frames] == list(range(len(frames)))
+
+
+def test_m22_follow_up_and_correction_keep_the_course_over_the_socket(api):  # noqa: F811
+    setup_parts(api, ["What is the fee structure for Python Full Stack?", "Are there any discounts?", "Actually, I meant Data Science."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        first, _ = say(ws)
+        second, _ = say(ws)
+        third, _ = say(ws)
+    assert reply_of(first)["context"] == "" and reply_of(second)["context"] == "follow_up" and reply_of(third)["context"] == "correction"
+    ids = [reply_of(x)["turn_id"] for x in (first, second, third)]
+    assert ids == sorted(set(ids)) and len(ids) == 3
+
+
+def test_m22_two_questions_are_answered_one_after_the_other(api):  # noqa: F811
+    setup_parts(api, ["Can I pay the course fee in instalments?", "What courses do you offer?"])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        a, fa = say(ws)
+        b, fb = say(ws)
+    assert reply_of(a)["turn_id"] != reply_of(b)["turn_id"] and fa > 0 and fb > 0
+    assert not any(m["type"] == "interrupted" for m in a + b) and not any(m.get("stale") for m in (reply_of(a), reply_of(b)))
+
+
+def test_m22_playback_ack_is_accepted_and_the_call_continues(api):  # noqa: F811
+    setup_parts(api, ["Can I pay the course fee in instalments?", "What courses do you offer?"])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        a, _ = say(ws)
+        ws.send_json({"type": "playback", "turn_id": reply_of(a)["turn_id"], "state": "ended"})
+        ws.send_json({"type": "playback", "turn_id": "bogus", "state": "ended"})       # malformed acks are ignored
+        b, _ = say(ws)
+    assert reply_of(b)["status"] in ("answered", "needs_detail")
+
+
+@pytest.mark.parametrize("said", ["Okay, I think that's it.", "No thanks, you may proceed to cut the call.", "Thanks for having me. Bye-bye.",
+                                  "You can end the call it's file."])
+def test_m22_real_call_goodbyes_end_the_call_after_the_closing(api, said):  # noqa: F811
+    setup_parts(api, [said])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        send_audio(ws, utterance())
+        msgs, _ = collect(ws, "call_end")
+    kinds = [m["type"] for m in msgs]
+    assert kinds.index("audio_end") < kinds.index("call_end") and reply_of(msgs)["end_call"] is True
+
+
+@pytest.mark.parametrize("said,route_kind", [("Hi, hello, how are you?", "greeting"), ("Of course.", "affirm")])
+def test_m22_pleasantries_do_not_touch_the_knowledge_base(api, said, route_kind):  # noqa: F811
+    setup_parts(api, [said])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, _ = say(ws)
+    r = reply_of(msgs)
+    assert r["citations"] == [] and r["intent"] == route_kind and r["end_call"] is False
+
+
+def test_m22_human_support_still_escalates_and_is_spoken(api):  # noqa: F811
+    setup_parts(api, ["I want to talk to a person about it"])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, audio = say(ws)
+    assert reply_of(msgs)["status"] == "escalated" and reply_of(msgs)["escalation_id"] and audio > 0
