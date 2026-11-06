@@ -164,3 +164,19 @@ def test_action_agent_reply_has_its_reasoning_removed():
 
     out = build_graph(model=Thinker(), tools=[]).invoke({"messages": [("human", "hi")]})
     assert out["messages"][-1].content == "Your attendance is fine."
+
+
+def test_real_client_uncited_first_try_is_retried_once_and_then_cited(stack, mock):
+    graph, *_ = stack
+    out = ask(graph, "Can I pay the fee in instalments? uncited-once")
+    assert not out["abstained"] and out["citations"] and "without any citation" not in out["reply"]
+    assert len([b for p, b in mock.calls if p == "/api/chat" and "contained no source citation" in str(b)]) == 1
+
+
+def test_real_client_model_that_never_cites_abstains_after_exactly_one_retry(stack, mock):
+    graph, *_ = stack
+    before = len([1 for p, _ in mock.calls if p == "/api/chat"])
+    out = ask(graph, "Can I pay the fee in instalments? uncited-always")
+    assert out["abstained"] and not out["citations"] and ABSTAIN_MESSAGE in out["reply"]
+    chats = [b for p, b in mock.calls if p == "/api/chat"][before:]
+    assert len([c for c in chats if "contained no source citation" in str(c)]) == 1

@@ -4,6 +4,9 @@ import os
 # Real environment variables outrank the .env file in pydantic-settings, so this wins.
 os.environ["SG_TRACING_ENABLED"] = "false"
 os.environ["SG_LLM_PROVIDER"] = "fake"
+# Same for embeddings: a developer who switched their .env to the real Ollama stack (M1b) must still get the offline fakes in tests,
+# otherwise code that reads get_settings() looks for vectors under the real embedding name and finds none.
+os.environ["SG_EMBEDDING_PROVIDER"] = "fake"
 
 from datetime import date  # noqa: E402
 

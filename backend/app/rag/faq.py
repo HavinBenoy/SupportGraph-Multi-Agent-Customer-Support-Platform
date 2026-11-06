@@ -11,7 +11,10 @@ does for the step 0 agent, and so the step 3 knowledge subgraph can reuse these 
 Where "hallucinated policy" is stopped (all in code, none of it trusting the model):
   1. retrieve   - only passages above `rag_min_score` reach the model; if none do, the model is never called.
   2. generate   - the prompt says "answer only from the sources or reply INSUFFICIENT_CONTEXT" (app/rag/prompts.py).
-  3. validate   - a reply cut off at the output-token limit is never accepted (even with a valid citation); otherwise the
+  3. retry      - ONLY an `uncited_answer` is regenerated, once, with an explicit reminder to cite (a small model often writes a correct
+                  but uncited sentence). The retry goes through exactly the same validate step; if it fails too, the bot abstains.
+                  No other failure is retried, and code never attaches a citation the model did not write.
+  4. validate   - a reply cut off at the output-token limit is never accepted (even with a valid citation); otherwise the
                   answer is accepted only if it cites at least one source AND every cited source was retrieved.
                   An uncited answer, an invented citation, or the sentinel all become a safe abstention.
 What this does NOT catch: a model that cites a real source but misstates what it says. Judging that needs a
@@ -26,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
@@ -44,6 +48,10 @@ from app.tenants.loader import load_tenant_config
 from app.tools.scope import ScopeError
 
 MAX_SEARCH_CHARS = 800  # a rewritten query may be longer than the question (it carries expansions)
+CITATION_REMINDER = (
+    "Your previous reply contained no source citation, so it cannot be shown. Answer the same question again using only the sources. "
+    "End every sentence that states a fact with the id of its source in square brackets, for example [{example}]. "
+    "Use only ids from the sources. If the sources do not contain the answer, reply exactly {sentinel} and nothing else.")
 MAX_QUESTION_CHARS = 500  # a help-centre question is a sentence or two; this bounds cost and the injection surface
 
 # What the user sees when the bot will not answer. It makes no promise it cannot keep (no "I'll escalate").
@@ -96,6 +104,7 @@ class FaqState(TypedDict, total=False):
     top_score: float | None  # best similarity seen, even if below the threshold (for calibrating rag_min_score)
     raw_answer: str  # what a person may see: the model's reply with any reasoning removed
     reasoning_unfinished: bool
+    generation_attempts: int  # 1 normally; 2 when an uncited answer was regenerated once
     truncated: bool  # the model stopped at the output-token limit: the answer is incomplete and must never be shown
     finish_reason: str | None
     answer: str
@@ -157,7 +166,22 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         reply = invoke_guarded(model, build_messages(state["question"], chunks, institute_name=institute_name), s)
         visible, unfinished = visible_answer(str(reply.content))
         return {"raw_answer": visible, "reasoning_unfinished": unfinished, "finish_reason": finish_reason(reply),
-                "truncated": is_truncated(reply, s.llm_max_output_tokens)}
+                "truncated": is_truncated(reply, s.llm_max_output_tokens), "generation_attempts": 1}
+
+    def regenerate(state: FaqState, config: RunnableConfig) -> dict:
+        """The one citation retry. Same prompt, same model, plus a reminder; its output is validated like any other."""
+        institute_name = load_tenant_config(_tenant_of(config)).name
+        chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
+        messages = build_messages(state["question"], chunks, institute_name=institute_name)
+        messages.append(HumanMessage(CITATION_REMINDER.format(example=chunks[0].source_id, sentinel=SENTINEL)))
+        reply = invoke_guarded(model, messages, s)
+        visible, unfinished = visible_answer(str(reply.content))
+        return {"raw_answer": visible, "reasoning_unfinished": unfinished, "finish_reason": finish_reason(reply),
+                "truncated": is_truncated(reply, s.llm_max_output_tokens), "generation_attempts": 2}
+
+    def after_validate(state: FaqState) -> str:
+        retry = (state.get("reason") == "uncited_answer" and state.get("generation_attempts", 1) < 2 and s.faq_citation_retries > 0)
+        return "regenerate" if retry else "end"
 
     def validate(state: FaqState) -> dict:
         raw = state.get("raw_answer", "")
@@ -191,7 +215,9 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
     graph.add_edge(START, "retrieve")
     graph.add_conditional_edges("retrieve", route, {"generate": "generate", "abstain": "abstain"})
     graph.add_edge("generate", "validate")
-    graph.add_edge("validate", END)
+    graph.add_node("regenerate", regenerate)
+    graph.add_conditional_edges("validate", after_validate, {"regenerate": "regenerate", "end": END})
+    graph.add_edge("regenerate", "validate")
     graph.add_edge("abstain", END)
     return graph.compile()
 

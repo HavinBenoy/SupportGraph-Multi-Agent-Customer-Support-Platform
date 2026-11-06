@@ -11,18 +11,20 @@
    "student": "anonymous",
    "text": "Can I pay the course fee in instalments?",
    "expect": "answers with a citation",
-   "route": "escalate",
-   "reason": "payment_dispute",
+   "route": "knowledge",
+   "reason": "fees",
    "abstained": false,
-   "citations": [],
+   "citations": [
+    "fees-and-payments#2"
+   ],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our accounts team, and I've left them a note (reference ESC-64ED856D). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
-   "seconds": 3.37,
+   "reply": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee. The exact amount depends on the programme. [fees-and-payments#2]\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
+   "seconds": 7.48,
    "stages": {
-    "triage": 3.19,
+    "triage": 3.1,
     "route": 0.0,
-    "escalate": 0.17,
+    "knowledge": 4.37,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -36,17 +38,19 @@
    "text": "Which programmes do you offer under PySpiders?",
    "expect": "answers with a citation",
    "route": "knowledge",
-   "reason": "assessment",
-   "abstained": true,
-   "citations": [],
+   "reason": "other",
+   "abstained": false,
+   "citations": [
+    "courses-and-batches#2"
+   ],
    "tools": [],
    "awaiting": null,
-   "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
-   "seconds": 6.68,
+   "reply": "The programmes offered under PySpiders are Python Full Stack and Data Science with Python [courses-and-batches#2].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
+   "seconds": 4.39,
    "stages": {
-    "triage": 1.4,
+    "triage": 1.53,
     "route": 0.0,
-    "knowledge": 5.27,
+    "knowledge": 2.86,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -59,48 +63,48 @@
    "student": "anonymous",
    "text": "Will I definitely get a salary of 20 LPA after the course?",
    "expect": "abstains (no guaranteed salary in the documents)",
-   "route": "clarify",
-   "reason": "low_confidence",
-   "abstained": false,
+   "route": "knowledge",
+   "reason": "other_low_confidence",
+   "abstained": true,
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Could you tell me a bit more? For example, name the batch (like PYF-101) or the course you mean.",
-   "seconds": 1.46,
+   "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
+   "seconds": 7.83,
    "stages": {
-    "triage": 1.45,
+    "triage": 1.57,
     "route": 0.0,
-    "clarify": 0.0,
+    "knowledge": 6.25,
     "qa": 0.0,
     "finalize": 0.0
    },
    "hard": "abstain",
-   "hard_ok": false,
-   "hard_why": "must abstain"
+   "hard_ok": true,
+   "hard_why": ""
   },
   {
    "id": "faq-outside",
    "student": "anonymous",
    "text": "What is the capital of Australia?",
    "expect": "abstains (out of scope)",
-   "route": "clarify",
-   "reason": "low_confidence",
-   "abstained": false,
+   "route": "knowledge",
+   "reason": "other",
+   "abstained": true,
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Could you tell me a bit more? For example, name the batch (like PYF-101) or the course you mean.",
-   "seconds": 1.37,
+   "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
+   "seconds": 5.99,
    "stages": {
-    "triage": 1.36,
+    "triage": 1.59,
     "route": 0.0,
-    "clarify": 0.0,
+    "knowledge": 4.4,
     "qa": 0.0,
     "finalize": 0.0
    },
    "hard": "abstain",
-   "hard_ok": false,
-   "hard_why": "must abstain"
+   "hard_ok": true,
+   "hard_why": ""
   },
   {
    "id": "own-records-anon",
@@ -114,9 +118,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can look up your own records only after you sign in as a student. I can still answer general questions about courses, fees and admissions.",
-   "seconds": 1.39,
+   "seconds": 1.65,
    "stages": {
-    "triage": 1.39,
+    "triage": 1.65,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -140,11 +144,11 @@
    ],
    "awaiting": null,
    "reply": "Your attendance in PYF-101 is 100.0%, which meets the published threshold of 75%.",
-   "seconds": 9.11,
+   "seconds": 4.72,
    "stages": {
-    "triage": 1.19,
+    "triage": 1.21,
     "route": 0.0,
-    "action": 7.91,
+    "action": 3.51,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -164,11 +168,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I cannot provide information about my friend Rahul's attendance as I do not have access to their personal records. Please check with the institute's support team for this information.",
-   "seconds": 3.19,
+   "seconds": 3.13,
    "stages": {
-    "triage": 1.52,
+    "triage": 1.47,
     "route": 0.0,
-    "action": 1.67,
+    "action": 1.65,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -187,12 +191,12 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-38A28CE7). I can't tell you when they will reply.",
-   "seconds": 1.53,
+   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-EF3EA6A6). I can't tell you when they will reply.",
+   "seconds": 1.58,
    "stages": {
-    "triage": 1.5,
+    "triage": 1.53,
     "route": 0.0,
-    "escalate": 0.02,
+    "escalate": 0.04,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -211,10 +215,10 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-2F8480E6). I can't tell you when they will reply.",
-   "seconds": 1.52,
+   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-756AE4A6). I can't tell you when they will reply.",
+   "seconds": 1.58,
    "stages": {
-    "triage": 1.48,
+    "triage": 1.55,
     "route": 0.0,
     "escalate": 0.03,
     "qa": 0.0,
@@ -229,24 +233,24 @@
    "student": "stu_asha",
    "text": "I want to talk to a person, not a bot.",
    "expect": "escalates to a human",
-   "route": "clarify",
-   "reason": "low_confidence",
+   "route": "escalate",
+   "reason": "human_request",
    "abstained": false,
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Could you tell me a bit more? For example, name the batch (like PYF-101) or the course you mean.",
-   "seconds": 1.43,
+   "reply": "This needs a person on our student support team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-639CEFE5). I can't tell you when they will reply.",
+   "seconds": 1.6,
    "stages": {
-    "triage": 1.43,
+    "triage": 1.53,
     "route": 0.0,
-    "clarify": 0.0,
+    "escalate": 0.06,
     "qa": 0.0,
     "finalize": 0.0
    },
    "hard": "escalates",
-   "hard_ok": false,
-   "hard_why": "must escalate"
+   "hard_ok": true,
+   "hard_why": ""
   },
   {
    "id": "injection",
@@ -260,9 +264,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can help with questions about courses, eligibility, fees, admissions and your own batch. I can't follow instructions that change how I work or show internal information.",
-   "seconds": 1.42,
+   "seconds": 1.64,
    "stages": {
-    "triage": 1.42,
+    "triage": 1.63,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -285,14 +289,14 @@
    ],
    "tools": [],
    "awaiting": null,
-   "reply": "You can reschedule your Saturday batch to the weekday evening batch by contacting the support team and quoting your batch id. Support requests are answered within 2 working days [student-support-attendance-and-assessments#5].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
-   "seconds": 5.36,
+   "reply": "You can request to reschedule your Saturday batch to the weekday evening batch by contacting the support team and quoting your batch id. Support requests are answered within 2 working days [student-support-attendance-and-assessments#5].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
+   "seconds": 6.44,
    "stages": {
-    "triage": 1.4,
+    "triage": 1.78,
     "route": 0.0,
-    "knowledge": 3.95,
+    "knowledge": 4.65,
     "qa": 0.0,
-    "finalize": 0.0
+    "finalize": 0.01
    },
    "hard": null,
    "hard_ok": null,
@@ -312,7 +316,7 @@
    "n": 30,
    "hit1": 90.0,
    "hit4": 100.0,
-   "p50_ms": 31,
+   "p50_ms": 39,
    "m0_hit1": 87.0,
    "embedder": "ollama:nomic-embed-text@px-2d4e97"
   }
@@ -324,7 +328,7 @@
   ],
   [
    "nomic-embed-text",
-   0.04
+   0.1
   ]
  ],
  "mem_before": {
@@ -341,11 +345,11 @@
    }
   ],
   "process_rss_mib": 101,
-  "mem_available_gib": 7.96,
+  "mem_available_gib": 7.11,
   "loadavg": [
-   0.86,
-   1.1,
-   0.96
+   2.73,
+   1.57,
+   1.26
   ]
  },
  "mem_after": {
@@ -361,12 +365,12 @@
     "gpu_gib": 0.0
    }
   ],
-  "process_rss_mib": 136,
-  "mem_available_gib": 7.58,
+  "process_rss_mib": 137,
+  "mem_available_gib": 6.72,
   "loadavg": [
-   2.46,
-   1.48,
-   1.09
+   3.64,
+   2.01,
+   1.43
   ]
  }
 }

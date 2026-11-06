@@ -84,6 +84,10 @@ class _H(BaseHTTPRequestHandler):
                 text = f"<think>The source says so [{ids[0] if ids else 'x#0'}]. I should cite it.</think> Final answer [{ids[0] if ids else 'x#0'}]."
             elif "reasoning-unfinished" in question.lower():
                 text = f"<think>Let me look [{ids[0] if ids else 'x#0'}] and then"
+            elif "uncited-once" in question.lower() and "contained no source citation" not in prompt:  # forgets the citation on the first try
+                text = "Here is the answer without any citation."
+            elif "uncited-always" in question.lower():
+                text = "Here is the answer without any citation."
             elif "ramble" in question.lower():  # never stops by itself: hits the token limit like a non-terminating model
                 limit = (body.get("options") or {}).get("num_predict", 50)
                 text = " ".join(["blah"] * limit)

@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Category `other` with confidence from this value up to triage_min_confidence goes to the grounded FAQ (answer with a citation or
     # abstain) instead of a clarifying question. Below it, and for parse failures (0.0), the router still asks. Escalation always wins.
     triage_other_floor: float = Field(default=0.4, ge=0.0, le=1.0)
+    # How many times an UNCITED FAQ answer is regenerated with a reminder to cite (0 = never; 1 = once). The retry is validated exactly like
+    # the first answer and no other failure (truncated, declined, unknown citation, ...) is ever retried.
+    faq_citation_retries: int = Field(default=1, ge=0, le=1)
     # Knowledge agent: first search + at most (attempts - 1) corrective retries. The cap prevents runaway loops and cost.
     knowledge_max_attempts: int = Field(default=2, ge=1, le=3)
 
