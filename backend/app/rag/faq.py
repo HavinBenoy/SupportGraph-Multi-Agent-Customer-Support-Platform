@@ -20,6 +20,7 @@ groundedness critic (build step 4) and evals (step 6); the baseline's numbers wi
 The tenant comes from trusted run config (config["configurable"]["tenant_id"]), never from the question.
 """
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
@@ -51,6 +52,23 @@ ABSTAIN_MESSAGE = (
 )
 
 
+# A model told to emit SENTINEL when the sources lack the answer sometimes says so in its own words ("The sources do not mention X").
+# That is an honest non-answer, but it must take the standard abstention path (handoff wording, logged as unanswered), not be
+# shown as a sourced answer. Detection is deliberately narrow and only ever moves a reply TOWARDS abstention (fail closed).
+_NO_INFO = re.compile(
+    r"\b(?:sources?|context|documents?|provided (?:text|information|material))\b[^.\n]{0,40}?\b(?:do(?:es)? not|don't|doesn't|did not|never)\b"
+    r"[^.\n]{0,20}?\b(?:mention|contain|provide|say|specify|include|cover|address|state|have|list|give)\b"
+    r"|\bnot (?:mentioned|covered|specified|stated|provided) in the (?:sources?|context|documents?)\b"
+    r"|\bno (?:information|details?|mention) (?:is |are |was )?(?:available |provided |given |found )?(?:about|on|regarding|in the (?:sources?|context))\b"
+    r"|\b(?:i )?(?:cannot|can't|could not|couldn't|am unable to|am not able to) (?:find|determine|confirm)\b"
+    r"|\bi (?:do not|don't) have (?:any |enough )?information\b", re.I)
+
+
+def declares_no_information(text: str) -> bool:
+    """True if the reply says, in its own words, that the sources do not contain the answer."""
+    return bool(_NO_INFO.search(CITATION.sub(" ", text or "")))
+
+
 class FaqState(TypedDict, total=False):
     question: str
     search_query: str  # optional: what to SEARCH for (a rewrite); the model is still asked `question`
@@ -70,7 +88,7 @@ class FaqAnswer:
     answer: str
     abstained: bool
     reason: str  # answered | no_relevant_context | no_documents_ingested | empty_question | question_too_long |
-    #              model_abstained | truncated_answer | uncited_answer | unknown_citation
+    #              model_abstained | model_declined | truncated_answer | uncited_answer | unknown_citation
     citations: list[str] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)  # the cited passages (id, title, heading, text, score)
     top_score: float | None = None
@@ -127,6 +145,8 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
             reason = "truncated_answer"
         elif not raw or SENTINEL in raw:  # "answer + sentinel" is treated as a refusal too: fail closed
             reason = "model_abstained"
+        elif declares_no_information(raw):  # a refusal in the model's own words, even with a citation attached
+            reason = "model_declined"
         elif not cited:
             reason = "uncited_answer"
         elif any(c not in retrieved for c in cited):

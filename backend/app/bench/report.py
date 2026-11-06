@@ -226,12 +226,12 @@ def _nr(n, d, rate_=None):
     return f"{n}/{d} ({_pct(rate_ if rate_ is not None else (n / d if d else None))})"
 
 
-def render_review(results: list[dict], labels=("missing_fact", "mixed_output")) -> str:
+def render_review(results: list[dict], labels=("missing_fact", "mixed_output", "answered_unanswerable")) -> str:
     """A human-review sheet for FAQ answers the deterministic scorer marked as failures it cannot judge on meaning
     (the expected phrase was absent, but a correct paraphrase can also look like that). READ-ONLY: it never changes a
     score, the criteria or any result file. A person fills in the verdicts; the strict metric stays the headline."""
     out = ["# FAQ review sheet", "",
-           "These answers were scored as failures by exact-phrase checks. Mark each one by reading the answer against the sources. "
+           "These answers were scored as failures by exact-phrase checks (including a refusal worded differently from the required marker). Mark each one by reading the answer against the sources. "
            "**Nothing here changes any score**; use it to see how far the strict metric under-states (or not) a model.", ""]
     n = 0
     for r in results:

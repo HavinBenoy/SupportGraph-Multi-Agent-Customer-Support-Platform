@@ -117,11 +117,14 @@ def bench_faq(settings: Settings, model_name: str, factory: ModelFactory, *, spl
             judged = metrics.judge_faq_answer(case, m["text"], ids, m["done_reason"])
             check = corpus.context_check(case, ctx)
             label = metrics.label_faq_row(case, judged, check["sufficient"])
+            from app.rag.faq import declares_no_information  # the product's own check; recorded, never used for scoring
+
+            declined = declares_no_information(m["text"])
             split_rows.append({**base, "question": case["message"], "must_abstain": case["must_abstain"],
                                "expected_facts": case["expected_facts"], "expected_docs": case["expected_docs"],
                                "context_ids": sorted(ids), "context_sufficient": check["sufficient"],
                                "facts_missing_from_context": check["facts_missing_from_context"],
-                               **m, **judged, "label": label, "failure_class": metrics.FAILURE_CLASS[label]})
+                               **m, **judged, "declines_in_own_words": declined, "label": label, "failure_class": metrics.FAILURE_CLASS[label]})
             if on_progress:
                 on_progress(i + 1, len(cases))
         rows += split_rows

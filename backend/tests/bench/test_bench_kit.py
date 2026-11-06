@@ -278,6 +278,9 @@ def test_review_sheet_lists_only_judgement_failures_and_changes_nothing():
     assert json.dumps(res) == before
     assert "T3" in md and "Both online and offline" in md and "Nothing here changes any score" in md
     assert "T9" not in md and "T1 " not in md and "[ ] correct (paraphrase)" in md
+    own = [{"id": "T129", "split": "heldout", "label": "answered_unanswerable", "question": "Education loan?", "expected_facts": [],
+            "context_ids": [], "text": "The sources do not mention loans. [about-the-institute#5]"}]
+    assert "T129" in report.render_review([{"suite": "faq", "model": "m", "rows": own}])
     assert "No failures" in report.render_review([{"suite": "faq", "model": "m", "rows": rows[2:]}])
 
 

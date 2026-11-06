@@ -95,3 +95,37 @@ def test_real_ollama_client_against_mock_non_terminating_model_is_rejected(embed
         s = Settings(_env_file=None, embedding_provider="fake", llm_provider="ollama", llm_base_url=mock.url, llm_max_output_tokens=30)
         r = answer_question(build_faq_graph(embedder, get_chat_model("faq", s), s), Q + " ramble", tenant_id="qspiders_sample")
     assert r.abstained and r.reason == "truncated_answer"
+
+
+# ---------- refusals in the model's own words must take the abstention path ----------
+
+from app.rag.faq import declares_no_information  # noqa: E402
+
+
+@pytest.mark.parametrize("text", [
+    "The sources do not mention anything about education loans or financial assistance options. [about-the-institute#5]",
+    "The context does not contain this information.",
+    "This is not mentioned in the sources.",
+    "No information is available about hostel fees.",
+    "I cannot find that in the documents.",
+    "I don't have information about that.",
+])
+def test_own_words_refusals_are_detected(text):
+    assert declares_no_information(text)
+
+
+@pytest.mark.parametrize("text", [
+    "The Python Full Stack course is offered in both online and offline modes [courses-and-batches#1].",
+    "You can pay in two instalments: 60% at registration and 40% before week 8 [fees-and-payments#2].",
+    "Submitting the enquiry form does not reserve a seat [admissions-and-demo-classes#5].",
+    "No, it is not ok to type your card number here to pay [privacy-and-student-data#4].",
+    "Weekend classes are available, but the sources list Saturday and Sunday batches [courses-and-batches#5].",
+])
+def test_ordinary_answers_including_negative_ones_are_not_flagged(text):
+    assert not declares_no_information(text)
+
+
+def test_validate_turns_a_cited_own_words_refusal_into_the_standard_abstention(embedder, cite):
+    text = f"The sources do not mention anything about education loans or financial assistance options. [{cite}]"
+    r = ask(embedder, MetaModel(reply=text, meta={"done_reason": "stop"}))
+    assert r.abstained and r.reason == "model_declined" and r.answer == ABSTAIN_MESSAGE and r.citations == []
