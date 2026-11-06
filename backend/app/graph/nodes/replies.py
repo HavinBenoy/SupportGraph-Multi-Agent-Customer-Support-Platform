@@ -76,6 +76,9 @@ CONVERSE = {
                 "Thanks for getting in touch. Have a good day, goodbye!"],
     "interruption": ["No problem. Ask me whenever you're ready.", "That's fine. What would you like to know?",
                      "No worries. Go ahead whenever you're ready."],
+    # the caller says the assistant said or asked something unnecessary / not what they asked
+    "correction": ["Sorry about that. What would you like to ask?", "My apologies. Go ahead, I'm listening.",
+                   "Sorry, my mistake. How can I help?"],
 }
 GOODBYE_WHILE_PENDING = ("Okay, goodbye. Your request stays with our staff, and you'll see the outcome in this conversation "
                          "when you come back.")

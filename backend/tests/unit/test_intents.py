@@ -3,7 +3,7 @@ The key property is the negative side: anything with real content, a yes/no, or 
 
 import pytest
 
-from app.conversation.intents import ACK, GOODBYE, GREETING, INTERRUPTION, THANKS, detect_intent
+from app.conversation.intents import ACK, CORRECTION, GOODBYE, GREETING, INTERRUPTION, THANKS, detect_intent
 
 
 @pytest.mark.parametrize("text", ["Hi", "hi.", "Hello there!", "hey", "Good morning", "hey, how are you?", "Hello? Can you hear me?",
@@ -30,16 +30,43 @@ def test_acknowledgements(text):
     "bye", "Goodbye!", "thanks, bye bye", "thank you bye", "that's all for now", "that's all", "I'm done", "no that's all",
     "you can end the call", "please hang up", "stop the call", "end the call", "you can disconnect", "have a good day", "take care",
     "okay thank you you can stop the call", "nothing else",
+    "Okay, that's everything. You can just cut the cord.", "You may please end the call.",             # the second real call
+    "that's everything", "you can just hang up", "please disconnect the call", "you can cut the call", "I want you to end the call",
+    "you can just cut the line now", "you can end this call now", "we can wrap up", "I have no more questions", "that'll do for now",
+    "okay that's all I needed", "I don't have any more questions", "let's end here",
 ])
 def test_goodbyes_and_call_ending(text):
     assert detect_intent(text) == GOODBYE
 
 
 @pytest.mark.parametrize("text", ["I am just testing", "I'm just testing.", "Sorry, I was just testing your response", "just testing",
-                                  "never mind", "wait", "hold on a second", "that's not what I asked", "I am just testing you, okay",
-                                  "sorry", "forget it"])
+                                  "never mind", "wait", "hold on a second", "I am just testing you, okay",
+                                  "sorry", "forget it",
+                                  "I'm actually just testing you.", "I am only testing you", "I'm really just testing you out", "I was just testing the system",
+                                  "I'm just checking", "actually, never mind"])
 def test_interruptions_and_clarifications(text):
     assert detect_intent(text) == INTERRUPTION
+
+
+@pytest.mark.parametrize("text", [
+    "I didn't ask anything in the first place for you to say.",   # the second real call
+    "I didn't ask for that", "you didn't have to say that", "why did you say that", "that's not what I asked", "that's not what I meant",
+    "no no that's not what I meant", "I never asked", "you misunderstood me", "who asked you",
+])
+def test_corrections_of_the_assistant(text):
+    assert detect_intent(text) == CORRECTION
+
+
+@pytest.mark.parametrize("text", [
+    "stop the course fee payment", "you can stop", "end", "cut", "What is the end date of the course?", "how do I end my enrolment",
+    "when does the session end", "cut the fee", "I want to stop the batch", "can you stop the auto debit", "you may end",
+    "I didn't ask about fees, I asked about placement in PYF-101",          # a correction that carries a real question
+    "I didn't get the fee receipt",
+    "actually I'm just testing the fee details, what is the fee?",
+    "I'm testing positive for nothing, what about the course",
+])
+def test_unrelated_uses_of_stop_end_cut_and_mixed_sentences_are_not_intents(text):
+    assert detect_intent(text) is None
 
 
 @pytest.mark.parametrize("text", [

@@ -112,3 +112,26 @@ def test_spoken_human_support_requests_are_caught(text):
 ])
 def test_look_alikes_do_not_ask_for_a_person(text):
     assert escalation_floor(text) is None
+
+
+# M2.1.1: support-desk wording from the second real call
+@pytest.mark.parametrize("text", [
+    "Okay, please proceed towards your support desk.",
+    "please go to your support team", "send me to your support team", "take this to your manager", "hand me over to support",
+    "move me to your support executive", "pass this call to your team", "let a human handle this", "have someone from support call me",
+    "support desk please", "your helpline", "Please forward this call to your support.", "please transfer me to the support desk",
+])
+def test_support_desk_requests_are_caught(text):
+    assert escalation_floor(text)[0] == "human_request"
+
+
+@pytest.mark.parametrize("text", [
+    "Can I go to the support centre near me?", "Where is the support desk?", "What are the support desk timings?",
+    "I will send the documents to the team", "take the course", "go to the next batch", "proceed to payment", "Can you send me the fee details",
+    "move me to the evening batch", "pass the exam", "hand in the assignment to the trainer", "take me to the python course details",
+    "send me the syllabus", "how do I raise an issue",
+    "Okay, that's everything. You can just cut the cord.", "You may please end the call.", "I'm actually just testing you.",
+    "I didn't ask anything in the first place for you to say.",
+])
+def test_ordinary_sentences_with_movement_verbs_do_not_ask_for_a_person(text):
+    assert escalation_floor(text) is None

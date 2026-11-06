@@ -34,6 +34,15 @@ _RULES: list[tuple[str, str, re.Pattern]] = [
         r"|\b(forward|transfer|redirect|reroute|route|divert|patch|put|pass|hand|escalate|connect)\w*\b.{0,25}?\b(to|towards?|through to|over to|with)\s+"
         r"(?:(?:your|the|a|an|our)\s+)?(?:(?:real|live|actual|human|customer|support|supporting)\s+)*"
         r"(support|supporting|person|human|agent|representative|executive|staff|someone(?!\s+(who|else))|team|helpline|customer care|care|desk|counsel+or|manager|supervisor)\b"
+        # M2.1.1: "please proceed towards your support desk", "send me to your support team", "take this to your manager". The weak verbs
+        # (proceed/go/send/take/...) need "your/our" so that "can I go to the support centre?" stays a question about a place.
+        r"|\b(proceed|go|move|head|take|send|pass|hand|bring|direct|refer|switch|shift)\w*\b(?:\s+(?:me|us|this|my|the call|this call|the chat|over|ahead|on|along))*\s+(?:to|towards?)\s+(?:your|our)\s+"
+        r"(?:(?:real|live|human|customer|support|supporting|help)\s+)*(support|supporting|helpdesk|help desk|desk|customer care|team|staff|executive|agent|person|representative|manager|supervisor|helpline|counsel+or)\b"
+        # "let a human handle this", "have someone from support call me"
+        r"|\blet\s+(?:a|an|the|your)?\s*(?:real\s+|live\s+)?(?:human|person|agent|someone|support)\b.{0,15}\b(?:handle|take over|answer|deal with|help)\b"
+        r"|\b(?:someone|somebody|a person|an agent|a human)\s+from\s+(?:the\s+|your\s+)?(?:support|customer care|helpline)\b"
+        # the destination alone: "support desk please", "customer care", "your helpline"
+        r"|^\W*(?:please\s+)?(?:(?:a|the|your)\s+)?(?:support desk|help ?desk|front desk|support team|support executive|support staff|support agent|customer care|helpline)(?:\s+please)?\W*$"
         # "I want / need / would like to contact / call / reach the support", "please contact support", "can you call someone"
         r"|\b(i\s+(want|need|would like|wanna|have)\s+to|i'?d like to|please|can you|could you|will you|let me)\s+(contact|call|reach|ring|phone|get)\s+"
         r"(?:(?:me|us|to|a|an|the|your|our)\s+)*(?:(?:real|live|actual|human|customer)\s+)*(support|supporting|person|human|agent|representative|executive|staff|someone(?!\s+(who|else))|helpline|customer care|counsel+or|manager|supervisor)\b"

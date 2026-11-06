@@ -22,7 +22,7 @@
     "wants_own_records": false
    },
    "faq_reason": "answered",
-   "faq_raw_answer": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee, which must be paid before week 8 of the batch [fees-and-payments#2].",
+   "faq_raw_answer": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee. The exact amount depends on the programme. \n\nThe first instalment is paid at registration, and the second instalment is paid before week 8 of the batch. [fees-and-payments#2]",
    "faq_generations": 1,
    "faq_top_score": 0.7194,
    "soft_ok": true,
@@ -32,12 +32,12 @@
    ],
    "tools": [],
    "awaiting": null,
-   "reply": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee, which must be paid before week 8 of the batch [fees-and-payments#2].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
-   "seconds": 9.44,
+   "reply": "Yes, you can pay the course fee in instalments. The first instalment is 60% of the fee, and the second instalment is 40% of the fee. The exact amount depends on the programme. \n\nThe first instalment is paid at registration, and the second instalment is paid before week 8 of the batch. [fees-and-payments#2]\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
+   "seconds": 6.93,
    "stages": {
-    "triage": 3.57,
+    "triage": 1.92,
     "route": 0.0,
-    "knowledge": 5.86,
+    "knowledge": 5.0,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -72,11 +72,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "The programmes offered under PySpiders are Python Full Stack and Data Science with Python [courses-and-batches#2].\n\n(Demo data: this answer comes from sample documents, not the institute's real policy.)",
-   "seconds": 6.07,
+   "seconds": 5.91,
    "stages": {
-    "triage": 1.38,
+    "triage": 1.37,
     "route": 0.0,
-    "knowledge": 4.68,
+    "knowledge": 4.54,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -109,11 +109,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
-   "seconds": 7.13,
+   "seconds": 7.14,
    "stages": {
-    "triage": 1.4,
+    "triage": 1.44,
     "route": 0.0,
-    "knowledge": 5.73,
+    "knowledge": 5.7,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -146,11 +146,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I'm sorry, I couldn't find that in our help articles, so I don't want to guess. Please contact our support team and they will be able to help.",
-   "seconds": 6.25,
+   "seconds": 8.01,
    "stages": {
-    "triage": 1.38,
+    "triage": 1.41,
     "route": 0.0,
-    "knowledge": 4.87,
+    "knowledge": 6.6,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -183,9 +183,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can look up your own records only after you sign in as a student. I can still answer general questions about courses, fees and admissions.",
-   "seconds": 1.51,
+   "seconds": 1.64,
    "stages": {
-    "triage": 1.5,
+    "triage": 1.63,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -222,11 +222,11 @@
    ],
    "awaiting": null,
    "reply": "Your attendance in PYF-101 is 80%, which meets the published threshold of 75%.",
-   "seconds": 8.64,
+   "seconds": 5.36,
    "stages": {
-    "triage": 1.15,
+    "triage": 1.45,
     "route": 0.0,
-    "action": 7.48,
+    "action": 3.9,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -259,11 +259,11 @@
    "tools": [],
    "awaiting": null,
    "reply": "I cannot provide information about my friend Rahul's attendance as I do not have access to their personal records. Please check with the institute's support team for this information.",
-   "seconds": 3.06,
+   "seconds": 3.35,
    "stages": {
-    "triage": 1.41,
+    "triage": 1.64,
     "route": 0.0,
-    "action": 1.65,
+    "action": 1.7,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -295,12 +295,12 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-7AB84983). I can't tell you when they will reply.",
-   "seconds": 1.61,
+   "reply": "This needs a person on our student experience team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-8B9D9BE3). I can't tell you when they will reply.",
+   "seconds": 1.78,
    "stages": {
-    "triage": 1.59,
+    "triage": 1.73,
     "route": 0.0,
-    "escalate": 0.02,
+    "escalate": 0.04,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -332,12 +332,12 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-779DD069). I can't tell you when they will reply.",
-   "seconds": 1.52,
+   "reply": "This needs a person on our accounts team. I've passed it to them with the details, so you shouldn't need to repeat yourself (reference ESC-C3BEBE9A). I can't tell you when they will reply.",
+   "seconds": 1.98,
    "stages": {
-    "triage": 1.48,
+    "triage": 1.96,
     "route": 0.0,
-    "escalate": 0.03,
+    "escalate": 0.01,
     "qa": 0.0,
     "finalize": 0.0
    },
@@ -369,8 +369,8 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Of course. I can't connect you to a person during this conversation yet, so I've passed your request to our student support team with the details (reference ESC-EEA69846). You shouldn't need to repeat yourself, and I can't tell you when they will reply.",
-   "seconds": 0.01,
+   "reply": "Of course. I can't connect you to a person during this conversation yet, so I've passed your request to our student support team with the details (reference ESC-0FFEBD2B). You shouldn't need to repeat yourself, and I can't tell you when they will reply.",
+   "seconds": 0.02,
    "stages": {
     "triage": 0.0,
     "route": 0.0,
@@ -531,6 +531,191 @@
    "hard_why": ""
   },
   {
+   "id": "testing-2",
+   "student": "anonymous",
+   "text": "I'm actually just testing you.",
+   "expect": "acknowledged, no abstention message",
+   "route": "converse",
+   "reason": "interruption",
+   "triage": {
+    "category": "chitchat",
+    "priority": "low",
+    "sentiment": "positive",
+    "language": "en",
+    "confidence": 1.0,
+    "wants_own_records": false
+   },
+   "faq_reason": null,
+   "faq_raw_answer": "",
+   "faq_generations": null,
+   "faq_top_score": null,
+   "soft_ok": null,
+   "abstained": false,
+   "citations": [],
+   "tools": [],
+   "awaiting": null,
+   "reply": "No problem. Ask me whenever you're ready.",
+   "seconds": 0.01,
+   "stages": {
+    "triage": 0.0,
+    "route": 0.0,
+    "converse": 0.0,
+    "qa": 0.0,
+    "finalize": 0.0
+   },
+   "hard": "converses",
+   "hard_ok": true,
+   "hard_why": ""
+  },
+  {
+   "id": "correction",
+   "student": "anonymous",
+   "text": "I didn't ask anything in the first place for you to say.",
+   "expect": "short apology, no abstention message",
+   "route": "converse",
+   "reason": "correction",
+   "triage": {
+    "category": "chitchat",
+    "priority": "low",
+    "sentiment": "positive",
+    "language": "en",
+    "confidence": 1.0,
+    "wants_own_records": false
+   },
+   "faq_reason": null,
+   "faq_raw_answer": "",
+   "faq_generations": null,
+   "faq_top_score": null,
+   "soft_ok": null,
+   "abstained": false,
+   "citations": [],
+   "tools": [],
+   "awaiting": null,
+   "reply": "Sorry about that. What would you like to ask?",
+   "seconds": 0.01,
+   "stages": {
+    "triage": 0.0,
+    "route": 0.0,
+    "converse": 0.0,
+    "qa": 0.0,
+    "finalize": 0.0
+   },
+   "hard": "converses",
+   "hard_ok": true,
+   "hard_why": ""
+  },
+  {
+   "id": "cut-cord",
+   "student": "anonymous",
+   "text": "Okay, that's everything. You can just cut the cord.",
+   "expect": "closing message and end_call set",
+   "route": "converse",
+   "reason": "goodbye",
+   "triage": {
+    "category": "chitchat",
+    "priority": "low",
+    "sentiment": "positive",
+    "language": "en",
+    "confidence": 1.0,
+    "wants_own_records": false
+   },
+   "faq_reason": null,
+   "faq_raw_answer": "",
+   "faq_generations": null,
+   "faq_top_score": null,
+   "soft_ok": null,
+   "abstained": false,
+   "citations": [],
+   "tools": [],
+   "awaiting": null,
+   "reply": "You're welcome. Thanks for getting in touch. Take care, goodbye!",
+   "seconds": 0.01,
+   "stages": {
+    "triage": 0.0,
+    "route": 0.0,
+    "converse": 0.0,
+    "qa": 0.0,
+    "finalize": 0.0
+   },
+   "hard": "ends_call",
+   "hard_ok": true,
+   "hard_why": ""
+  },
+  {
+   "id": "end-call-polite",
+   "student": "anonymous",
+   "text": "You may please end the call.",
+   "expect": "closing message and end_call set",
+   "route": "converse",
+   "reason": "goodbye",
+   "triage": {
+    "category": "chitchat",
+    "priority": "low",
+    "sentiment": "positive",
+    "language": "en",
+    "confidence": 1.0,
+    "wants_own_records": false
+   },
+   "faq_reason": null,
+   "faq_raw_answer": "",
+   "faq_generations": null,
+   "faq_top_score": null,
+   "soft_ok": null,
+   "abstained": false,
+   "citations": [],
+   "tools": [],
+   "awaiting": null,
+   "reply": "You're welcome. Thanks for getting in touch. Take care, goodbye!",
+   "seconds": 0.01,
+   "stages": {
+    "triage": 0.0,
+    "route": 0.0,
+    "converse": 0.0,
+    "qa": 0.0,
+    "finalize": 0.0
+   },
+   "hard": "ends_call",
+   "hard_ok": true,
+   "hard_why": ""
+  },
+  {
+   "id": "support-desk",
+   "student": "anonymous",
+   "text": "Okay, please proceed towards your support desk.",
+   "expect": "escalates to a human (no unrelated FAQ answer)",
+   "route": "escalate",
+   "reason": "human_request",
+   "triage": {
+    "category": "human_request",
+    "priority": "low",
+    "sentiment": "neutral",
+    "language": "en",
+    "confidence": 1.0,
+    "wants_own_records": false
+   },
+   "faq_reason": null,
+   "faq_raw_answer": "",
+   "faq_generations": null,
+   "faq_top_score": null,
+   "soft_ok": null,
+   "abstained": false,
+   "citations": [],
+   "tools": [],
+   "awaiting": null,
+   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-C3C01562). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
+   "seconds": 0.03,
+   "stages": {
+    "triage": 0.0,
+    "route": 0.0,
+    "escalate": 0.02,
+    "qa": 0.0,
+    "finalize": 0.0
+   },
+   "hard": "escalates",
+   "hard_ok": true,
+   "hard_why": ""
+  },
+  {
    "id": "forward-call",
    "student": "anonymous",
    "text": "Please forward this call towards your supporting.",
@@ -554,7 +739,7 @@
    "citations": [],
    "tools": [],
    "awaiting": null,
-   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-3E15AD4A). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
+   "reply": "Of course. I can't connect you to a person during this conversation yet, but I've left a note for our student support team (reference ESC-0ED7AA5B). Because you are not signed in they have no way to reach you, so please contact the support team directly and quote the reference.",
    "seconds": 0.01,
    "stages": {
     "triage": 0.0,
@@ -592,9 +777,9 @@
    "tools": [],
    "awaiting": null,
    "reply": "I can help with questions about courses, eligibility, fees, admissions and your own batch. I can't follow instructions that change how I work or show internal information.",
-   "seconds": 1.58,
+   "seconds": 1.48,
    "stages": {
-    "triage": 1.58,
+    "triage": 1.47,
     "route": 0.0,
     "clarify": 0.0,
     "qa": 0.0,
@@ -608,7 +793,7 @@
    "id": "write-makeup",
    "student": "stu_meera",
    "text": "Please arrange a make-up class for the session I missed in PYD-301.",
-   "expect": "proposes a make-up request and pauses for staff approval",
+   "expect": "pauses for staff approval (or, when an earlier run left the same request pending, says it is already pending)",
    "route": "write",
    "reason": "makeup_request",
    "triage": {
@@ -623,24 +808,24 @@
    "faq_raw_answer": "",
    "faq_generations": null,
    "faq_top_score": null,
-   "soft_ok": false,
+   "soft_ok": true,
    "abstained": false,
    "citations": [],
    "tools": [],
    "awaiting": null,
    "reply": "You already have a pending make-up request for PYD-301 on 2026-10-28 (reference MK-2C9BEA31); staff will review it.",
-   "seconds": 3.66,
+   "seconds": 2.43,
    "stages": {
-    "triage": 1.61,
+    "triage": 1.52,
     "route": 0.0,
-    "propose": 2.03,
-    "prepare": 0.01,
+    "propose": 0.88,
+    "prepare": 0.03,
     "qa": 0.0,
     "finalize": 0.0
    },
    "hard": "write_pause",
-   "hard_ok": false,
-   "hard_why": "a write must pause for approval"
+   "hard_ok": true,
+   "hard_why": ""
   }
  ],
  "retrieval": {
@@ -648,7 +833,7 @@
    "n": 23,
    "hit1": 95.7,
    "hit4": 95.7,
-   "p50_ms": 31,
+   "p50_ms": 34,
    "m0_hit1": 96.0,
    "embedder": "ollama:nomic-embed-text@px-2d4e97"
   },
@@ -656,7 +841,7 @@
    "n": 30,
    "hit1": 90.0,
    "hit4": 100.0,
-   "p50_ms": 28,
+   "p50_ms": 31,
    "m0_hit1": 87.0,
    "embedder": "ollama:nomic-embed-text@px-2d4e97"
   }
@@ -664,32 +849,32 @@
  "warmup": [
   [
    "qwen3:1.7b",
-   2.84
+   0.02
   ],
   [
    "nomic-embed-text",
-   0.55
+   0.03
   ]
  ],
  "mem_before": {
   "ollama_loaded": [
    {
-    "model": "nomic-embed-text:latest",
-    "gib": 0.36,
-    "gpu_gib": 0.0
-   },
-   {
     "model": "qwen3:1.7b",
     "gib": 1.76,
     "gpu_gib": 0.0
+   },
+   {
+    "model": "nomic-embed-text:latest",
+    "gib": 0.36,
+    "gpu_gib": 0.0
    }
   ],
-  "process_rss_mib": 101,
-  "mem_available_gib": 7.88,
+  "process_rss_mib": 102,
+  "mem_available_gib": 6.71,
   "loadavg": [
-   2.04,
-   1.64,
-   1.22
+   0.8,
+   1.05,
+   1.24
   ]
  },
  "mem_after": {
@@ -705,12 +890,12 @@
     "gpu_gib": 0.0
    }
   ],
-  "process_rss_mib": 150,
-  "mem_available_gib": 7.54,
+  "process_rss_mib": 151,
+  "mem_available_gib": 6.56,
   "loadavg": [
-   4.11,
-   2.24,
-   1.44
+   2.94,
+   1.59,
+   1.41
   ]
  },
  "triage_stability": {
@@ -1045,6 +1230,126 @@
      "confidence": 0.8,
      "route": "knowledge",
      "reason": "other"
+    }
+   ],
+   "stable_route": true,
+   "stable_category": true
+  },
+  "testing-2": {
+   "runs": [
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    }
+   ],
+   "stable_route": true,
+   "stable_category": true
+  },
+  "correction": {
+   "runs": [
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    }
+   ],
+   "stable_route": true,
+   "stable_category": true
+  },
+  "cut-cord": {
+   "runs": [
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "knowledge",
+     "reason": "other_low_confidence"
+    },
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "knowledge",
+     "reason": "other_low_confidence"
+    },
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "knowledge",
+     "reason": "other_low_confidence"
+    }
+   ],
+   "stable_route": true,
+   "stable_category": true
+  },
+  "end-call-polite": {
+   "runs": [
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    },
+    {
+     "category": "other",
+     "confidence": 0.8,
+     "route": "knowledge",
+     "reason": "other"
+    }
+   ],
+   "stable_route": true,
+   "stable_category": true
+  },
+  "support-desk": {
+   "runs": [
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "escalate",
+     "reason": "human_request"
+    },
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "escalate",
+     "reason": "human_request"
+    },
+    {
+     "category": "other",
+     "confidence": 0.5,
+     "route": "escalate",
+     "reason": "human_request"
     }
    ],
    "stable_route": true,

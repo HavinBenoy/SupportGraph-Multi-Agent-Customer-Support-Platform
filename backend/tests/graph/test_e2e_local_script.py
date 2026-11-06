@@ -31,9 +31,10 @@ def test_script_runs_end_to_end_against_the_mock(tmp_path):
         graph, rec = e2e.build_recording_graph(s)
         rows = e2e.run_cases(graph, ask_support, rec)
         by = {r["id"]: r for r in rows}
-        assert len(rows) == 17 and {r['id'] for r in rows} >= {'write-makeup'} and 'write' not in {r['id'] for r in rows} and all(r["seconds"] >= 0 for r in rows)
+        assert len(rows) == 22 and {r['id'] for r in rows} >= {'write-makeup'} and 'write' not in {r['id'] for r in rows} and all(r["seconds"] >= 0 for r in rows)
         assert not [r for r in rows if r["hard_why"].startswith("crashed")]
-        for cid in ("legal", "dispute", "human", "faq-unanswerable", "own-records-anon", "injection", "greeting", "thanks", "goodbye", "just-testing", "forward-call"):
+        for cid in ("legal", "dispute", "human", "faq-unanswerable", "own-records-anon", "injection", "greeting", "thanks", "goodbye", "just-testing", "forward-call",
+                    "testing-2", "correction", "cut-cord", "end-call-polite", "support-desk"):
             assert by[cid]["hard_ok"], (cid, by[cid]["hard_why"], by[cid]["reply"])
         assert by["faq-fee"]["stages"]  # per-stage timing is collected
         retr = e2e.retrieval(s)
@@ -45,3 +46,47 @@ def test_script_runs_end_to_end_against_the_mock(tmp_path):
         assert by["faq-fee"]["faq_reason"] == "answered" and by["faq-fee"]["faq_generations"] == 1 and by["faq-fee"]["triage"]["category"]
         assert by["faq-unanswerable"]["faq_reason"] == "model_abstained" and by["faq-unanswerable"]["faq_raw_answer"].startswith("INSUFFICIENT")
     assert "@px-" in retr["dev"]["embedder"]
+
+
+# ---- M2.1.1: the write-makeup hard check on a database that already holds the same pending request ---------------------------------------
+def _make_up(graph, ticket):
+    return ask_support(graph, "Please arrange a make-up class for the session I missed in PYD-301.", tenant_id="qspiders_sample",
+                       student_id="stu_meera", ticket_id=ticket, today="2026-10-24")
+
+
+def test_second_run_of_the_makeup_case_is_a_genuine_duplicate_not_a_skipped_pause(tmp_path):
+    """Reproduces the failure seen on the second local `make e2e-local`: the first run left a pending request, so the next run answers
+    'you already have a pending request' (route write, no new pause). The hard check must accept that only after confirming it in the database."""
+    from sqlalchemy import select, update
+
+    from app.db.models import MakeupRequest
+
+    from app.config import Settings
+
+    e2e = load_script()
+    if True:  # offline fakes: the rule-based triage recognises the make-up request, which the mock Ollama does not
+        s = Settings(_env_file=None)
+        with session_scope() as db:
+            ingest_tenant(db, e2e.TENANT, get_embedding_client(s))
+        graph = build_support_graph(settings=s)
+        first = _make_up(graph, "e2e-run-1")
+        assert first["route"] == "write" and first["awaiting"] == "staff"
+        assert e2e.hard("write_pause", first, first["reply"], "stu_meera") == (True, "")
+        second = _make_up(graph, "e2e-run-2")                                            # a later run, another ticket
+        assert second["route"] == "write" and second["outcome"] == "duplicate" and not second.get("awaiting")
+        with session_scope() as db:
+            rows = db.scalars(select(MakeupRequest)).all()
+        assert len(rows) == 1 and rows[0].status == "pending"                           # nothing new was written
+        assert e2e.hard("write_pause", second, second["reply"], "stu_meera") == (True, "")
+
+        # not weakened: a duplicate that points at nothing, at someone else's request, or at a decided request still fails
+        bogus = {**second, "check": {"request_id": "nope"}}
+        assert e2e.hard("write_pause", bogus, "x", "stu_meera")[0] is False
+        assert e2e.hard("write_pause", second, "x", "stu_asha")[0] is False
+        assert e2e.hard("write_pause", {**second, "check": {}}, "x", "stu_meera")[0] is False
+        with session_scope() as db:
+            db.execute(update(MakeupRequest).values(status="approved"))
+        assert e2e.hard("write_pause", second, "x", "stu_meera")[0] is False
+        # and a write that is neither paused nor a duplicate fails, as before
+        assert e2e.hard("write_pause", {"route": "write", "outcome": "approved"}, "x", "stu_meera")[0] is False
+        assert e2e.hard("write_pause", {"route": "knowledge"}, "x", "stu_meera") == (True, "")

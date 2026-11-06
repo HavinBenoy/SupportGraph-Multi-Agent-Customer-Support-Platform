@@ -379,3 +379,44 @@ def test_friendly_words_by_voice_do_not_unlock_records_for_a_visitor(api):  # no
         start(ws)
         r = reply_of(say(ws)[0])
     assert r["status"] == "needs_detail" and "sign in" in r["reply"].lower() and "%" not in r["reply"]
+
+
+# ---- M2.1.1: the second real call, by voice ----------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("sentence", ["Okay, that's everything. You can just cut the cord.", "You may please end the call."])
+def test_natural_goodbyes_by_voice_end_the_call(api, sentence):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    setup_parts(api, [sentence])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        msgs, audio = say(ws)
+        assert reply_of(msgs)["reply"] in CONVERSE["goodbye"] and reply_of(msgs)["end_call"] and audio > 0
+        assert json.loads(ws.receive_text())["type"] == "call_end"
+
+
+def test_support_desk_request_by_voice_escalates_and_corrections_do_not_search(api):  # noqa: F811
+    from app.graph.nodes.replies import CONVERSE
+
+    setup_parts(api, ["Okay, please proceed towards your support desk.", "I didn't ask anything in the first place for you to say.",
+                      "I'm actually just testing you."])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        r = reply_of(say(ws)[0])
+        assert r["status"] == "escalated" and r["escalation_id"] and not r["citations"] and "working days" not in r["reply"]
+        r = reply_of(say(ws)[0])
+        assert r["reply"] in CONVERSE["correction"] and not r["end_call"] and r["status"] == "answered"
+        r = reply_of(say(ws)[0])
+        assert r["reply"] in CONVERSE["interruption"] and not r["end_call"]
+
+
+def test_new_phrasings_give_identical_replies_by_text_and_voice(api):  # noqa: F811
+    for text in ["I didn't ask anything in the first place for you to say.", "I'm actually just testing you.", "You may please end the call.",
+                 "Okay, please proceed towards your support desk."]:
+        setup_parts(api, [text])
+        with api.websocket_connect("/api/voice/ws") as ws:
+            start(ws)
+            voice = reply_of(say(ws)[0])
+        typed = api.post("/api/chat", json={"text": text, "tenant": T}).json()
+        assert voice["status"] == typed["status"]
+        norm = lambda r, ref: r["reply"].replace(ref or "\0", "REF")  # noqa: E731
+        assert norm(voice, voice["escalation_id"]) == norm(typed, typed["escalation_id"]), text

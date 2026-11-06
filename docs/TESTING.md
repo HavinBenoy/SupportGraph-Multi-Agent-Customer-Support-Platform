@@ -48,4 +48,4 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 - `tests/unit/test_intents.py`, `tests/unit/test_escalation_floor.py` (new human-request cases and look-alikes): pure code, fast.
 - `tests/graph/test_m21_conversation.py`: the full support graph with a triager that RAISES if called, proving pleasantries and requests for a person need no model; plus unchanged FAQ, abstention, escalation, sign-in and approval behaviour.
 - `tests/voice/test_voice_ws.py` (M2.1 block): the same words by voice and by text give the same replies; a goodbye ends the call after the closing is spoken.
-- `make e2e-local` now has 17 messages (5 new, code-handled).
+- `make e2e-local` now has 22 messages (10 new, code-handled). Its make-up case accepts "already pending" only after confirming the pending request in the database (re-runs on the same database).

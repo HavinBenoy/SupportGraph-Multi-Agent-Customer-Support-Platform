@@ -9,40 +9,56 @@ The router also checks the escalation floor and the injection screen first, so "
 
 Asking for a person is NOT handled here: that is the escalation floor's `human_request` rule (guardrails/escalation_floor.py).
 
+M2.1.1 widened the phrase lists after a real call ("you can just cut the cord", "you may please end the call", "I'm actually just testing you",
+"I didn't ask anything in the first place for you to say"). Call-ending commands still need a call word (call, chat, line, cord, ...) or "hang up":
+"stop", "end" and "cut" on their own, or inside "stop the course fee payment", are never a command to end the call.
+
 Deliberately absent: "yes" and "no" (they answer a pending confirmation; see graph/review.py) and bare "stop" (the caller's barge-in).
 """
 
 import re
 
-GREETING, THANKS, ACK, GOODBYE, INTERRUPTION = "greeting", "thanks", "acknowledgement", "goodbye", "interruption"
-INTENTS = (GREETING, THANKS, ACK, GOODBYE, INTERRUPTION)
+GREETING, THANKS, ACK, GOODBYE, INTERRUPTION, CORRECTION = "greeting", "thanks", "acknowledgement", "goodbye", "interruption", "correction"
+INTENTS = (GREETING, THANKS, ACK, GOODBYE, INTERRUPTION, CORRECTION)
 
 _SPLIT = re.compile(r"[.!?;]+\s*|\s*,\s+(?=(?:and\s+)?(?:you|that|i|we|thank|thanks|bye|goodbye|ok|okay)\b)|\n+", re.I)
-_FILLER = re.compile(r"^(?:(?:um+|uh+|hmm+|well|so|and|but|then|ok(?:ay)?|alright|right|oh|ah|please|just)\b[\s,]*)+", re.I)
+_FILLER = re.compile(r"^(?:(?:um+|uh+|hmm+|well|so|and|but|then|ok(?:ay)?|alright|right|oh|ah|please|just|actually|honestly|basically)\b[\s,]*)+", re.I)
 _TRAIL = re.compile(r"[\s,]*\b(?:please|thanks|thank you|then|now|ok(?:ay)?|sir|ma'?am|bro)\s*$", re.I)
 _NAME = r"(?:\s+(?:there|team|support|assistant|bot|everyone|all))?"
 
 _RULES: list[tuple[str, re.Pattern]] = [
     (GOODBYE, re.compile(
         r"^(?:no(?:pe)?[\s,]+)?(?:good\s*bye|bye(?:[\s-]*bye)?|see (?:you|ya)(?: (?:later|soon|around))?|take care|talk (?:to you )?later|have a (?:good|great|nice|lovely) (?:day|one|evening|night|time)|"
-        r"that'?s (?:all|it)(?: (?:for now|from me|for today))?|that is (?:all|it)(?: for now)?|that will be all|that would be all|"
-        r"(?:i'?m|i am|we'?re|we are) (?:all )?(?:done|good|finished|set)(?: (?:here|now|for now|for today))?|all (?:good|done|set)|nothing (?:else|more)|"
-        r"(?:i )?(?:have|got) no (?:more|other|further) questions|"
-        r"(?:(?:you can|you may|i will|i'll|i'?m going to|let'?s|please)\s+)?(?:go ahead and )?(?:hang ?up|disconnect)(?: (?:the|this|our|my|that)(?: (?:call|chat|conversation|session|line))?)?(?: now| here| for now)?|"
-        r"(?:(?:you can|you may|i will|i'll|i'?m going to|let'?s|please)\s+)?(?:go ahead and )?(?:stop|end|finish|cut|close|drop|terminate)(?: (?:the|this|our|my|that))? (?:call|chat|conversation|session|line)(?: now| here| for now)?|"
-        r"(?:you can |you may )(?:go|leave)(?: now)?|(?:i )?(?:have to|need to|got to|gotta) (?:go|leave|run|hang up))$", re.I)),
+        r"that'?s (?:all|it|everything|enough|about it|all (?:i|we) (?:need|needed|want|wanted|had|have))(?: (?:for now|from me|for today|for me|then))?|that is (?:all|it|everything|enough)(?: for now)?|that will be all|that would be all|"
+        r"that(?:'ll| will| would) (?:do|be enough|be everything)(?: for now)?|"
+        r"(?:i'?m|i am|we'?re|we are) (?:all )?(?:done|good|finished|set|through)(?: (?:here|now|for now|for today|with (?:that|this|you)))?|all (?:good|done|set)|nothing (?:else|more)(?: (?:to (?:ask|say)|from me))?|"
+        r"(?:i )?(?:have|got|don'?t have|do not have) (?:no|any) (?:more|other|further) (?:questions|queries|doubts)(?: for now)?|(?:i )?(?:have|got) nothing (?:else|more) to (?:ask|say)|"
+        r"(?:let'?s|we can|we may|i think we can) (?:wrap(?: this)? up|end(?: it)? here|stop here|finish here|call it a day)|(?:we can |you can )?wrap(?: this)? up|"
+        r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|also)\s+)*(?:please\s+)?(?:go ahead and )?(?:hang ?up|disconnect)(?: (?:the|this|our|my|that)(?: (?:call|chat|conversation|session|line|phone))?)?(?: now| here| for now| please)*|"
+        r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:i|we)\s+(?:want|would like|wanna|'d like) (?:you )?to\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|also)\s+)*(?:please\s+)?(?:go ahead and )?(?:stop|end|finish|cut|close|drop|terminate|kill)(?: (?:off|up|out))?(?: (?:the|this|our|my|that|it))?"
+        r" (?:call|chat|conversation|session|line|cord|phone|connection|call here)(?: (?:now|here|for now|off|please))*|"
+        r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|also)\s+)*(?:please\s+)?(?:go ahead and )?cut (?:it|this|that)(?: (?:off|out|short))(?: now| here| for now| please)*|"
+        r"(?:you|u)\s+(?:can|may|could|would)\s+(?:(?:just|please|kindly|now|simply|go ahead and|also)\s+)*(?:please\s+)?(?:go|leave)(?: now)?|(?:i )?(?:have to|need to|got to|gotta) (?:go|leave|run|hang up))$", re.I)),
     (THANKS, re.compile(
         r"^(?:thanks?(?: you)?(?: (?:a lot|so much|very much|a ton|again|for (?:your|the) (?:help|time|information|info|answer|support)|for calling|for that))*|"
         r"thx|ty|cheers|many thanks|much appreciated|(?:i )?(?:really )?appreciate (?:it|that|your help|the help)|thank you (?:so|very) much|"
         r"that was (?:helpful|useful|great)|that helps|that'?s (?:helpful|useful|very helpful))$", re.I)),
+    (CORRECTION, re.compile(
+        r"^(?:(?:no|oh|hey|hmm|well|okay|ok)[\s,]+)*(?:"
+        r"i (?:didn'?t|did not|never|haven'?t|have not|wasn'?t|was not)\s+(?:even\s+|actually\s+|really\s+)?(?:ask(?:ed|ing)?|say|said|request(?:ed)?|mean|meant)"
+        r"(?:\s+(?:anything|that|this|it|you|for (?:that|this|it|anything|you to \w+(?: that| this| it)?)|you to \w+(?: that| this| it)?|in the first place|at all|for you|about (?:that|this|it)|anything))*|"
+        r"you (?:didn'?t|did not) (?:have|need) to (?:say|ask|tell me) (?:that|this|it|anything)(?: (?:at all|in the first place))?|"
+        r"why (?:did|are|would) you (?:say|saying|ask|asking|tell me) (?:that|this|it)|who asked you(?: (?:that|this))?|"
+        r"that'?s not what i (?:asked|meant|said|wanted)|that was not what i (?:asked|meant|said|wanted)|that'?s not my question|that was not my question|not what i (?:asked|meant)|"
+        r"you (?:misunderstood|misheard|got me wrong)(?: me)?|(?:you )?(?:are|'?re) not listening|(?:that'?s )?(?:wrong|not right)|that'?s not it|not that|"
+        r"(?:no[\s,]*)+(?:that'?s )?(?:not (?:what )?(?:i (?:asked|meant|said))|wrong))$", re.I)),
     (INTERRUPTION, re.compile(
-        r"^(?:(?:i(?: am|'?m)|we(?: are|'?re)|this is|it'?s|it is)\s+(?:just |only |simply )?(?:a )?(?:test(?:ing)?|checking|trying(?: (?:it|this|you|this out|you out))?|kidding)(?: (?:you|it|this|out|the (?:system|call|line|bot|assistant)|your (?:response|answer|replies|voice)))*|"
-        r"(?:i )?(?:was|am) (?:just |only )?(?:testing|checking|trying)(?: (?:you|it|this|out|the (?:system|call|line|bot|assistant)|your (?:response|answer|replies|voice)))*|"
-        r"just (?:a )?(?:test(?:ing)?|checking|kidding)|(?:this is )?(?:a )?(?:test|testing)(?: (?:one|1|two|2|three|3|call|only))*|"
+        r"^(?:(?:i(?: am|'?m)|we(?: are|'?re)|this is|it'?s|it is)\s+(?:(?:actually|really|only|just|simply|still|now|basically|also|honestly)\s+)*(?:a )?(?:test(?:ing)?|checking|trying(?: (?:it|this|you|this out|you out))?|kidding|joking)(?: (?:you|it|this|out|the (?:system|call|line|bot|assistant)|your (?:response|answer|replies|voice)))*(?: (?:out|only|for fun))?|"
+        r"(?:i )?(?:was|am|'?m) (?:(?:actually|really|only|just|simply|still|now|basically|also|honestly)\s+)*(?:testing|checking|trying|playing)(?: (?:you|it|this|out|the (?:system|call|line|bot|assistant)|your (?:response|answer|replies|voice)))*(?: (?:out|only|for fun|with you))?|"
+        r"(?:(?:actually|really|only|just|simply|still|now|basically|also|honestly)\s+)*(?:a )?(?:test(?:ing)?|checking|kidding|joking)|(?:this is )?(?:a )?(?:test|testing)(?: (?:one|1|two|2|three|3|call|only))*|"
         r"(?:testing[\s,]*)+(?:one|1)?[\s,]*(?:two|2)?[\s,]*(?:three|3)?|sorry|my (?:bad|mistake)|(?:i'?m|i am) sorry|excuse me|pardon(?: me)?|"
         r"never ?mind|forget (?:it|that)|(?:ignore|disregard) (?:that|it|what i said)|scratch that|"
-        r"wait(?: (?:a|one) (?:second|sec|moment|minute))?|hold on(?: (?:a|one) (?:second|sec|moment|minute))?|one (?:second|sec|moment|minute)|give me (?:a|one) (?:second|sec|moment|minute)|"
-        r"(?:no[\s,]*)+(?:that'?s )?(?:not (?:what )?(?:i (?:asked|meant|said))|wrong)|that'?s not what i (?:asked|meant|said)|i (?:didn'?t|did not) (?:ask|say|mean) that|not that)$", re.I)),
+        r"wait(?: (?:a|one) (?:second|sec|moment|minute))?|hold on(?: (?:a|one) (?:second|sec|moment|minute))?|one (?:second|sec|moment|minute)|give me (?:a|one) (?:second|sec|moment|minute))$", re.I)),
     (ACK, re.compile(
         r"^(?:ok(?:ay)?(?: (?:cool|great|fine|then|thanks?))?|alright|all right|fine|sure|got it|i (?:see|understand|got it|get it)|understood|noted|right|cool|nice|great|perfect|awesome|excellent|good|"
         r"(?:that'?s|that is|it'?s|it is) (?:fine|ok(?:ay)?|good|great|perfect|alright|all right|cool|nice|clear|understood|enough|noted)|that works(?: for me)?|makes sense|(?:no )?(?:problem|worries|issue)|no worries|no thanks?|no thank you|nope|"
@@ -83,7 +99,7 @@ def _classify(sentence: str) -> str | None:
 
 _LEAD = re.compile(r"\b(ok(?:ay)?|alright|all right|thanks|thank you(?: very much| so much)?)\b[,.!]?\s+(?!for\b|a lot\b|so much\b|very much\b|again\b)(?=\S)", re.I)
 _MAX_WORDS = 24
-_PRIORITY = (GOODBYE, INTERRUPTION, THANKS, GREETING, ACK)
+_PRIORITY = (GOODBYE, CORRECTION, INTERRUPTION, THANKS, GREETING, ACK)
 
 
 def detect_intent(text: str) -> str | None:
