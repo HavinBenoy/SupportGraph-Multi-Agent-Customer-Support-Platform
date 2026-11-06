@@ -15,6 +15,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <strong className="brand">SupportGraph</strong>
         <nav aria-label="Main">
           {link("/", "Chat")}
+          {link("/voice", "Voice")}
           {staff && link("/agent", "Staff console")}
           {session?.role === "admin" && link("/admin", "Analytics")}
         </nav>

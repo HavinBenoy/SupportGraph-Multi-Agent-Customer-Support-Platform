@@ -9,3 +9,7 @@ __pycache__/
 node_modules/
 .next/
 *.egg-info/
+
+# voice models and smoke output (downloaded/generated locally)
+models/
+evals/voice/

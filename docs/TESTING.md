@@ -38,3 +38,8 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 - `tests/graph/test_local_stack_mock.py`: real langchain-ollama clients against a mock Ollama server (runs in `make test-fast`). Proves plumbing and safety, not model quality.
 - `SG_TEST_OLLAMA=1 pytest tests/graph/test_real_ollama.py`: opt-in, real Ollama, safety assertions only.
 - `make e2e-local`: 12 synthetic messages + retrieval Hit@k + memory/latency on your machine (`evals/e2e/REPORT.md`). Not part of any tier.
+
+## Voice line (M2)
+- `tests/voice/` runs in `make test-fast`: endpointer, spoken-text rules, session logic, real adapters against stand-ins, smoke logic, WebSocket conversations through the real graph with fake STT/TTS. `test_real_vad.py` uses the real Silero model and is skipped unless onnxruntime and faster-whisper are installed (`make voice-setup`); speech for it comes from espeak-ng when available.
+- `frontend`: `npm test` (VoiceCall, voice helpers).
+- `make voice-smoke`: real Piper/Silero/Whisper round trip on your machine (not part of any tier).

@@ -1,48 +1,39 @@
-# M1b fixes after the first real-model run - consolidated (batches 1-3; apply batch 1, 2, then this ZIP)
+# M2 (v2: numpy now optional) - Browser voice line (simulated call) + M1b closure documentation
 
-Preserved throughout: Qwen3 1.7B, Nomic with prefixes, citation validation, abstention, escalation floor (additive only), RBAC, tenant isolation,
-approval pause. No model benchmark, no schema/migration, no dependency, `.env`/database/volumes untouched.
+Apply on top of the M1b chain: `unzip -o ../supportgraph-m2.zip`. No migration, no schema change, `.env`, database and volumes untouched.
+Only new dependency: the optional extra `voice` (faster-whisper, piper-tts, onnxruntime) plus `numpy`; install with `make voice-setup`.
 
-## Findings and fixes (from your e2e report + read-only diagnostic)
-| # | Case | Root cause | Type | Fix (batch) |
-|---|---|---|---|---|
-| 1 | `faq-unanswerable` | triage `other` 0.5 < 0.6 -> "name the batch"; FAQ would have abstained (`INSUFFICIENT_CONTEXT`) | graph routing | `other` at 0.4..<0.6 -> grounded FAQ (1) |
-| 2 | `faq-outside` | same | graph routing | same (1) |
-| 3 | `human` | triage `other` 0.5; no floor rule | model classification + missing floor rule | `human_request` floor rule + prompt (1) |
-| 4 | `faq-fee` | same text gave `other` 0.8 in the diagnostic, but escalated in e2e: 1.7B triage unstable run to run | model classification (unstable) | prompt definitions (1); instability now reported (3) |
-| 5 | `faq-courses` | correct answer without citation -> `uncited_answer` | model compliance, caught by the validator | one validated citation retry (2) |
-| 6 | `write` | invented "reschedule" request: no such action | test-data error (mine) | e2e uses labelled T038 (3) |
-Also fixed: tests depended on your `.env` embedding provider (found by your batch-1 `make test-fast`): `tests/conftest.py` forces fake embeddings (2).
+## M1b closure (docs only)
+`docs/ROADMAP.md` and `docs/M1B.md` mark M1b CLOSED 2026-11-06 with your verified results (SQLite 790/30, PostgreSQL 818/2, e2e 12/12, 0 hard failures).
 
-## Behaviour changes
-- Router: category `other`, confidence >= `SG_TRIAGE_OTHER_FLOOR` (0.4) and < `SG_TRIAGE_MIN_CONFIDENCE` (0.6) -> knowledge (reason `other_low_confidence`). Below 0.4 and parse failures (0.0): still clarify. Other categories unchanged. Injection and escalation first.
-- Floor: `human_request` rule (talk/speak/connect/transfer to a person/human/agent/representative/someone; real person; human agent; not a bot).
-- FAQ: an `uncited_answer` is regenerated once with a citation reminder; same validator; abstain if it fails again. Nothing else is retried; code never adds a citation. `SG_FAQ_CITATION_RETRIES=0` disables.
-- Triage prompt: defines human_request, concession_request (discount/waiver only), other; confidence is about the category.
-- Offline eval reference refreshed in batch 1 (heldout handled-correctly 59.7% -> 64.5%, correct abstention 42.9% -> 71.4%, over-abstain 16.7% -> 20.0% due to the fake FAQ on T110; escalation recall 100%).
+## What M2 adds
+Open `/voice`, press Start call, talk. Browser AudioWorklet (16 kHz PCM16) -> WebSocket `/api/voice/ws` -> Silero VAD endpointing -> faster-whisper -> **the same `run_turn` graph as the text chat** -> speakable reply -> Piper, streamed sentence by sentence. Barge-in, mute, typed fallback, transcript, escalation/approval banners. Full description: `docs/M2.md`.
 
-## This batch (3): e2e and final verification
-- `scripts/e2e_local.py`: write case is now labelled ticket T038 (`stu_meera`, make-up class for PYD-301) with a HARD check that a write route must pause for approval; per-case soft "as hoped / differs" column; report shows triage category+confidence, FAQ validator reason, number of generations and the raw answer of every non-answered FAQ result (via a recording wrapper; nothing extra is stored in product state); `--stability-runs N` (default 3, 0 = skip) classifies each message N times through the real triager and the real route node and reports category/route variation; `today` now follows the labelled-ticket rule (`today_for`) so make-up windows match your seeded data.
-- `tests/graph/test_m1b_six_cases.py` (new, 11 cases): the six findings through the full support graph with triage scripted to what the real model returned, plus guards: model escalation is not overridden, uncited smuggling fails, anonymous make-up is not written, unsupported "reschedule" writes nothing.
-- `tests/graph/test_e2e_local_script.py`: dry run covers the new report fields and stability.
-- `docs/M1B.md`, `docs/ROADMAP.md` updated.
+Reused unchanged: FAQ with citation validation and abstention, triage/router, escalation floor, RBAC and own-records rules, make-up approval pause, QA, analytics, the text chat's rate limiter and signed tickets (a call and the text chat share one ticket).
+Small refactor: `principal_from_token` extracted from `optional_principal` in `app/api/deps.py` (same behaviour, now shared).
 
-## Tests actually run (sandbox, final)
-| Run | Result |
-|---|---|
-| SQLite full suite (`pytest -n auto`, with `SG_LLM_PROVIDER=ollama SG_EMBEDDING_PROVIDER=ollama` exported) | 790 passed, 30 skipped |
-| PostgreSQL full suite (`SG_TEST_DATABASE_URL`, sandbox PG 16) | 818 passed, 2 skipped (opt-in real-Ollama tests) |
-| New six-case file | 11 passed |
-| Real Ollama / real latency | NOT run here: your `make e2e-local` |
+## Files
+Backend: `app/config.py` (voice settings), `app/api/deps.py`, `app/api/main.py`, `app/api/routes/voice.py`, `app/voice/{vad,stt,tts,text,session,smoke}.py`, `scripts/voice_smoke.py`, `pyproject.toml`, `tests/conftest.py`, `tests/voice/*`.
+Frontend: `public/voice-worklet.js`, `src/lib/voice.ts(+test)`, `src/components/VoiceCall.tsx(+test)`, `src/components/Shell.tsx` (Voice link), `src/app/voice/page.tsx`, `src/app/globals.css`.
+Repo: `Makefile` (`voice-setup`, `voice-smoke`), `.gitignore` (models/, evals/voice/), `.env.example`, `docs/{M2,ROADMAP,M1B,TESTING}.md`.
+
+## Tests actually run (sandbox)
+- Backend full suite, SQLite: 853 passed, 30 skipped. PostgreSQL 16: 881 passed, 2 skipped (providers exported as ollama to prove env independence). Offline eval regression gate passes.
+- New: 63 voice tests (endpointer, spoken text, session/barge-in/limits, WebSocket conversations through the real graph with fake STT/TTS: FAQ+citation, shared ticket with text, escalation, anonymous refused own records, signed-in student own vs friend's records, make-up approval by staff, auth/origin/ticket attacks, shared rate limit); real Silero model on silence, noise and espeak speech.
+- Frontend: 39 vitest tests, `tsc --noEmit` clean, `next build` OK. Real Chromium with a fake microphone through the real worklet and WebSocket into the real graph (scripted STT).
+- NOT run (needs your machine): real Whisper transcription, real Piper audio, real speaker/mic behaviour (HF downloads are blocked here).
 
 ## Verify locally
 ```
-make test-fast
-make test-pg
-git diff --check
-make e2e-local              # ~5-8 min now (3 extra triage calls per message for the stability table; use ARGS="--stability-runs 0" to skip)
+unzip -o ../supportgraph-m2.zip
+make test-fast && git diff --check          # (optionally make test-pg)
+make voice-setup                            # downloads models; add the 2 printed lines to YOUR .env
+make voice-smoke                            # real Piper -> Silero -> Whisper round trip, writes evals/voice/REPORT.md
+make api    # + make frontend-dev, open http://localhost:3000/voice, allow the microphone, ask "What is the fee for the Python course?"
+(cd frontend && npm test && npx tsc --noEmit)
 ```
-Expect: `HARD failures: 0` (the three earlier failures were human + two abstain checks, now `human` escalates and both out-of-scope cases route to knowledge and abstain). Soft column: faq-courses should answer with a citation (generations 2 if the model forgot), write-makeup should show route write + staff. If faq-fee escalates again, the triage table will show the category; send me the report.
-Optional rollbacks: `SG_TRIAGE_OTHER_FLOOR=0.6`, `SG_FAQ_CITATION_RETRIES=0`.
+Please send me `evals/voice/REPORT.md` and any call impressions (latency per turn is shown in the page log) to tune M3.
 
-Files (this ZIP): modified `docs/M1B.md`, `docs/ROADMAP.md`, `backend/scripts/e2e_local.py`, `backend/tests/graph/test_e2e_local_script.py`; added `backend/tests/graph/test_m1b_six_cases.py`; `CHANGES.md` replaced. Deleted: none.
+## v2 fix
+Your venv had no numpy (the `numpy` core dependency only installs when you re-run `make venv`/`pip install -e backend[dev]`), so importing `app.api.main` failed. numpy is now imported lazily inside the voice modules: the API and the whole existing suite run without it (verified by blocking numpy: 790 passed / 30 skipped, identical to your M1b baseline); `tests/voice` is skipped when numpy is missing. Voice itself still needs `make voice-setup`.
+Files in this v2 ZIP: `backend/app/voice/{stt,vad,smoke}.py`, `backend/tests/voice/conftest.py`, `CHANGES.md`.

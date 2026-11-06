@@ -109,6 +109,29 @@ class Settings(BaseSettings):
     # Comma-separated browser origins allowed to call the API directly. Empty = none (the frontend proxies /api, so it needs none).
     cors_origins: str = ""
 
+    # --- Browser voice line (M2) ---
+    # real = faster-whisper (speech to text) + Piper (text to speech) + Silero VAD; fake = scripted stand-ins for tests/demos without models.
+    voice_enabled: bool = True
+    voice_provider: Literal["real", "fake"] = "real"
+    voice_stt_model: str = "base.en"                # faster-whisper model name or a local folder; downloaded on first use
+    voice_stt_compute_type: str = "int8"
+    voice_stt_threads: int = Field(default=4, ge=1, le=32)
+    voice_stt_language: str = "en"
+    voice_tts_voice: str = ""                       # path to a Piper voice .onnx (its .onnx.json sits beside it); see docs/M2.md
+    voice_vad: Literal["auto", "silero", "energy"] = "auto"   # auto: Silero with real models, a crude energy gate with the fake provider (tests)
+    voice_vad_model: str = ""                       # path to a Silero VAD .onnx; empty = the copy that ships inside faster-whisper
+    voice_vad_threshold: float = Field(default=0.5, ge=0.1, le=0.95)   # speech probability to START speech; it ends below threshold - 0.15
+    voice_silence_ms: int = Field(default=700, ge=200, le=3000)        # silence that ends an utterance
+    voice_min_utterance_ms: int = Field(default=300, ge=100, le=2000)  # shorter blips (clicks, coughs) are ignored
+    voice_max_utterance_s: int = Field(default=15, ge=3, le=60)        # a longer monologue is cut and transcribed
+    voice_barge_in_ms: int = Field(default=250, ge=0, le=2000)         # speech this long while the bot talks interrupts it
+    voice_max_session_s: int = Field(default=600, ge=30, le=7200)
+    voice_max_turns: int = Field(default=60, ge=1, le=1000)
+    voice_max_reply_chars: int = Field(default=600, ge=100, le=3000)   # spoken reply is cut at a sentence boundary; the full text is still shown
+    # Browser origins allowed to open the voice WebSocket (browsers do not apply CORS to WebSockets, so the server checks Origin itself).
+    # cors_origins are allowed too. A client that sends no Origin (scripts, tests) is allowed: it still needs a valid ticket/token to act.
+    voice_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

@@ -1,5 +1,7 @@
 # M1b - real local AI on the text path
 
+**Status: CLOSED 2026-11-06.** Verified on the developer's machine: SQLite 790 passed / 30 skipped, PostgreSQL 818 passed / 2 skipped, `git diff --check` clean, real-Ollama `make e2e-local` 12/12 scenarios with 0 hard failures (qwen3:1.7b + nomic-embed-text with prefixes; retrieval Hit@1 95.7% dev, 90% heldout, Hit@4 100% heldout). Next: M2 (docs/M2.md).
+
 Configuration (decided in M0/M1a, not reopened): FAQ `qwen3:1.7b`, triage `qwen3:1.7b`, embeddings `nomic-embed-text`, provider Ollama, CPU.
 
 ## What is in the code

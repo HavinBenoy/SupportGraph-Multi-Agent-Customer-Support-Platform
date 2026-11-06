@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke
 
 venv:
 	python3 -m venv .venv
@@ -72,6 +72,23 @@ bench-tts:
 # make e2e-local [ARGS="--ingest"] [ARGS="--skip-retrieval"]. Writes evals/e2e/REPORT.md. Not part of any test tier.
 e2e-local:
 	cd backend && ../.venv/bin/python scripts/e2e_local.py $(ARGS)
+
+# ---- browser voice line (M2). See docs/M2.md ----
+# One time, needs internet: installs faster-whisper / Piper / onnxruntime, downloads a Piper voice into models/voices and the Whisper model into
+# the Hugging Face cache, then prints the lines to add to YOUR .env (this target never edits .env). Safe to re-run.
+voice-setup:
+	.venv/bin/pip install -q -e "backend[dev,voice]"
+	mkdir -p models/voices
+	.venv/bin/python -m piper.download_voices $(or $(VOICE),en_US-lessac-medium) --download-dir models/voices
+	cd backend && ../.venv/bin/python -c "from app.config import get_settings; from app.voice.stt import FasterWhisperStt; print('Whisper ready (%.1fs)' % FasterWhisperStt(get_settings()).preload())"
+	@echo ""
+	@echo "Add these two lines to your .env, then restart 'make api':"
+	@echo "SG_VOICE_PROVIDER=real"
+	@echo 'SG_VOICE_TTS_VOICE="$(CURDIR)/models/voices/$(or $(VOICE),en_US-lessac-medium).onnx"'
+
+# Round trip on this machine: Piper speaks, Silero VAD endpoints, Whisper transcribes. Writes evals/voice/REPORT.md. No microphone needed.
+voice-smoke:
+	cd backend && ../.venv/bin/python scripts/voice_smoke.py
 
 bench-review:
 	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/$(or $(DIR),bench) review

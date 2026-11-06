@@ -22,11 +22,11 @@ def secret_of(request: Request) -> str:
     return request.app.state.secret
 
 
-def optional_principal(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal | None:
-    if creds is None:
-        return None
+def principal_from_token(secret: str, token: str) -> Principal:
+    """Verify a bearer token AND that its account still exists, is enabled and has the same role/student. Raises HTTPException(401).
+    Shared by the HTTP dependency below and the voice WebSocket (which cannot send an Authorization header from a browser)."""
     try:
-        principal = verify_token(secret_of(request), creds.credentials)
+        principal = verify_token(secret, token)
     except TokenError:
         raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from None
     # A valid signature is not enough: the account must still exist and be enabled, so disabling it, or changing its role or student, cuts off a live token at once.
@@ -35,6 +35,12 @@ def optional_principal(request: Request, creds: HTTPAuthorizationCredentials | N
         if acct is None or acct.disabled or acct.role != principal.role or acct.student_id != principal.student_id:
             raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
     return principal
+
+
+def optional_principal(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal | None:
+    if creds is None:
+        return None
+    return principal_from_token(secret_of(request), creds.credentials)
 
 
 def require_principal(p: Principal | None = Depends(optional_principal)) -> Principal:
