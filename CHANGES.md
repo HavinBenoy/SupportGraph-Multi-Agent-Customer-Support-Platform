@@ -1,3 +1,32 @@
+# M3.0.1 - leak fix and per-node timings (from your first real timing)
+
+Apply: `unzip -o ../supportgraph-m2-2-3.zip` (M2.2.2/M3.0 already applied). No migration, dependency, model or default-setting change.
+
+## Reading your real numbers
+`stt_ms 577, turn_ms 6125, endpoint_to_reply_ms 6703` for "what is the fee of the full-stack course" (2.75 s of audio, one segment, no merge):
+- Speech recognition 0.6 s (about 0.2x real time) and the end-of-speech wait are NOT the problem. **The graph is 91% of the delay.**
+- Inside the graph there are two model calls on your CPU: triage (about 1.4 s in your e2e runs) and the grounded FAQ answer (the rest, about 4-5 s: prompt processing of ~500 tokens plus ~25 tokens of output). Retrieval and the code steps take milliseconds. I cannot split this precisely from one block, so this release makes the split visible instead of guessing.
+- The holding phrase should already have played at 1.8 s while waiting (the `audio_end` message of that turn shows `endpoint_to_filler_ms`; please tell me if you did not hear it).
+
+## Fixes
+1. **Leaked tasks ("Task was destroyed but it is pending ... Event.wait()" in your API log).** My paced-playback drain wait created two helper tasks per response that were never awaited. All waits now go through one helper that cancels and awaits its tasks; regression test checks no stray tasks remain after several paced responses. Harmless to the call but noisy and a slow leak, so it is fixed now.
+2. **Per-node timings.** Every graph run records milliseconds per node (`triage`, `route`, `knowledge`, `qa`, `finalize`, ...; names and numbers only). They arrive in the voice `reply.timing.nodes`, in the `graph_done` event (`grep voice_event` in the API log) and as `node_ms` in the graph result. With one real turn we will know exactly how the 6.1 s splits.
+
+## Next (M3.1, decided after your next timing block)
+Candidates, each testable with the new breakdown and none changing models or weakening grounding: (a) smaller context window / fewer retrieved chunks for voice (`SG_LLM_NUM_CTX=2048`, `SG_RAG_TOP_K=3` are existing settings you can try now: change one, ask the same question three times, compare `nodes`), (b) a shorter FAQ prompt, (c) a validated-answer cache for repeated anonymous FAQ questions, (d) answering only after validation stays; text is not streamed unvalidated.
+Please send: the `reply.timing` (with `nodes`) and the `audio_end.timing` for two questions (one warm, one repeated).
+
+## Results (sandbox)
+SQLite 1304 passed / 30 skipped; PostgreSQL 1332 passed / 2 skipped; frontend unchanged (57, `tsc` clean). Not testable here: real model timings.
+
+## Run locally
+```
+unzip -o ../supportgraph-m2-2-3.zip
+make test-fast && git diff --check && make test-pg
+```
+Then `make api`, make a call, and confirm the "Task was destroyed" lines are gone.
+
+---
 # M2.2.2 + M3.0 - Close M2, first safe latency slice
 
 Apply: `unzip -o ../supportgraph-m2-2-2.zip` (M2.2.1 already applied). No migration, dependency or model change; `.env`, databases, volumes untouched.

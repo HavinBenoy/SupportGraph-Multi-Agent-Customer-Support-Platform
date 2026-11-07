@@ -48,3 +48,4 @@ class TicketState(TypedDict, total=False):
     # --- M2.2 ---
     resolved: str           # the caller's text with the course from an earlier question added (follow-up/correction), else ""
     context_kind: str       # "follow_up" | "correction" | ""
+    node_ms: dict           # milliseconds spent in each node during this run (latency diagnosis; no content)

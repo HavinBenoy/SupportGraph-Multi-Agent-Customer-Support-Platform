@@ -632,3 +632,37 @@ async def test_latency_from_the_end_of_speech_to_first_audio_is_measured():
     assert end["endpoint_to_first_audio_ms"] >= 0 and msgs(tl, "reply")[0]["timing"]["endpoint_to_reply_ms"] >= 0
     assert any(e["event"] == "latency" for e in v.events)
     await v.close()
+
+
+@pytest.mark.anyio
+async def test_paced_playback_leaves_no_stray_tasks_behind():
+    """Regression: the drain wait used to leave two un-awaited Event.wait() tasks per response ("Task was destroyed but it is pending")."""
+    class Short(FakeTts):
+        def synthesize(self, text):
+            self.spoken.append(text)
+            yield b"\x01\x00" * (self.sample_rate // 5)
+
+    before = set(asyncio.all_tasks())
+    v, tl, _ = mk(tts=Short(), voice_pace_audio=True, voice_pace_lead_ms=200)
+    await v.start()
+    for _ in range(3):
+        await v.submit_text("okay")
+        await until(lambda: not v.speaking and n_of(tl, "audio_end") >= 1)
+        v.playback_ended(1)
+    await v.submit_text("thanks")
+    await until(lambda: n_of(tl, "audio_end") == 4, timeout=8)
+    await asyncio.sleep(0.05)
+    stray = [t for t in asyncio.all_tasks() if t not in before and not t.done() and t.get_name() != "voice-runner"]
+    assert stray == []
+    await v.close()
+
+
+@pytest.mark.anyio
+async def test_the_per_node_timings_reach_the_reply_and_the_events():
+    v, tl, _ = mk(turn=lambda text: {"reply": "ok.", **OK, "node_ms": {"triage": 1400, "knowledge": 4500}})
+    await v.start()
+    await v.submit_text("What is the fee?")
+    await until(lambda: n_of(tl, "reply") == 1)
+    assert msgs(tl, "reply")[0]["timing"]["nodes"] == {"triage": 1400, "knowledge": 4500}
+    assert any(e["event"] == "graph_done" and e.get("nodes") for e in v.events)
+    await v.close()

@@ -57,6 +57,34 @@ _TICKET_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 log = logging.getLogger(__name__)
 
 
+def _timed(name: str, fn):
+    """Record how long each node took in state["node_ms"] (names and milliseconds only). Used to see where a slow turn spent its time."""
+    import functools
+    import inspect
+    import time
+
+    takes_config = "config" in inspect.signature(fn).parameters
+
+    def finish(name_, state, out, t0):
+        if isinstance(out, dict):
+            prev = {} if name_ == "triage" else dict(state.get("node_ms") or {})
+            prev[name_] = prev.get(name_, 0) + round((time.perf_counter() - t0) * 1000)
+            out = {**out, "node_ms": prev}
+        return out
+
+    if takes_config:
+        @functools.wraps(fn)
+        def wrapped(state, config):
+            t0 = time.perf_counter()
+            return finish(name, state, fn(state, config), t0)
+    else:
+        @functools.wraps(fn)
+        def wrapped(state):
+            t0 = time.perf_counter()
+            return finish(name, state, fn(state), t0)
+    return wrapped
+
+
 def build_support_graph(*, triager: Triager | None = None, knowledge=None, action=None, action_model: BaseChatModel | None = None,
                         proposer: Proposer | None = None, critic: Critic | None = None, reviser: Reviser | None = None,
                         settings: Settings | None = None, checkpointer=None):
@@ -150,7 +178,7 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
              CONVERSE: converse_node, ESCALATE: escalate_node, "propose": write["propose"], "prepare": write["prepare"], "approval": write["approval"],
              "execute": write["execute"], "qa": qa["qa"], "revise": qa["revise"], "fallback": qa["fallback"], "finalize": finalize}
     for name, fn in nodes.items():
-        g.add_node(name, fn)
+        g.add_node(name, _timed(name, fn))
     g.add_edge(START, "triage")
     g.add_edge("triage", "route")
     entry = {KNOWLEDGE: KNOWLEDGE, ACTION: ACTION, CLARIFY: CLARIFY, CONVERSE: CONVERSE, ESCALATE: ESCALATE, WRITE: "propose"}

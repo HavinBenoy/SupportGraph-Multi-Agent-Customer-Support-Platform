@@ -322,7 +322,9 @@ class VoiceSession:
         timing["turn_ms"] = round((time.perf_counter() - t0) * 1000)
         if t.last_endpoint:
             timing["endpoint_to_reply_ms"] = round((time.monotonic() - t.last_endpoint) * 1000)
-        self._ev("graph_done", t.id, ms=timing["turn_ms"], status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
+        if out.get("node_ms"):
+            timing["nodes"] = dict(out["node_ms"])          # e.g. {"triage": 1400, "knowledge": 4500}: where this turn spent its time
+        self._ev("graph_done", t.id, ms=timing["turn_ms"], nodes=timing.get("nodes"), status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
         await self._wait_for_caller()
         stale = self._is_stale(t, out)
         kind = "continuation" if t.merged else "interruption" if t.after_barge_in else (out.get("context") or out.get("intent") or "new")
@@ -365,10 +367,7 @@ class VoiceSession:
     async def _wait(ev: asyncio.Event, seconds: float) -> None:
         if seconds <= 0:
             return
-        try:
-            await asyncio.wait_for(ev.wait(), seconds)
-        except asyncio.TimeoutError:
-            pass
+        await VoiceSession._wait_any([ev], seconds)
 
     async def _speak(self, t: Turn, reply: str, timing: dict, must: bool = False, filler: bool = False) -> None:
         spoken = speakable(reply, max_chars=self.s.voice_max_reply_chars)
@@ -418,10 +417,7 @@ class VoiceSession:
                             sent_ms += len(piece) / 2 / rate * 1000
                 self._ev("tts_done", t.id, frames=seq, audio_ms=round(sent_ms))
                 if pace and not sp.cancelled:    # keep "speaking" until the tail has been played (or the browser says it has)
-                    both = asyncio.Event()
-                    waiter = asyncio.ensure_future(self._first_of(sp, both))
-                    await self._wait(both, sent_ms / 1000 - (time.perf_counter() - t0) + 0.3)
-                    waiter.cancel()
+                    await self._wait_any([sp.cancel, sp.played], sent_ms / 1000 - (time.perf_counter() - t0) + 0.3)
             except asyncio.CancelledError:
                 sp.cancel.set()
                 raise
@@ -436,12 +432,17 @@ class VoiceSession:
                 await self._send({"type": "audio_end", "turn_id": t.id, "interrupted": sp.cancelled, "timing": dict(timing), **({"filler": True} if filler else {})})
 
     @staticmethod
-    async def _first_of(sp: _Speech, out: asyncio.Event) -> None:
-        done, pending = await asyncio.wait([asyncio.ensure_future(sp.cancel.wait()), asyncio.ensure_future(sp.played.wait())],
-                                           return_when=asyncio.FIRST_COMPLETED)
-        for p in pending:
-            p.cancel()
-        out.set()
+    async def _wait_any(events: list, seconds: float) -> None:
+        """Wait until ANY of the events is set or `seconds` pass. Every helper task is cancelled and awaited (no pending tasks are left behind)."""
+        if seconds <= 0 or any(e.is_set() for e in events):
+            return
+        tasks = [asyncio.ensure_future(e.wait()) for e in events]
+        try:
+            await asyncio.wait(tasks, timeout=seconds, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for tk in tasks:
+                tk.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _is_stale_now(self, t: Turn) -> bool:
         return t.id < self._latest_content

@@ -175,7 +175,7 @@ async def voice_ws(ws: WebSocket) -> None:
         record_event(tenant_id=tenant_id, ticket_id=ticket_id, signed_in=student_id != ANONYMOUS, out=out)
         return {"reply": resp.reply, "status": resp.status, "citations": [c.model_dump() for c in resp.citations],
                 "escalation_id": resp.escalation_id, "ticket_id": ticket_id, "end_call": bool(out.get("end_call")),
-                "intent": out.get("intent") or "", "context": out.get("context_kind") or ""}
+                "intent": out.get("intent") or "", "context": out.get("context_kind") or "", "node_ms": out.get("node_ms") or {}}
 
     async def send_bytes(b: bytes) -> None:
         await ws.send_bytes(b)

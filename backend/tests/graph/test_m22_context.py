@@ -141,3 +141,10 @@ def test_a_bare_pronoun_does_not_borrow_the_previous_course(text):
 
 def test_a_pronoun_with_something_being_asked_still_follows_up():
     assert resolve("Does it have a certificate?", [FEE]) == ("Does it have a certificate for Python Full Stack?", FOLLOW_UP)
+
+
+def test_every_graph_run_reports_milliseconds_per_node_and_they_do_not_carry_over(graph):
+    a = ask(graph, FEE)
+    assert a["node_ms"].keys() >= {"triage", "route", "knowledge", "qa", "finalize"} and all(isinstance(x, int) for x in a["node_ms"].values())
+    b = ask(graph, "hello")
+    assert "knowledge" not in b["node_ms"] and "triage" in b["node_ms"]
