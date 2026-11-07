@@ -1,3 +1,89 @@
+# M4.1 + M5 - Safer human takeover and Trial Verification Mode (one change set)
+
+Apply (from the project root): `unzip -o ../supportgraph-m4.1-m5-complete.zip`, then `make db-migrate` (migrations 0007 and 0008, additive). No new dependency, no model/embedding/RAG change, `.env` untouched, nothing deleted. Full write-up: **docs/M5.md** (and the updated docs/M4.md). The M4 section further down is kept as history.
+
+## 1. M4.1 changes
+- **Return to AI removed completely** (button, frontend action `returnCall`, `POST .../return`, hub method, state-machine path). A human-owned call stays human-owned until it ends, fails or the caller disconnects; an owner who stays away past the grace period ends the call as `failed` (`staff_unreachable`). `returning_to_ai` remains only as a legacy value so M4 rows stay valid.
+- **Exclusive control** by the intervention owner (`calls.intervention_owner`, persisted, re-checked in the database for end, microphone and feedback). No silent transfer. An admin may take over an AI-owned call, never a human-owned one.
+- **Hand-over announcement** ("I want to make sure you receive accurate information. One of our support specialists is joining us to clarify this. I'll hand over the conversation now."): only after ownership is granted, a system entry (never an AI message), never overlaps audio (the microphone waits; it opens even if the announcement fails, and the failure is audited).
+- **Full chronological transcript** with timestamps (customer, AI, human staff spans, system), built from the existing conversation history and call events; tenant-isolated, staff/admin only; staff speech is not transcribed and nothing is invented.
+- **Four status colours with words**: green AI handling, blue Human handling, grey Ended normally, red Ended after intervention (plus an amber Failed for a call that failed with no human involved). Listening is not taking over.
+- **Post-call "Call intervention feedback"**: owner only, after the call; category, "What did the AI say or do that required your intervention?", optional correct information; no duplicates, submit/edit/skip; never written to the knowledge base.
+
+## 2. M5 architecture
+Versioned per-tenant trial settings + audit; per-call `TrialCall` (disclosure, consent, recorder); `RecordingProvider` abstraction (`none` default, `local` disk); idempotent retention job; counts-only metrics; admin Trial verification page. Diagram and file map: docs/M5.md B1.
+
+## 3. Database migrations
+- **0007 interventions**: `calls.intervention_owner` (nullable); tables `intervention_feedback`, `feedback_reviews`.
+- **0008 trial_mode**: `calls.trial_mode` (default false); tables `trial_settings`, `trial_events`, `call_consents`, `call_recordings`.
+Both purely additive; downgrades remove exactly what they add; tested up -> down -> up on PostgreSQL 16 and SQLite. Recording audio is never in the database.
+
+## 4. API changes
+- Removed: `POST /api/staff/calls/{id}/return`.
+- Staff/admin: `GET .../calls/{id}/transcript`, `GET|POST|PUT .../calls/{id}/feedback`, `POST .../feedback/skip`, `GET /api/staff/interventions`, `GET /api/staff/trial` (read-only flag).
+- Admin: `GET|PUT /api/admin/trial` (PUT needs `expected_version`), `GET .../events|metrics|feedback|retention|recordings`, `POST .../feedback/{call_id}/review`, `POST .../retention/purge` (dry-run), `POST .../recordings/{id}/hold`, `GET .../recordings/{id}/audio/{track}` (audited).
+- Sockets: caller gets `trial_notice` / `consent` / `recording` and sends `consent{decision,policy_version}`; staff get `announcement` and `owner_disconnected`.
+
+## 5. Frontend changes
+Live Calls: no Return control, status badges with text, transcript panel, owner-only controls and banners, announcement/owner-disconnect messages, feedback form, "My intervention feedback" tab. Voice page: trial disclosure, explicit consent buttons (Allow recording / No thanks / Stop recording), recording indicator, storage-failure message. Admin console: Trial verification (switch, settings, metrics with date filter, feedback review, retention and recordings with legal hold). A role gate keeps it admin-only.
+
+## 6. Call ownership and transcript changes
+See 1. Ownership moves one way: `created -> active_ai -> staff_takeover -> ended|failed`. The transcript merges the LangGraph checkpoint thread with call events; limitations are returned in the response `notes` and shown on the page.
+
+## 7. Intervention feedback workflow
+Takeover creates an `awaiting` record for the owner; after the call ends the owner submits or skips (compare-and-set, one record per call), may edit until reviewed. Admin review: `pending_review -> reviewed -> approved_for_update | rejected` (also directly from pending, and `approved_for_update -> rejected`); no self-review; history in `feedback_reviews`. "Approved for knowledge update" is only a label for a later manual step: **nothing is inserted into the knowledge base or index.**
+
+## 8. Consent and privacy controls
+Trial disclosure on every trial call (text and voice). Recording is offered only if trial mode, "recording offered" and a healthy provider all hold; consent is a separate explicit button press tied to the policy version shown (changing notice, period or withdrawal rule makes a new version and refuses old answers); decline/ignore never changes the call; withdrawal stops recording at once and the admin-chosen policy deletes or keeps what was recorded. No claim of legal compliance is made.
+
+## 9. Retention and purge
+Recordings (default 30 d), consent records (365 d), reviewed/skipped feedback (365 d). Idempotent; legal holds respected; failures kept, counted and retried every run; tombstones remain; audit holds counts only; calls, tickets and knowledge documents are never deleted. Runs in-process every `SG_TRIAL_PURGE_INTERVAL_MIN` (60; 0 = off), from the admin page (with preview) and by `make purge-trial TENANT=... [PREVIEW=1]`.
+
+## 10. Trial metrics
+Date-filtered (UTC, default 30 days), trial calls only, counts and rates only (no names, ids, text or audio), explicit empty state, `n/a` for undefined rates, truncation flag. Calls, listening vs takeover, intervention rate, endings, escalations, durations, consent funnel, recordings, feedback reasons and review status.
+
+## 11. Security measures
+Admin-only routes and tenant from the token on every query; strict request models (`extra=forbid`, strict bool/int); versioned settings and compare-and-set feedback; consent accepted only from the caller's own connection and current policy version; database owner re-check for every human control; recording fails closed; files 0700/0600 with traversal checks; storage references never in responses or logs; audited, `no-store` audio download; counts-only audit details.
+
+## 12. Tests actually executed (in this sandbox; fakes and synthetic audio only)
+- Backend, SQLite, whole suite (`pytest -n 4`): **1586 passed, 41 skipped**.
+- Backend with PostgreSQL 16 (`SG_TEST_DATABASE_URL=...`, whole suite, run serially): **1625 passed, 2 skipped**; includes `tests/db/test_postgres_m5.py` and the 0007/0008 up -> down -> up test.
+- Frontend: `vitest run` **190 passed** in 9 files; `tsc --noEmit` clean; production `next build` succeeded (routes /, /admin, /agent, /login, /voice).
+- `scripts/purge_trial_data.py` smoke-run on a scratch SQLite database (dry-run, exit 0).
+- Scenarios A-E (trial off; trial on without recording; consent granted and recorded; declined/withdrawn; failures, retention and purge) in `tests/calls/test_m5_scenarios.py`.
+
+## 13. Skipped tests and reasons
+- SQLite run: 39 PostgreSQL-only tests (need `SG_TEST_DATABASE_URL`) and 2 real-Ollama tests (need `SG_TEST_OLLAMA=1`).
+- PostgreSQL run: the same 2 real-Ollama tests.
+- With numpy hidden the whole `tests/calls` directory is skipped by design (voice tests need numpy); not a failure.
+- Not run at all: real microphone/speaker, real recording audio, real Ollama, real browser sessions (nothing in the sandbox can do these).
+
+## 14. Migration instructions
+`make db-migrate` (applies 0007, 0008). Do not reset or drop the database. To roll back: `cd backend && ../.venv/bin/alembic downgrade 0006` (removes only the M4.1/M5 additions; trial settings, feedback and recording metadata are lost, so export them first if you need them). Take a backup first (`pg_dump`) if you have data you care about.
+
+## 15. Local environment configuration
+Nothing is required: defaults keep trial mode off and recording unavailable. Optional keys (in `.env.example`): `SG_CALLS_HANDOVER_ANNOUNCEMENT`, `SG_CALLS_ANNOUNCEMENT_TIMEOUT_S`, `SG_TRIAL_RECORDING_PROVIDER` (`none`|`local`), `SG_TRIAL_RECORDINGS_DIR`, `SG_TRIAL_RECORDING_MAX_MB`, `SG_TRIAL_PURGE_INTERVAL_MIN`, `SG_TRIAL_METRICS_MAX_ROWS`. `data/recordings/` is added to `.gitignore`.
+
+## 16. Exact local verification commands
+```
+make db-migrate
+make test-fast                 # SQLite backend suite
+make test-pg                   # needs make db-up; runs the PostgreSQL tests incl. migration 0007/0008
+make test-trial                # M4.1 + M5 backend and frontend tests only
+make frontend-test && make frontend-build
+cd frontend && npx tsc --noEmit
+make purge-trial TENANT=qspiders_sample PREVIEW=1
+```
+Then the browser checks in docs/M5.md part F.
+
+## 17. Known limitations
+Verified only with fake STT/TTS/VAD and synthetic audio. Recording supports the local-disk provider only, with no encryption at rest, no off-machine storage and no in-app playback. One API process (live state and the retention loop are in-process). Staff speech is not transcribed. Transcript completeness depends on the checkpoint history. The announcement is not mirrored to listeners. An admin cannot take over or end a human-owned call. Migrations 0001-0003 remain PostgreSQL-only, so the SQLite migration test starts from a schema at 0006.
+
+## 18. Features requiring real-world validation
+Real microphone/speaker behaviour of the announcement and the staff microphone gate (echo, timing); actual recorded audio (quality, size, three-track sync, playback); the consent and withdrawal experience with real callers; retention timing against a real clock and disk; what recording notice and retention periods your organisation and its lawyers need (this software makes no compliance claim); real Ollama latency during a trial call; browser behaviour on your machine.
+
+---
+
 # M4 - Call sessions, staff Live Calls, listening and human takeover (complete, one change set)
 
 Apply (from the project root): `unzip -o ../supportgraph-m4-complete.zip`, then `make db-migrate` (migration 0006, additive). No new dependency, no model/embedding/voice-engine change, `.env` untouched, nothing deleted. Full write-up (state machine, protocols, failure table, manual test): **docs/M4.md**.

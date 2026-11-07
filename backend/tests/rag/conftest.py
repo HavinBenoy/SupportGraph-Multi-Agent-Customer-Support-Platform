@@ -19,6 +19,7 @@ from app.rag.ingest import ingest_tenant
 
 
 def settings(**kw) -> Settings:
+    kw.setdefault("trial_purge_interval_min", 0)   # M5: the scheduled retention loop is off in tests (they call run_purge directly; the shared SQLite connection must not be written from a background task)
     return Settings(_env_file=None, embedding_provider="fake", llm_provider="fake", **kw)
 
 

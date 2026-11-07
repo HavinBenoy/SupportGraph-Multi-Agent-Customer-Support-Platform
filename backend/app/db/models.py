@@ -13,7 +13,7 @@ from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, func,
+    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, false, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -387,9 +387,14 @@ class Call(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     takeover_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))    # the latest takeover
-    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))    # the latest return to the AI
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))    # LEGACY (M4): a call can no longer return to the AI (M4.1); never written now
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     end_reason: Mapped[str | None] = mapped_column(String(32))
+    # M4.1: the staff account that interrupted the call. Set in the SAME transaction as the takeover and never cleared (owner_subject is
+    # cleared when the call ends; this is the durable fact "who holds / held this call"). Only this account may control the call or file its feedback.
+    intervention_owner: Mapped[str | None] = mapped_column(String(64))
+    # M5: the call was made while Trial Verification Mode was on for the tenant (decided once, when the call is created).
+    trial_mode: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class CallEvent(Base):
@@ -408,3 +413,166 @@ class CallEvent(Base):
     actor: Mapped[str] = mapped_column(String(64))                  # staff username, "caller", "ai" or "system"
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# M4.1: intervention feedback. One row per human intervention (a call can only be taken over once and never goes back to the AI).
+# ----------------------------------------------------------------------------------------------------------------------
+FEEDBACK_STATES = ("awaiting", "submitted", "skipped")
+FEEDBACK_CATEGORIES = ("incorrect_information", "outdated_knowledge", "misleading_response", "policy_compliance", "customer_dissatisfaction",
+                       "missing_knowledge", "other")
+REVIEW_STATUSES = ("pending_review", "reviewed", "approved_for_update", "rejected")
+
+
+class InterventionFeedback(Base):
+    """What the staff member who interrupted a call says the AI got wrong. A PROPOSED correction, never verified truth: nothing here is
+    written into the knowledge base; M6/M7 read the rows an administrator marked `approved_for_update`. The row is created in the same
+    transaction as the takeover (so the intervention owner and time are persisted), in state `awaiting`."""
+
+    __tablename__ = "intervention_feedback"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["calls.tenant_id", "calls.id"]),
+        CheckConstraint("state IN ('awaiting','submitted','skipped')", name="state_valid"),
+        CheckConstraint("category IS NULL OR category IN ('incorrect_information','outdated_knowledge','misleading_response',"
+                        "'policy_compliance','customer_dissatisfaction','missing_knowledge','other')", name="category_valid"),
+        CheckConstraint("review_status IS NULL OR review_status IN ('pending_review','reviewed','approved_for_update','rejected')", name="review_valid"),
+        CheckConstraint("(state = 'submitted') = (what_was_wrong IS NOT NULL)", name="submitted_has_text"),
+        Index("ix_intervention_feedback_review", "tenant_id", "review_status"),
+        Index("ix_intervention_feedback_owner", "tenant_id", "staff_subject"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    staff_subject: Mapped[str] = mapped_column(String(64))           # the intervention owner (copied from calls.intervention_owner at takeover)
+    intervened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(12), default="awaiting")
+    category: Mapped[str | None] = mapped_column(String(32))
+    what_was_wrong: Mapped[str | None] = mapped_column(Text)
+    suggested_correction: Mapped[str | None] = mapped_column(Text)
+    related_message_id: Mapped[str | None] = mapped_column(String(80))   # id of the AI message in the conversation history the staff member pointed at
+    related_index: Mapped[int | None] = mapped_column(Integer)           # its position in that history (a second pointer, in case ids are not kept)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_status: Mapped[str | None] = mapped_column(String(24))        # NULL until submitted
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeedbackReview(Base):
+    """History of review decisions on a feedback record (who moved it from which status to which, and why)."""
+
+    __tablename__ = "feedback_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["intervention_feedback.tenant_id", "intervention_feedback.call_id"]),
+        Index("ix_feedback_reviews_call", "tenant_id", "call_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    call_id: Mapped[str] = mapped_column(String(40))
+    reviewer: Mapped[str] = mapped_column(String(64))
+    from_status: Mapped[str] = mapped_column(String(24))
+    to_status: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# M5: Trial Verification Mode. Settings, audit events, per-call recording consent, recording metadata.
+# ----------------------------------------------------------------------------------------------------------------------
+CONSENT_STATUSES = ("offered", "granted", "declined", "withdrawn")
+RECORDING_STATUSES = ("recording", "completed", "failed", "purged")
+WITHDRAWAL_POLICIES = ("delete", "keep_until_expiry")
+
+
+class TrialSettings(Base):
+    """Trial Verification Mode for one tenant (absent row = the defaults in app.trial.settings, mode OFF). `version` makes concurrent edits safe
+    (compare-and-set); `consent_policy_version` is bumped whenever something a customer consented to changes."""
+
+    __tablename__ = "trial_settings"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("retention_recording_days BETWEEN 1 AND 365", name="rec_days_range"),
+        CheckConstraint("retention_consent_days BETWEEN 1 AND 3650", name="consent_days_range"),
+        CheckConstraint("retention_feedback_days BETWEEN 1 AND 3650", name="feedback_days_range"),
+        CheckConstraint("withdrawal_policy IN ('delete','keep_until_expiry')", name="withdrawal_valid"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    recording_offered: Mapped[bool] = mapped_column(Boolean, default=False)      # customers are asked for recording consent (needs a recording provider)
+    disclosure_text: Mapped[str] = mapped_column(Text)
+    recording_notice: Mapped[str] = mapped_column(Text)                          # what is recorded, why, for how long (shown with the consent buttons)
+    consent_policy_version: Mapped[int] = mapped_column(Integer, default=1)
+    retention_recording_days: Mapped[int] = mapped_column(Integer, default=30)
+    retention_consent_days: Mapped[int] = mapped_column(Integer, default=365)
+    retention_feedback_days: Mapped[int] = mapped_column(Integer, default=365)
+    withdrawal_policy: Mapped[str] = mapped_column(String(20), default="delete")
+    updated_by: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TrialEvent(Base):
+    """Audit trail of the trial feature (mode switched, settings changed, purge runs, legal holds, recording access). Counts and ids only."""
+
+    __tablename__ = "trial_events"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id"], ["tenants.id"]), Index("ix_trial_events_tenant", "tenant_id", "id"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(32))
+    actor: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CallConsent(Base):
+    """The caller's recording consent for ONE call. Granted only by an explicit action in the caller's browser (never inferred from speech or silence)."""
+
+    __tablename__ = "call_consents"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["calls.tenant_id", "calls.id"]),
+        CheckConstraint("status IN ('offered','granted','declined','withdrawn')", name="status_valid"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), default="offered")
+    policy_version: Mapped[int] = mapped_column(Integer)
+    offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CallRecording(Base):
+    """Metadata of one recording. The audio is NOT here (never a database blob): `storage_ref` is an opaque key the recording provider resolves."""
+
+    __tablename__ = "call_recordings"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["calls.tenant_id", "calls.id"]),
+        CheckConstraint("status IN ('recording','completed','failed','purged')", name="status_valid"),
+        Index("ix_call_recordings_expiry", "tenant_id", "status", "expires_at"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    call_id: Mapped[str] = mapped_column(String(40))
+    consent_policy_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12), default="recording")
+    provider: Mapped[str] = mapped_column(String(16))
+    storage_ref: Mapped[str | None] = mapped_column(String(120))                 # NULL once purged
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stop_reason: Mapped[str | None] = mapped_column(String(32))
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # set when recording stops: stopped_at + the retention period
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    hold_reason: Mapped[str | None] = mapped_column(String(120))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    purge_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    purge_error: Mapped[str | None] = mapped_column(String(80))

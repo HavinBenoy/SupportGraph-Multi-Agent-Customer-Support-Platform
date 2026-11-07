@@ -53,6 +53,9 @@ class Rig:
         self.run_turn = run_turn or self._default_turn
         self.json: list[dict] = []            # everything sent to the caller as JSON
         self.frames: list[tuple[str, int, int, str, int]] = []   # (source, turn, seq, owner_at_send, epoch_at_send) for every audio frame the caller received
+        self.notice_frames: list[tuple[str, int, int, str, int]] = []   # frames of the spoken notices (hand-over announcement, trial disclosure)
+        self.timeline: list[tuple] = []       # everything the caller got, in order: ("start", turn, kind) | ("frame", source) | ("end", turn, kind)
+        self.notice_turns: dict[int, str] = {}   # turn id -> "handover" | "disclosure" for the spoken notices (M4.1/M5)
         self.caller_closed = False
         self.fail_caller_send = False
         self.live = None
@@ -66,14 +69,22 @@ class Rig:
         if self.fail_caller_send:
             raise RuntimeError("socket gone")
         self.json.append(m)
+        if m.get("type") == "audio_start":
+            kind = "notice" if m.get("notice") else ("staff" if m.get("staff") else "ai")
+            if m.get("notice"):
+                self.notice_turns[m["turn_id"]] = m["notice"]
+            self.timeline.append(("start", m["turn_id"], kind))
+        elif m.get("type") == "audio_end":
+            self.timeline.append(("end", m["turn_id"], "notice" if m.get("notice") else ("staff" if m.get("staff") else "ai")))
 
     async def _caller_bytes(self, b):
         if self.fail_caller_send:
             raise RuntimeError("socket gone")
         turn, seq = HDR.unpack_from(b)
         live = self.live
-        src = "staff" if (live is not None and live.staff_turn and turn == live.staff_turn) else "ai"   # turn ids are unique per response, staff's included
-        self.frames.append((src, turn, seq, live.owner if live else "?", live.epoch if live else -1))
+        src = "notice" if turn in self.notice_turns else ("staff" if (live is not None and live.staff_turn and turn == live.staff_turn) else "ai")   # turn ids are unique per response
+        (self.notice_frames if src == "notice" else self.frames).append((src, turn, seq, live.owner if live else "?", live.epoch if live else -1))
+        self.timeline.append(("frame", src))
 
     async def _close_caller(self):
         self.caller_closed = True
@@ -116,6 +127,16 @@ class Rig:
         await self.until(lambda: sum(1 for m in self.json if m["type"] == "audio_end" and not m.get("staff")) > before, timeout)
 
     # ---- staff -------------------------------------------------------------------------------------------------------------
+    async def take(self, p=None, settle: bool = True):
+        """A staff takeover, then (by default) wait until the spoken hand-over announcement has finished so the microphone may open."""
+        snap = await self.live.takeover(p or staff())
+        if settle:
+            await self.until(lambda: not self.live.announcing, 6)
+            t = self.live._announce_task
+            if t is not None:
+                await asyncio.wait_for(asyncio.shield(t), 6)             # its audit events are written too (one SQLite connection must not be shared by two writers in a test)
+        return snap
+
     async def attach(self, name="staff1", role="staff", maxq=None) -> StaffConn:
         c = StaffConn(staff(name, role), maxq or self.s.calls_listener_queue)
         await self.live.join(c)

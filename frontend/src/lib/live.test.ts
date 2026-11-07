@@ -125,7 +125,7 @@ describe("live client: the staff microphone", () => {
     expect(new DataView(out).getUint32(0, true)).toBe(5);
   });
 
-  it("the microphone is released the moment the call is no longer ours (return to AI), and the server is told", async () => {
+  it("the microphone is released the moment the call is no longer ours (no longer owner), and the server is told", async () => {
     const r = rig();
     r.client.connect("u", "t"); r.open(); r.say(JOINED);
     r.say({ type: "ownership", owner: "staff", epoch: 2, staff: "s" });
@@ -203,5 +203,68 @@ describe("mixer", () => {
     const a = ctx(); const m = createMixer(() => a.c);
     m.play("caller", new ArrayBuffer(0), 16000);
     expect(a.stopped).toEqual([]);
+  });
+});
+
+describe("live client: the hand-over announcement (M4.1)", () => {
+  const owned = () => { const r = rig(); r.client.connect("u", "t"); r.open(); r.say(JOINED); r.say({ type: "ownership", owner: "staff", epoch: 2, staff: "staff1" }); return r; };
+
+  it("speak() while the announcement plays opens nothing, then opens the mic as soon as it finishes", async () => {
+    const r = owned();
+    r.say({ type: "announcement", state: "started" });
+    expect(r.client.announcing).toBe(true);
+    await r.client.speak();
+    expect(r.client.speaking).toBe(false);
+    expect(r.json().some((m) => m.type === "mic_open")).toBe(false);
+    r.say({ type: "announcement", state: "finished" });
+    await vi.waitFor(() => expect(r.client.speaking).toBe(true));
+    expect(r.json().at(-1)).toEqual({ type: "mic_open", epoch: 2 });
+    expect(r.client.announcing).toBe(false);
+  });
+
+  it("a failed announcement never blocks the staff member: the queued request goes through", async () => {
+    const r = owned();
+    r.say({ type: "announcement", state: "started" });
+    await r.client.speak();
+    r.say({ type: "announcement", state: "failed" });
+    await vi.waitFor(() => expect(r.client.speaking).toBe(true));
+  });
+
+  it("joining while it is already playing is honoured, and a nothing-queued finish opens no microphone", async () => {
+    const r = rig();
+    r.client.connect("u", "t"); r.open(); r.say({ ...JOINED, announcing: true });
+    expect(r.client.announcing).toBe(true);
+    r.say({ type: "announcement", state: "finished" });
+    expect(r.client.announcing).toBe(false);
+    expect(r.client.speaking).toBe(false);
+  });
+
+  it("a mic refused with reason 'announcing' is not an error: it is retried when the announcement ends", async () => {
+    const r = owned();
+    await r.client.speak();                                                   // server says: too early
+    r.say({ type: "mic", state: "rejected", reason: "announcing" });
+    expect(r.events.errors).toEqual([]);
+    expect(r.client.speaking).toBe(false);
+    r.say({ type: "announcement", state: "finished" });
+    await vi.waitFor(() => expect(r.client.speaking).toBe(true));
+  });
+
+  it("any other refusal is reported", async () => {
+    const r = owned();
+    await r.client.speak();
+    r.say({ type: "mic", state: "rejected", reason: "not_owner" });
+    expect(r.events.errors).toEqual(["The microphone was refused (not_owner)."]);
+    expect(r.client.speaking).toBe(false);
+  });
+
+  it("disconnecting forgets a queued request (no microphone opens after a reconnect by surprise)", async () => {
+    const r = owned();
+    r.say({ type: "announcement", state: "started" });
+    await r.client.speak();
+    r.client.disconnect();
+    r.client.connect("u", "t"); r.open(); r.say(JOINED); r.say({ type: "ownership", owner: "staff", epoch: 3, staff: "staff1" });
+    r.say({ type: "announcement", state: "finished" });
+    await new Promise((res) => setTimeout(res, 20));
+    expect(r.client.speaking).toBe(false);
   });
 });

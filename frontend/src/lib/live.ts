@@ -4,7 +4,9 @@
 import { browserMic, browserSocket, int16ToFloat32, parseAudioFrame, type Mic, type MicFactory, type Socket, type SocketFactory } from "./voice";
 
 export type LiveMsg =
-  | { type: "joined"; call_id: string; owner: "ai" | "staff" | "none"; epoch: number; owner_staff: string | null; listeners: number; you_own: boolean; live: boolean }
+  | { type: "joined"; call_id: string; owner: "ai" | "staff" | "none"; epoch: number; owner_staff: string | null; listeners: number; you_own: boolean; live: boolean; announcing?: boolean }
+  | { type: "announcement"; state: "started" | "finished" | "failed" }      // M4.1: the spoken hand-over notice; the microphone opens only after it
+  | { type: "owner_disconnected"; grace_s: number }                          // the staff member who owns the call lost their connection (the call ends if they stay away)
   | { type: "ownership"; owner: "ai" | "staff" | "none"; epoch: number; staff: string | null }
   | { type: "mic"; state: "open" | "closed" | "rejected"; reason?: string; epoch?: number }
   | { type: "transcript"; speaker: "caller" | "ai"; text: string }
@@ -67,11 +69,12 @@ export interface LiveClient {
   readonly state: LiveState;
   readonly speaking: boolean;
   readonly epoch: number;
+  readonly announcing: boolean;    // M4.1: the hand-over announcement is playing; speak() waits for it
 }
 
 export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLiveDeps): LiveClient {
   let sock: Socket | null = null, mic: Mic | null = null, mixer: Mixer | null = null;
-  let state: LiveState = "idle", epoch = 0, aiTurn = -1, aiRate = 22050, wantMic = false, gen = 0;
+  let state: LiveState = "idle", epoch = 0, aiTurn = -1, aiRate = 22050, wantMic = false, gen = 0, announcing = false, queuedSpeak = false;
   const set = (s: LiveState) => { if (state !== s) { state = s; h.onState?.(s); } };
   const sendJson = (o: unknown) => { try { sock?.send(JSON.stringify(o)); } catch { /* socket closing */ } };
   const m = () => (mixer ??= deps.mixer());
@@ -83,7 +86,7 @@ export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLive
     if (was) { sendJson({ type: "mic_close" }); h.onMic?.(false); }
   }
   function teardown() {
-    gen += 1; wantMic = false;
+    gen += 1; wantMic = false; announcing = false; queuedSpeak = false;
     closeMic();
     try { sock?.close(); } catch { /* ignore */ }
     sock = null;
@@ -94,14 +97,22 @@ export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLive
     let msg: LiveMsg;
     try { msg = JSON.parse(raw) as LiveMsg; } catch { return; }
     switch (msg.type) {
-      case "joined": epoch = msg.epoch; set("joined"); break;
+      case "joined": epoch = msg.epoch; announcing = !!msg.announcing; set("joined"); break;
+      case "announcement":
+        announcing = msg.state === "started";
+        if (!announcing && queuedSpeak) { queuedSpeak = false; void api.speak(); }      // the announcement is over (played, or failed): staff may speak now
+        break;
       case "ownership":
         epoch = msg.epoch;
         if (msg.owner !== "staff" && mic) closeMic();       // the call is no longer ours to speak on: release the microphone at once
         if (msg.owner !== "ai") m().reset("ai");            // staff took over: whatever the AI had queued is cut
         break;
       case "mic":
-        if (msg.state === "rejected") { closeMic(); h.onError?.(`The microphone was refused (${msg.reason ?? "unknown"}).`); }
+        if (msg.state === "rejected") {
+          closeMic();
+          if (msg.reason === "announcing") { announcing = true; queuedSpeak = true; }    // asked too early: retry as soon as the announcement ends
+          else h.onError?.(`The microphone was refused (${msg.reason ?? "unknown"}).`);
+        }
         break;
       case "ai_audio_start": aiTurn = msg.turn_id ?? -1; aiRate = msg.sample_rate; m().reset("ai"); break;
       case "ai_audio_end": if (msg.interrupted) m().reset("ai"); break;
@@ -119,8 +130,8 @@ export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLive
     else if (tag === TAG_AI) { const f = parseAudioFrame(body); if (f && f.turn === aiTurn) m().play("ai", f.pcm, aiRate); }   // frames of a cut response are ignored
   }
 
-  return {
-    get state() { return state; }, get speaking() { return mic !== null; }, get epoch() { return epoch; },
+  const api: LiveClient = {
+    get state() { return state; }, get speaking() { return mic !== null; }, get epoch() { return epoch; }, get announcing() { return announcing; },
     connect(url, token) {
       if (sock) return;
       const my = ++gen;
@@ -134,6 +145,7 @@ export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLive
     },
     async speak() {
       if (mic || state !== "joined") return;
+      if (announcing) { queuedSpeak = true; return; }                   // never open the microphone over the hand-over announcement
       wantMic = true;
       const my = gen;
       let started: Mic;
@@ -155,8 +167,9 @@ export function createLiveClient(h: LiveHandlers = {}, deps: LiveDeps = realLive
       sendJson({ type: "mic_open", epoch });
       h.onMic?.(true);
     },
-    stopSpeaking() { wantMic = false; closeMic(); },
+    stopSpeaking() { wantMic = false; queuedSpeak = false; closeMic(); },
     mute(on) { mic?.mute(on); },
     disconnect() { teardown(); set(state === "idle" ? "idle" : "closed"); },
   };
+  return api;
 }

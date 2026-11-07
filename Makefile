@@ -137,6 +137,14 @@ test-full:  ## everything except real models and browser e2e: backend (parallel)
 	$(MAKE) frontend-test
 	$(MAKE) frontend-build
 
+# M5: run the retention job once by hand. PREVIEW=1 only reports what it would delete.
+purge-trial:  ## delete trial data past its retention period (legal holds respected): make purge-trial TENANT=qspiders_sample [PREVIEW=1]
+	cd backend && ../.venv/bin/python scripts/purge_trial_data.py --tenant $(or $(TENANT),qspiders_sample) $(if $(PREVIEW),--dry-run,)
+
+test-trial:  ## the M4.1 + M5 backend tests (SQLite) and the trial frontend tests
+	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/db/test_migrations_m4_1_m5.py
+	cd frontend && npx vitest run src/components/TrialAdmin.test.tsx src/components/LiveCalls.test.tsx src/components/VoiceCall.test.tsx src/lib
+
 eval-routing:
 	cd backend && ../.venv/bin/python scripts/eval_routing.py
 

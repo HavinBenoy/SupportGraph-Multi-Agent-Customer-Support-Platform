@@ -15,13 +15,24 @@ from app.db.models import Account, Call
 from app.db.session import session_scope
 from tests.api.conftest import PW, T, api, auth  # noqa: F401
 from tests.api.test_staff_admin import OTHER, other_headers
+from tests.calls.apidb import seeded_db  # noqa: F401  (autouse: a file-backed SQLite database for tests that use sockets and REST together)
 from tests.calls.rig import events
 from tests.rag.conftest import embedder, ingested, settings  # noqa: F401
 from tests.voice.audio import chunks, tone, utterance
 from tests.voice.test_voice_ws import setup_parts, start
 
 QUESTION = "Can I pay the course fee in instalments?"
-ALL = [("get", ""), ("post", "/listen"), ("post", "/takeover"), ("post", "/return"), ("post", "/end"), ("get", "/events")]
+ALL = [("get", ""), ("post", "/listen"), ("post", "/takeover"), ("post", "/end"), ("get", "/events"), ("get", "/transcript"), ("get", "/feedback"), ("post", "/feedback/skip")]
+BODY_ROUTES = [("post", "/feedback"), ("put", "/feedback")]      # need a JSON body to get past validation; auth is checked first
+
+
+def staff2(api):  # noqa: F811
+    """A second staff account (the shared fixture has only staff1 and admin1)."""
+    from app.auth.accounts import create_account
+    with session_scope() as db:
+        if db.get(Account, (T, "staff2")) is None:
+            create_account(db, T, "staff2", PW, "staff")
+    return auth(api, "staff2")
 
 
 class Pump:
@@ -103,10 +114,12 @@ def test_every_live_call_route_requires_staff_or_admin(api):  # noqa: F811
     with api.websocket_connect("/api/voice/ws") as ws:
         start(ws)
         cid = one_call(api)[0]["id"]
-        for method, suffix in [("get", "")] + ALL:
+        for method, suffix in [("get", "")] + ALL + BODY_ROUTES:
             url = f"/api/staff/calls/{cid}{suffix}"
             assert getattr(api, method)(url).status_code == 401, url                                        # no token
             assert getattr(api, method)(url, headers=auth(api, "asha")).status_code == 403, url             # a student
+        assert api.get("/api/staff/interventions").status_code == 401 and api.get("/api/staff/interventions", headers=auth(api, "asha")).status_code == 403
+        assert api.post(f"/api/staff/calls/{cid}/return", headers=auth(api, "staff1")).status_code in (404, 405)       # the operation does not exist (M4.1)
         assert api.get("/api/staff/calls").status_code == 401 and api.get("/api/staff/calls", headers=auth(api, "asha")).status_code == 403
         assert api.get("/api/staff/calls", headers=auth(api, "staff1")).status_code == 200
         assert api.get("/api/staff/calls", headers=auth(api, "admin1")).status_code == 200
@@ -143,41 +156,53 @@ def test_the_api_exposes_a_reference_not_the_ticket_id_and_student_ids_only_to_a
 
 
 # ---- REST flow ---------------------------------------------------------------------------------------------------------------
-def test_rest_lifecycle_listen_takeover_return_end_and_events(api):  # noqa: F811
+def test_rest_lifecycle_listen_takeover_end_and_events_with_no_return_and_owner_only_end(api):  # noqa: F811
     setup_parts(api, [QUESTION])
-    s1, adm = auth(api, "staff1"), auth(api, "admin1")
+    s1, adm, s2 = auth(api, "staff1"), auth(api, "admin1"), staff2(api)
     with api.websocket_connect("/api/voice/ws") as ws:
         start(ws)
         pump = Pump(ws)
         [c] = api.get("/api/staff/calls", headers=s1).json()
         cid = c["id"]
         assert (c["status"], c["owner"], c["live"], c["listeners"], c["short_id"]) == ("active_ai", "ai", True, 0, cid[2:10]) and c["duration_s"] >= 0
+        assert (c["category"], c["can_takeover"], c["can_end"], c["intervened"]) == ("ai_handling", True, True, False)
         assert c["created_at"].endswith("Z") or "+" in c["created_at"]
         r = api.post(f"/api/staff/calls/{cid}/listen", headers=s1).json()
         assert r["ws_path"] == f"/api/staff/calls/{cid}/stream" and r["status"] == "active_ai"
         t1 = api.post(f"/api/staff/calls/{cid}/takeover", headers=s1)
         assert t1.status_code == 200 and (t1.json()["status"], t1.json()["owner"], t1.json()["owner_staff"], t1.json()["is_mine"]) == ("staff_takeover", "staff", "staff1", True)
+        assert (t1.json()["category"], t1.json()["intervention_by"], t1.json()["can_end"], t1.json()["can_takeover"]) == ("human_handling", "staff1", True, False)
+        pump.until(lambda k, p: k == "json" and p.get("type") == "audio_end" and p.get("notice") == "handover")      # the announcement has been played
+        time.sleep(0.4)                                                          # ... and its audit rows written (the SQLite test DB is one shared connection)
         assert api.post(f"/api/staff/calls/{cid}/takeover", headers=s1).json()["epoch"] == t1.json()["epoch"]      # idempotent
         t2 = api.post(f"/api/staff/calls/{cid}/takeover", headers=adm)
         assert t2.status_code == 409 and "already" in t2.json()["detail"]
-        assert api.get(f"/api/staff/calls/{cid}", headers=adm).json()["is_mine"] is False
-        assert api.post(f"/api/staff/calls/{cid}/return", headers=auth(api, "asha")).status_code == 403
-        back = api.post(f"/api/staff/calls/{cid}/return", headers=s1).json()
-        assert (back["status"], back["owner"], back["owner_staff"]) == ("active_ai", "ai", None)
-        assert api.post(f"/api/staff/calls/{cid}/return", headers=s1).json()["status"] == "active_ai"           # idempotent
+        for h in (adm, s2):                                                      # what other staff and the admin see: listen yes, control no
+            v = api.get(f"/api/staff/calls/{cid}", headers=h).json()
+            assert (v["is_mine"], v["can_end"], v["can_takeover"], v["can_listen"], v["category"]) == (False, False, False, True, "human_handling")
+            assert api.post(f"/api/staff/calls/{cid}/listen", headers=h).status_code == 200
+            e403 = api.post(f"/api/staff/calls/{cid}/end", headers=h)
+            assert e403.status_code == 403 and "took over" in e403.json()["detail"]
+        assert api.get(f"/api/staff/calls/{cid}", headers=s1).json()["status"] == "staff_takeover"      # still running after both refused attempts
+        assert api.post(f"/api/staff/calls/{cid}/return", headers=s1).status_code in (404, 405)         # there is no such operation
         e = api.post(f"/api/staff/calls/{cid}/end", headers=s1).json()
-        assert (e["status"], e["end_reason"], e["live"]) == ("ended", "ended_by_staff", False)
+        assert (e["status"], e["end_reason"], e["live"], e["category"], e["intervened"]) == ("ended", "ended_by_staff", False, "ended_after_intervention", True)
+        assert e["feedback"] == {"state": "awaiting", "form_open": True, "review_status": None}      # only the owner is told about the form
+        assert "feedback" not in api.get(f"/api/staff/calls/{cid}", headers=adm).json()
         assert api.post(f"/api/staff/calls/{cid}/end", headers=s1).json()["status"] == "ended"                  # idempotent
-        for op in ("takeover", "return", "listen"):
+        for op in ("takeover", "listen"):
             r = api.post(f"/api/staff/calls/{cid}/{op}", headers=s1)
             assert r.status_code == 409 and "ended" in r.json()["detail"], op
         pump.until(lambda k, p: k == "json" and p.get("type") == "call_end" and p["reason"] == "ended_by_staff")
         pump.until(lambda k, p: k == "closed")
     ev = api.get(f"/api/staff/calls/{cid}/events", headers=s1).json()
-    assert [x["kind"] for x in ev] == ["created", "connected", "takeover_requested", "takeover_succeeded", "takeover_requested", "takeover_failed",
-                                       "returned_to_ai", "ended"]
-    assert [x["actor"] for x in ev][2:] == ["staff1", "staff1", "admin1", "admin1", "staff1", "staff1"]
-    assert all(set(x["detail"]) <= {"reason", "role", "epoch", "listeners", "previous_owner", "duration_s", "connection", "status"} for x in ev)
+    core = [x for x in ev if not x["kind"].startswith("announcement")]
+    assert [x["kind"] for x in core] == ["created", "connected", "takeover_requested", "takeover_succeeded", "takeover_requested", "takeover_failed", "control_denied",
+                                         "control_denied", "ended"]
+    assert [x["actor"] for x in core][2:] == ["staff1", "staff1", "admin1", "admin1", "admin1", "staff2", "staff1"]
+    assert "returned_to_ai" not in [x["kind"] for x in ev]
+    assert all(set(x["detail"]) <= {"reason", "role", "epoch", "listeners", "previous_owner", "duration_s", "connection", "status", "action", "category",
+                                    "policy_version", "recording_id", "variant"} for x in ev)
     assert api.get(f"/api/staff/calls/{cid}/events?limit=0", headers=s1).status_code == 422
 
 
@@ -255,25 +280,32 @@ def test_a_staff_socket_for_an_unknown_or_ended_call_is_refused(api):  # noqa: F
     assert "not found or already ended" in first_message(api, cid, {"type": "auth", "token": t})["detail"]
 
 
-def test_the_staff_socket_closes_when_its_token_expires_and_a_takeover_goes_back_to_the_ai(api):  # noqa: F811
+def test_the_staff_socket_closes_when_its_token_expires_and_the_abandoned_takeover_ends_the_call_never_returning_it_to_the_ai(api):  # noqa: F811
     api.app.state.settings.calls_takeover_grace_s = 1
     setup_parts(api, [QUESTION])
-    short = issue_token(api.app.state.secret, Principal(T, "staff", "staff1", None), ttl_seconds=1)
+    short = issue_token(api.app.state.secret, Principal(T, "staff", "staff1", None), ttl_seconds=4)
     with api.websocket_connect("/api/voice/ws") as caller:
         start(caller)
+        cp = Pump(caller)
         cid = one_call(api)[0]["id"]
         with staff_stream(api, cid, None) as ws:
             p = open_stream(api, ws, short)
+            time.sleep(0.3)
             assert api.post(f"/api/staff/calls/{cid}/takeover", headers={"Authorization": f"Bearer {tok(api, 'staff1')}"}).status_code == 200
             p.json_of("ownership", owner="staff")
-            err = p.json_of("error", timeout=5)
+            err = p.json_of("error", timeout=8)
             assert err["detail"] == "session expired" and err["fatal"] is True
             p.until(lambda k, x: k == "closed")
+        end = cp.json_of("call_end", timeout=6)                                  # staff gone and not back within the grace period: the call ends, the AI does NOT resume
+        assert end["reason"] == "staff_unreachable"
+        time.sleep(0.5)
         deadline = time.monotonic() + 4
-        while time.monotonic() < deadline and api.get(f"/api/staff/calls/{cid}", headers=auth(api, "staff1")).json()["owner"] != "ai":
+        while time.monotonic() < deadline and api.get(f"/api/staff/calls/{cid}", headers=auth(api, "staff1")).json()["status"] != "failed":
             time.sleep(0.05)
-        assert api.get(f"/api/staff/calls/{cid}", headers=auth(api, "staff1")).json()["owner"] == "ai"   # staff gone: the caller is not left alone
-        assert api.get(f"/api/staff/calls/{cid}", headers=auth(api, "staff1")).json()["listeners"] == 0
+        v = api.get(f"/api/staff/calls/{cid}", headers=auth(api, "staff1")).json()
+        assert (v["status"], v["end_reason"], v["category"], v["intervention_by"]) == ("failed", "staff_unreachable", "ended_after_intervention", "staff1")
+        assert v["listeners"] == 0
+        assert not any(k == "json" and x.get("type") in ("reply", "thinking") for k, x in cp.log)      # the assistant never spoke again
 
 
 def test_the_expiry_watcher_also_closes_for_a_disabled_account(api):  # noqa: F811
@@ -301,7 +333,7 @@ def test_the_expiry_watcher_also_closes_for_a_disabled_account(api):  # noqa: F8
 
 
 # ---- the full sequence over real sockets -----------------------------------------------------------------------------------------
-def test_the_full_call_sequence_listen_takeover_staff_speaks_return_end(api, caplog):  # noqa: F811
+def test_the_full_call_sequence_listen_takeover_announcement_staff_speaks_end(api, caplog):  # noqa: F811
     caplog.set_level(logging.DEBUG)
     setup_parts(api, [QUESTION])
     s1 = auth(api, "staff1")
@@ -334,20 +366,25 @@ def test_the_full_call_sequence_listen_takeover_staff_speaks_return_end(api, cap
             assert {1, 2} <= tags
             texts = [p for k, p in staff.log if k == "json" and p.get("type") == "transcript"]
             assert {t["speaker"] for t in texts} == {"caller", "ai"} and any(QUESTION in t["text"] for t in texts)
-            # 5. staff takes over: both sides are told, and the epoch moves
+            # 5. staff takes over: both sides are told, and the epoch moves (let the finished turn's own writes settle first: the SQLite test DB is one shared connection)
+            caller.quiet(0.4)
             r = api.post(f"/api/staff/calls/{cid}/takeover", headers=s1).json()
             own = staff.json_of("ownership", owner="staff")
             assert own["staff"] == "staff1" and own["epoch"] == r["epoch"]
             caller.json_of("ownership", owner="staff")
-            # 6. the AI is silent: the caller talks, nobody answers, but staff hear the caller
-            caller.quiet(0.1)
+            # 6. the caller hears the hand-over announcement first (it is a notice, not an AI reply) and it finishes before anything else
+            caller.json_of("audio_start", notice="handover")
+            staff.json_of("announcement", state="finished", timeout=10)
+            caller.json_of("audio_end", notice="handover")
+            caller.quiet(0.4)
             staff.quiet(0.1)
+            # 7. the AI is silent from here on: the caller talks, nobody answers, but staff hear the caller
             speak(cws)
             got = caller.quiet(1.0)
             assert not [x for x in got if x[0] == "bytes" or (x[0] == "json" and x[1]["type"] in ("thinking", "reply", "audio_start", "transcript", "speech_start"))]
             heard = staff.quiet(0.3)
             assert any(k == "bytes" and p[0] == 1 for k, p in heard)
-            # 7. staff speaks and the caller hears it as a staff response with a higher turn id
+            # 8. staff speak and the caller hears them as a staff response with a higher turn id
             sws.send_json({"type": "mic_open", "epoch": own["epoch"]})
             assert staff.json_of("mic")["state"] == "open"
             pcm = b"\x10\x00" * 640
@@ -364,19 +401,16 @@ def test_the_full_call_sequence_listen_takeover_staff_speaks_return_end(api, cap
             # stale epoch frames never reach the caller
             sws.send_bytes((own["epoch"] - 1).to_bytes(4, "little") + pcm)
             assert not [x for x in caller.quiet(0.4) if x[0] == "bytes"]
-            # 8. staff returns the call to the AI
-            back = api.post(f"/api/staff/calls/{cid}/return", headers=s1).json()
-            assert back["owner"] == "ai"
-            assert staff.json_of("ownership", owner="ai")["epoch"] == back["epoch"]
-            caller.json_of("ownership", owner="ai")
-            sws.send_bytes(own["epoch"].to_bytes(4, "little") + pcm)                 # the old microphone is dead
-            assert not [x for x in caller.quiet(0.4) if x[0] == "bytes"]
-            # 9. the AI answers again, in the same conversation, with fresh turn ids
+            # 9. nobody can give the call back to the AI, and the old/other microphones are dead
+            assert api.post(f"/api/staff/calls/{cid}/return", headers=s1).status_code in (404, 405)
+            sws.send_json({"type": "return"})                                        # a hand-made socket message is ignored
+            sws.send_json({"type": "ownership", "owner": "ai", "epoch": own["epoch"] + 1})
+            assert not [x for x in caller.quiet(0.4) if x[0] == "json" and x[1].get("type") == "ownership"]
+            assert api.get(f"/api/staff/calls/{cid}", headers=s1).json()["owner"] == "staff"
+            # 10. the caller talks again: still nobody from the AI
             speak(cws)
-            reply3 = caller.json_of("reply")
-            caller.json_of("audio_end")
-            assert reply3["ticket_id"] == ready["ticket_id"] and reply3["turn_id"] > start_msg["turn_id"]
-            # 10. staff ends the call: caller and staff sockets are closed
+            assert not [x for x in caller.quiet(0.8) if x[0] == "bytes" or (x[0] == "json" and x[1].get("type") in ("reply", "thinking"))]
+            # 11. staff ends the call: caller and staff sockets are closed
             e = api.post(f"/api/staff/calls/{cid}/end", headers=s1).json()
             assert e["status"] == "ended"
             staff.json_of("call_ended")
@@ -385,12 +419,13 @@ def test_the_full_call_sequence_listen_takeover_staff_speaks_return_end(api, cap
         caller.until(lambda k, p: k == "closed")
     # 11. the whole story is in the audit trail, and nothing sensitive is in the logs
     ev = [x["kind"] for x in api.get(f"/api/staff/calls/{cid}/events", headers=s1).json()]
-    assert ev == ["created", "connected", "listen_started", "takeover_requested", "takeover_succeeded", "returned_to_ai", "ended"]
+    assert [k for k in ev if not k.startswith(("announcement", "staff_mic"))] == ["created", "connected", "listen_started", "takeover_requested", "takeover_succeeded", "ended"]
+    assert {"announcement_started", "announcement_finished", "staff_mic_started"} <= set(ev)
     logs = caplog.text
     assert QUESTION not in logs and t1 not in logs and "Bearer" not in logs and "instalment" not in logs.lower()
 
 
-def test_staff_audio_after_the_staff_socket_is_gone_returns_the_call_to_the_ai_after_the_grace_period(api):  # noqa: F811
+def test_when_the_owners_socket_drops_the_staff_audio_is_closed_for_the_caller_and_the_call_ends_after_the_grace_period(api):  # noqa: F811
     api.app.state.settings.calls_takeover_grace_s = 1
     setup_parts(api, [QUESTION])
     s1, t1 = auth(api, "staff1"), tok(api, "staff1")
@@ -402,13 +437,13 @@ def test_staff_audio_after_the_staff_socket_is_gone_returns_the_call_to_the_ai_a
             staff = open_stream(api, sws, t1)
             ep = api.post(f"/api/staff/calls/{cid}/takeover", headers=s1).json()["epoch"]
             staff.json_of("ownership", owner="staff")
+            staff.json_of("announcement", state="finished", timeout=10)
             sws.send_json({"type": "mic_open", "epoch": ep})
             staff.json_of("mic")
         caller.json_of("audio_end", staff=True)                              # the staff response is closed for the caller when the socket drops
-        caller.json_of("ownership", owner="ai", timeout=5)
-        speak(cws)
-        caller.json_of("reply")                                              # and the AI answers again
-        assert api.get(f"/api/staff/calls/{cid}", headers=s1).json()["owner"] == "ai"
+        assert caller.json_of("call_end", timeout=6)["reason"] == "staff_unreachable"
+        time.sleep(0.3)
+        assert not any(k == "json" and x.get("type") == "reply" for k, x in caller.log)
 
 
 # ---- compatibility ---------------------------------------------------------------------------------------------------------------
@@ -416,8 +451,8 @@ def test_the_voice_line_still_works_when_the_calls_tables_are_missing(api, caplo
     from sqlalchemy import text
 
     with session_scope() as db:
-        db.execute(text("DROP TABLE call_events"))
-        db.execute(text("DROP TABLE calls"))
+        for t in ("call_recordings", "call_consents", "feedback_reviews", "intervention_feedback", "call_events", "calls", "trial_events", "trial_settings"):
+            db.execute(text(f"DROP TABLE {t}"))
     setup_parts(api, [QUESTION])
     with api.websocket_connect("/api/voice/ws") as ws:
         start(ws)
@@ -465,9 +500,11 @@ def test_audio_never_crosses_between_two_calls_of_the_same_tenant(api):  # noqa:
         assert id_a != id_b
         with staff_stream(api, id_a, t1) as sws:
             staff = open_stream(api, sws, t1)
+            time.sleep(0.4)                                                          # SQLite test DB = one shared connection: let background writes settle
             ep = api.post(f"/api/staff/calls/{id_a}/takeover", headers=s1).json()["epoch"]
             staff.json_of("ownership", owner="staff")
             a.json_of("ownership", owner="staff")
+            staff.json_of("announcement", state="finished", timeout=10)
             sws.send_json({"type": "mic_open", "epoch": ep})
             staff.json_of("mic")
             speak(ws_b)                                                             # the OTHER caller talks: the staff member attached to call A hears nothing of it

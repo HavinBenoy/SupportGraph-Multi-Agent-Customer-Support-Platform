@@ -170,12 +170,24 @@ class Settings(BaseSettings):
     voice_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- M4: staff live calls (listen / take over / return to AI) ---
-    calls_takeover_grace_s: int = Field(default=15, ge=1, le=300)      # staff who took over must have an audio connection attached; if it is gone this long the call goes back to the AI
+    calls_takeover_grace_s: int = Field(default=15, ge=1, le=300)      # M4.1: if the staff member who took over has NO audio connection for this long the call ENDS as failed (it never goes back to the AI)
     calls_max_listeners: int = Field(default=5, ge=1, le=50)           # staff audio connections per call (each one may listen; at most one speaks)
     calls_listener_queue: int = Field(default=200, ge=10, le=5000)     # frames buffered per listener; a slow listener drops its OWN oldest audio, never delays the call
     calls_staff_frame_max: int = Field(default=16 * 1024, ge=1024, le=64 * 1024)   # one staff microphone message (a normal 40 ms frame is 1280 bytes)
     calls_recheck_s: int = Field(default=30, ge=5, le=600)             # a staff socket re-checks token expiry and that the account is still enabled this often
     calls_keep_ended_minutes: int = Field(default=30, ge=0, le=1440)   # ended calls stay visible in the list this long
+    # M4.1: what the caller hears when staff take over. It is synthesised by the same voice as the assistant and is recorded as a SYSTEM entry in the transcript.
+    calls_handover_announcement: str = Field(default="I want to make sure you receive accurate information. One of our support specialists is joining us to clarify this. "
+                                                     "I'll hand over the conversation now.", min_length=10, max_length=400)
+    calls_announcement_timeout_s: int = Field(default=30, ge=3, le=120)   # a notice that has not finished by then is abandoned (failure is shown to staff, who may speak)
+    # --- M5: Trial Verification Mode ---
+    # Recording is OFF unless a provider is chosen here AND an administrator offers recording in the trial settings AND the caller consents.
+    # "local" writes WAV files under trial_recordings_dir (never the database). "none" = the consent/retention framework runs, nothing is ever recorded.
+    trial_recording_provider: Literal["none", "local"] = "none"
+    trial_recordings_dir: str = "data/recordings"
+    trial_purge_interval_min: int = Field(default=60, ge=0, le=1440)   # how often the retention job runs inside the API process (0 = only on demand / `make purge-trial`)
+    trial_metrics_max_rows: int = Field(default=5000, ge=100, le=100000)
+    trial_recording_max_mb: int = Field(default=200, ge=1, le=2000)    # a recording that reaches this size is stopped (reason `size_limit`)
 
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.

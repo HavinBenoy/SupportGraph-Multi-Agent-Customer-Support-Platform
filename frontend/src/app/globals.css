@@ -69,9 +69,24 @@ figure { margin: 0; } figcaption { font-weight: 600; margin-bottom: 8px; }
 .phase { font-weight: 600; } .phase.hearing { color: var(--accent); } .phase.speaking { color: var(--bar); }
 .voice .composer input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
 
-/* M4: live calls */
-.pill.call-active_ai { background: color-mix(in srgb, var(--ok) 15%, var(--surface)); color: var(--ok); border-color: transparent; }
-.pill.call-staff_takeover { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
-.pill.call-returning_to_ai, .pill.call-created { color: var(--muted); }
-.pill.call-ended, .pill.call-failed { opacity: .7; }
-.pill.call-failed { color: #b3261e; }
+/* M4.1: the four call status colours. Every badge also carries its words; the colours below keep >= 4.5:1 contrast on their tint in light and dark. */
+:root { --st-ai: #14673a; --st-ai-bg: #e2f4e8; --st-human: #1a4fb4; --st-human-bg: #e3ecfc; --st-end: #4b5563; --st-end-bg: #eceef2; --st-red: #a3231b; --st-red-bg: #fde7e5; --st-fail: #7a4a00; --st-fail-bg: #fdf0d3; }
+@media (prefers-color-scheme: dark) {
+  :root { --st-ai: #7fe0a3; --st-ai-bg: #12301f; --st-human: #9bbcff; --st-human-bg: #15264a; --st-end: #c3cbd7; --st-end-bg: #2a323f; --st-red: #ffaaa3; --st-red-bg: #3e1a17; --st-fail: #f3cf85; --st-fail-bg: #3a2f10; }
+}
+.pill.status { font-weight: 600; border: 1px solid currentColor; }
+.pill.status-ai_handling { color: var(--st-ai); background: var(--st-ai-bg); }
+.pill.status-human_handling { color: var(--st-human); background: var(--st-human-bg); }
+.pill.status-ended_normally { color: var(--st-end); background: var(--st-end-bg); }
+.pill.status-ended_after_intervention { color: var(--st-red); background: var(--st-red-bg); }
+.pill.status-failed { color: var(--st-fail); background: var(--st-fail-bg); }
+.row:has(.status-ai_handling) { border-left: 4px solid var(--st-ai); } .row:has(.status-human_handling) { border-left: 4px solid var(--st-human); }
+.row:has(.status-ended_normally) { border-left: 4px solid var(--st-end); } .row:has(.status-ended_after_intervention) { border-left: 4px solid var(--st-red); }
+.row:has(.status-failed) { border-left: 4px solid var(--st-fail); }
+/* M4.1: transcript, feedback; M5: trial */
+.tlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 360px; overflow-y: auto; }
+.t { padding: 6px 10px; border-radius: 8px; border-left: 4px solid var(--line); background: var(--bg); } .t p { margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.t-customer { border-left-color: var(--accent); } .t-ai { border-left-color: var(--st-ai); } .t-staff { border-left-color: var(--st-human); } .t-system { border-left-color: var(--st-fail); font-style: italic; }
+.t.earlier { opacity: .75; } .tmeta { font-size: .8rem; color: var(--muted); }
+.feedback textarea { resize: vertical; } .check { display: flex !important; align-items: center; gap: 8px; } .check input { width: auto; }
+.banner.trial { background: var(--st-human-bg); color: var(--st-human); } .banner.trial .consent { margin-top: 6px; }

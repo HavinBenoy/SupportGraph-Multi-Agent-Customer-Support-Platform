@@ -5,8 +5,9 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Approval, EscalationDetail, EscalationRow } from "@/lib/types";
 import { LiveCalls } from "./LiveCalls";
+import { MyInterventions } from "./MyInterventions";
 
-type Tab = "escalations" | "approvals" | "calls";
+type Tab = "escalations" | "approvals" | "calls" | "feedback";
 const STATUSES = ["open", "claimed", "resolved"] as const;
 const when = (iso: string) => new Date(iso).toLocaleString();
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
@@ -20,8 +21,9 @@ export function StaffConsole() {
         <button role="tab" aria-selected={tab === "escalations"} onClick={() => setTab("escalations")}>Escalations</button>
         <button role="tab" aria-selected={tab === "approvals"} onClick={() => setTab("approvals")}>Make-up approvals</button>
         <button role="tab" aria-selected={tab === "calls"} onClick={() => setTab("calls")}>Live calls</button>
+        <button role="tab" aria-selected={tab === "feedback"} onClick={() => setTab("feedback")}>My intervention feedback</button>
       </div>
-      {tab === "escalations" ? <Escalations /> : tab === "approvals" ? <Approvals /> : <LiveCalls />}
+      {tab === "escalations" ? <Escalations /> : tab === "approvals" ? <Approvals /> : tab === "calls" ? <LiveCalls /> : <MyInterventions />}
     </div>
   );
 }

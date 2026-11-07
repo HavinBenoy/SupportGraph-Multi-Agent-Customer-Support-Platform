@@ -37,7 +37,11 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
-  const [withStaff, setWithStaff] = useState(false);   // M4: a staff member has taken the call (the assistant is silent until they hand it back)
+  const [withStaff, setWithStaff] = useState(false);   // M4.1: a staff member has taken the call (the assistant stays silent for the rest of the call)
+  const [trial, setTrial] = useState<Extract<ServerMsg, { type: "trial_notice" }> | null>(null);   // M5: Trial Verification Mode disclosure and the recording choice
+  const [consent, setConsent] = useState<"offered" | "granted" | "declined" | "withdrawn">("offered");
+  const [recording, setRecording] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [showLogin, setShowLogin] = useState(false);
   const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false), callNo = useRef(0), fillerNow = useRef(false);
@@ -59,7 +63,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     sock.current?.close(); sock.current = null;
     mic.current?.stop(); mic.current = null;
     player.current?.stop(); player.current = null;
-    setPhase("idle"); setMuted(false); setWithStaff(false);
+    setPhase("idle"); setMuted(false); setWithStaff(false); setTrial(null); setConsent("offered"); setRecording(false); setConsentError(null);
   }, []);
   useEffect(() => hangUp, [hangUp]); // leaving the page ends the call and releases the microphone
 
@@ -92,10 +96,19 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         if (!m.filler) setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p));   // a holding phrase is not the end of the turn
         break;
       case "interrupted": player.current?.stop(m.turn_id); break;
-      case "ownership": // M4: the server says who is speaking with the caller; the answer in progress was already cut by an `interrupted` message
-        setWithStaff(m.owner === "staff");
-        setNotice(m.owner === "staff" ? "A staff member has joined your call. The assistant is paused." : "The assistant is back on the call.");
+      case "ownership": // the server says who is speaking with the caller; the answer in progress was already cut by an `interrupted` message
+        if (m.owner === "staff") { setWithStaff(true); setNotice("A staff member has joined your call. The assistant will not speak again on this call."); }
         setPhase((p) => (p === "idle" ? p : "listening")); break;
+      case "trial_notice": setTrial(m); setConsent("offered"); setConsentError(null); break;
+      case "consent":
+        if (m.error) setConsentError(m.error); else { if (!(m.status === "granted" && !m.recording)) setConsentError(null); if (m.status) setConsent(m.status); setRecording(!!m.recording); }   // "agreed but not recording" keeps the reason the `recording` message gave
+        break;
+      case "recording":
+        setRecording(m.state === "on");
+        if (m.state === "off" && m.reason === "storage_unavailable") setConsentError("Recording could not be started, so this call is not being recorded. The call itself is unaffected.");
+        else if (m.state === "off" && m.reason === "trial_disabled") setConsentError("Recording was switched off. This call is no longer being recorded.");
+        else if (m.state === "off" && m.reason && m.reason !== "consent_withdrawn" && m.reason !== "call_ended") setConsentError("Recording stopped. This call is no longer being recorded.");
+        break;
       case "call_end": { // goodbye: let the spoken closing finish playing, then hang up cleanly (no "call ended" error)
         ending.current = true;
         const finish = () => { if (!ending.current) return; ending.current = false; hangUp(); setNotice(m.reason === "ended_by_staff" ? "The call was ended by a staff member. Your conversation is saved in the chat." : "Call ended. Thanks for calling."); };
@@ -137,6 +150,12 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     if (!q || !live) return;
     sock.current?.send(JSON.stringify({ type: "text", text: q })); setText("");
   }
+  // M5: an explicit button press is the ONLY way recording consent is ever given, declined or withdrawn.
+  function decide(decision: "granted" | "declined" | "withdrawn") {
+    if (trial?.recording.offered !== true) return;
+    setConsentError(null);
+    try { sock.current?.send(JSON.stringify({ type: "consent", decision, policy_version: trial.recording.policy_version })); } catch { setConsentError("Your choice could not be sent. Nothing is being recorded."); }
+  }
   function toggleMute() { const v = !muted; mic.current?.mute(v); setMuted(v); }
 
   if (session && !student) return <div className="card narrow"><p>You are signed in as {session.role}. The voice line is for students and visitors.</p></div>;
@@ -174,7 +193,26 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         <div ref={endRef} />
       </div>
 
-      {withStaff && <p className="banner" role="status">You are speaking with a staff member. Talk as you would on a phone call.</p>}
+      {trial && live && (
+        <div className="banner trial" role="region" aria-label="Trial call notice">
+          <p>{trial.disclosure}</p>
+          {trial.recording.offered && (
+            <div className="consent">
+              <p>{trial.recording.notice}</p>
+              <p role="status" aria-live="polite"><strong>{recording ? "Recording is on." : consent === "granted" ? "Recording is not running." : "This call is not being recorded."}</strong>
+                {consent === "declined" && " You said no. The call works exactly the same."}{consent === "withdrawn" && " You stopped the recording."}{consent === "offered" && " Recording is optional: it only starts if you choose “Allow recording”."}</p>
+              <div className="actions">
+                {(consent === "offered" || consent === "declined" || consent === "withdrawn") && <button className="btn primary" onClick={() => decide("granted")}>{consent === "offered" ? "Allow recording" : "Allow recording after all"}</button>}
+                {consent === "offered" && <button className="btn" onClick={() => decide("declined")}>No thanks</button>}
+                {consent === "granted" && <button className="btn" onClick={() => decide("withdrawn")}>Stop recording</button>}
+              </div>
+            </div>
+          )}
+          {consentError && <p className="error" role="alert">{consentError}</p>}
+        </div>
+      )}
+      {recording && <p className="pill warn" role="status" aria-label="Recording indicator">● Recording</p>}
+      {withStaff && <p className="banner" role="status">You are speaking with a staff member. Talk as you would on a phone call. The assistant will not speak again on this call.</p>}
       {status && BANNERS[status] && <p className={`banner ${status}`} role="status">{BANNERS[status]}</p>}
       {notice && <p className="muted tiny" role="status">{notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -184,7 +222,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         <input id="voice-text" value={text} maxLength={1000} placeholder={!live ? "Start a call to type or speak" : withStaff ? "A staff member is on the call" : "Or type your question"} disabled={!live || withStaff} onChange={(e) => setText(e.target.value)} />
         <button className="btn" disabled={!live || withStaff || !text.trim()}>Send</button>
       </form>
-      <p className="muted tiny">Your voice is processed on this institute’s own server and is not stored; only the text of the conversation is saved, like the chat.</p>
+      <p className="muted tiny">Your voice is processed on this institute’s own server and is not stored, unless you agree to a recording on a trial call; only the text of the conversation is saved, like the chat.</p>
     </section>
   );
 }

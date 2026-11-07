@@ -9,10 +9,14 @@ export type ServerMsg =
   | { type: "interrupted"; turn_id?: number; reason?: string }
   | { type: "transcript"; turn_id?: number; text: string; final?: boolean; ignored?: boolean; segments?: number }
   | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Timing; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
-  | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean; staff?: boolean }
+  | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean; staff?: boolean; notice?: "handover" | "disclosure" }
   | { type: "metrics"; turn_id: number; timing: Timing }   // M3: the four latencies of a spoken answer
-  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; staff?: boolean; timing?: Timing }
-  | { type: "ownership"; owner: "staff" | "ai"; epoch: number }   // M4: a staff member took the call / handed it back to the assistant
+  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; staff?: boolean; notice?: "handover" | "disclosure"; timing?: Timing }
+  // M5 (trial calls only): what the caller is told, and the explicit recording choice. Nothing is recorded unless the caller presses "Allow recording".
+  | { type: "trial_notice"; disclosure: string; recording: { offered: false } | { offered: true; policy_version: number; notice: string; retention_days: number } }
+  | { type: "consent"; status?: "granted" | "declined" | "withdrawn"; recording?: boolean; error?: string }
+  | { type: "recording"; state: "on" | "off"; reason?: string }
+  | { type: "ownership"; owner: "staff" | "ai"; epoch: number }   // M4.1: a staff member took the call; the assistant never speaks on it again
   | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };

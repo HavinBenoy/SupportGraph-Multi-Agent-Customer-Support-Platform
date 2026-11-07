@@ -261,7 +261,7 @@ describe("VoiceCall: staff takeover (M4)", () => {
     await r.serverSays({ type: "interrupted", turn_id: 3, reason: "takeover" });
     expect(r.player.stop).toHaveBeenCalledWith(3);
     await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
-    expect(await screen.findByText(/A staff member has joined your call\. The assistant is paused\./)).toBeInTheDocument();
+    expect(await screen.findByText(/A staff member has joined your call\. The assistant will not speak again on this call\./)).toBeInTheDocument();
     expect(screen.getByText(/You are speaking with a staff member/)).toBeInTheDocument();
     expect(screen.getByLabelText("Type instead")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -279,13 +279,23 @@ describe("VoiceCall: staff takeover (M4)", () => {
     expect(r.player.end).toHaveBeenCalledWith(5);
   });
 
-  it("when the staff member hands the call back, typing works again and the caller is told", async () => {
+  it("there is no hand-back: once a staff member has the call, typing stays off and the assistant never announces it is back", async () => {
     const r = await inCall();
     await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
-    await r.serverSays({ type: "ownership", owner: "ai", epoch: 4 });
-    expect(await screen.findByText("The assistant is back on the call.")).toBeInTheDocument();
-    expect(screen.queryByText(/You are speaking with a staff member/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Type instead")).toBeEnabled();
+    await r.serverSays({ type: "ownership", owner: "ai", epoch: 4 } as ServerMsg);          // not something the server sends any more; the screen must not act on it
+    expect(screen.queryByText("The assistant is back on the call.")).not.toBeInTheDocument();
+    expect(screen.getByText(/You are speaking with a staff member/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Type instead")).toBeDisabled();
+  });
+
+  it("the hand-over announcement is played like any spoken response and is not shown as an assistant message", async () => {
+    const r = await inCall();
+    await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
+    await r.serverSays({ type: "audio_start", turn_id: 9, sample_rate: 22050, notice: "handover" });
+    expect(r.player.begin).toHaveBeenLastCalledWith(9, 22050);
+    await r.serverSays({ type: "audio_end", turn_id: 9, notice: "handover" });
+    expect(r.player.end).toHaveBeenCalledWith(9);
+    expect(screen.queryByText(/I want to make sure you receive accurate information/)).not.toBeInTheDocument();      // spoken, never a chat line from the assistant
   });
 
   it("a call ended by staff says so and releases the microphone and socket", async () => {
@@ -295,5 +305,119 @@ describe("VoiceCall: staff takeover (M4)", () => {
     expect(r.micStop).toHaveBeenCalled();
     expect(r.close).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "End call" })).not.toBeInTheDocument();
+  });
+});
+
+
+describe("VoiceCall: trial notice and recording consent (M5)", () => {
+  const OFFER = { type: "trial_notice", disclosure: "You're speaking with our AI support assistant. During this trial, a member of our support team may monitor the conversation and step in whenever additional assistance is needed.",
+                  recording: { offered: true, policy_version: 3, notice: "If you agree, we will record the audio of this call. Recording is optional.", retention_days: 30 } } as const;
+  const NO_OFFER = { type: "trial_notice", disclosure: OFFER.disclosure, recording: { offered: false } } as const;
+  const sentJson = (r: ReturnType<typeof rig>) => r.sent.filter((x): x is string => typeof x === "string").map((x) => JSON.parse(x));
+  async function inTrial(notice: ServerMsg = OFFER) {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays(notice);
+    return r;
+  }
+
+  it("a normal call shows no trial notice and no recording choice", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await screen.findByText(/Listening/);
+    expect(screen.queryByRole("region", { name: "Trial call notice" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /recording/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the disclosure and the consent choice, and sends NOTHING until the caller presses a button", async () => {
+    const r = await inTrial();
+    const box = await screen.findByRole("region", { name: "Trial call notice" });
+    expect(box).toHaveTextContent("You're speaking with our AI support assistant");
+    expect(box).toHaveTextContent("may monitor the conversation");
+    expect(box).toHaveTextContent("Recording is optional");
+    expect(box).toHaveTextContent("This call is not being recorded");
+    expect(sentJson(r).some((m) => m.type === "consent")).toBe(false);                 // viewing, speaking and waiting never grant consent
+    await r.serverSays({ type: "transcript", turn_id: 1, text: "yes you can record me", final: true });      // even saying "yes" is not consent
+    expect(sentJson(r).some((m) => m.type === "consent")).toBe(false);
+    expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument();
+  });
+
+  it("Allow recording sends an explicit decision with the policy version it showed; recording is only shown as on when the server says so", async () => {
+    const r = await inTrial();
+    await userEvent.click(await screen.findByRole("button", { name: "Allow recording" }));
+    expect(sentJson(r).filter((m) => m.type === "consent")).toEqual([{ type: "consent", decision: "granted", policy_version: 3 }]);
+    expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument();       // nothing is claimed before the server confirms
+    await r.serverSays({ type: "recording", state: "on" });
+    await r.serverSays({ type: "consent", status: "granted", recording: true });
+    expect(await screen.findByLabelText("Recording indicator")).toHaveTextContent("Recording");
+    expect(screen.getByText("Recording is on.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow recording" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "No thanks" })).not.toBeInTheDocument();
+  });
+
+  it("No thanks declines, the call carries on, and the caller can still change their mind", async () => {
+    const r = await inTrial();
+    await userEvent.click(await screen.findByRole("button", { name: "No thanks" }));
+    expect(sentJson(r).filter((m) => m.type === "consent")).toEqual([{ type: "consent", decision: "declined", policy_version: 3 }]);
+    await r.serverSays({ type: "consent", status: "declined", recording: false });
+    expect(await screen.findByText(/You said no\. The call works exactly the same\./)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "End call" })).toBeEnabled();
+    expect(screen.getByLabelText("Type instead")).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Allow recording after all" }));
+    expect(sentJson(r).filter((m) => m.type === "consent").at(-1)).toEqual({ type: "consent", decision: "granted", policy_version: 3 });
+  });
+
+  it("Stop recording withdraws consent; the indicator goes away when the server confirms it stopped", async () => {
+    const r = await inTrial();
+    await userEvent.click(await screen.findByRole("button", { name: "Allow recording" }));
+    await r.serverSays({ type: "recording", state: "on" });
+    await r.serverSays({ type: "consent", status: "granted", recording: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
+    expect(sentJson(r).filter((m) => m.type === "consent").at(-1)).toEqual({ type: "consent", decision: "withdrawn", policy_version: 3 });
+    await r.serverSays({ type: "recording", state: "off", reason: "consent_withdrawn" });
+    await r.serverSays({ type: "consent", status: "withdrawn", recording: false });
+    await waitFor(() => expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument());
+    expect(screen.getByText(/You stopped the recording/)).toBeInTheDocument();
+  });
+
+  it("a refusal or a storage failure is said plainly: not recording, call unaffected", async () => {
+    const r = await inTrial();
+    await userEvent.click(await screen.findByRole("button", { name: "Allow recording" }));
+    await r.serverSays({ type: "recording", state: "off", reason: "storage_unavailable" });
+    await r.serverSays({ type: "consent", status: "granted", recording: false });
+    expect(await screen.findByText(/this call is not being recorded\. The call itself is unaffected/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument();
+    await r.serverSays({ type: "consent", error: "the recording terms changed; please read them again" });
+    expect(await screen.findByText("the recording terms changed; please read them again")).toBeInTheDocument();
+  });
+
+  it("an administrator switching trial mode off while recording clears the indicator", async () => {
+    const r = await inTrial();
+    await r.serverSays({ type: "recording", state: "on" });
+    expect(await screen.findByLabelText("Recording indicator")).toBeInTheDocument();
+    await r.serverSays({ type: "recording", state: "off", reason: "trial_disabled" });
+    await waitFor(() => expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument());
+    expect(screen.getByText(/Recording was switched off/)).toBeInTheDocument();
+  });
+
+  it("when recording is not offered only the monitoring disclosure is shown: no recording buttons, no consent can be sent", async () => {
+    const r = await inTrial(NO_OFFER);
+    const box = await screen.findByRole("region", { name: "Trial call notice" });
+    expect(box).toHaveTextContent("may monitor the conversation");
+    expect(screen.queryByRole("button", { name: /recording/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "No thanks" })).not.toBeInTheDocument();
+    expect(sentJson(r).some((m) => m.type === "consent")).toBe(false);
+  });
+
+  it("the notice and recording state are cleared when the call ends, so the next call starts with no consent", async () => {
+    const r = await inTrial();
+    await userEvent.click(await screen.findByRole("button", { name: "Allow recording" }));
+    await r.serverSays({ type: "recording", state: "on" });
+    await userEvent.click(screen.getByRole("button", { name: "End call" }));
+    expect(screen.queryByRole("region", { name: "Trial call notice" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Recording indicator")).not.toBeInTheDocument();
   });
 });

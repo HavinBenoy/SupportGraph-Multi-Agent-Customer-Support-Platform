@@ -17,9 +17,8 @@ Rules this class guarantees (M2.2; root causes in docs/M2_2.md):
     the echo guard and the next response all agree with what the caller hears.
 M4: audio ownership. A session can be SUSPENDED by a staff takeover (`suspend_ai`): the AI is silenced at once (the speech in progress is cut, a graph run
 in flight finishes but its reply is discarded, pending and queued turns are dropped, the endpointer is reset) and caller audio is only forwarded
-(`tap_caller`), never recognised. `resume_ai` hands the call back. Every suspend/resume carries an ownership EPOCH; a response remembers the epoch it
-started under and is never spoken, not even one more frame, after the epoch moved. The graph context (the ticket id) is untouched, so after
-a return the AI continues in the same conversation.
+(`tap_caller`), never recognised. M4.1: a suspension is PERMANENT: there is no resume (a human-owned call never goes back to the AI). Every suspend carries an
+ownership EPOCH; a response remembers the epoch it started under and is never spoken, not even one more frame, after the epoch moved.
 Everything that decides what the caller may see or do (tenant, student, ticket, RBAC, escalation, approvals) lives in `run_turn`, which the
 route builds from the text chat's own code. This class adds no powers: it converts audio to text and the reply back to audio.
 """
@@ -134,7 +133,7 @@ class VoiceSession:
     epoch: int = 0                           # M4: ownership epoch (bumped by every ownership change; see app/calls/hub.py)
     _suspended: bool = False                 # M4: a staff member owns the call's audio: the AI neither hears nor speaks
     _susp_at: float | None = None            # M4: when the current suspension began (monotonic)
-    _susp_total: float = 0.0                 # M4: seconds the assistant has been suspended; they do not count against the assistant's time limit
+    _susp_total: float = 0.0                 # M4: seconds the assistant has been suspended (M4.1: a suspension is permanent; the field stays for the time-limit arithmetic)
 
     def __post_init__(self) -> None:
         self.ep = Endpointer(self.vad, threshold=self.s.voice_vad_threshold, silence_ms=self.s.voice_silence_ms,
@@ -447,16 +446,10 @@ class VoiceSession:
         self._ev("ai_suspended", epoch=epoch)
         return cut
 
-    def resume_ai(self, epoch: int) -> None:
-        """The staff member hands the call back. The conversation (ticket id, turn counter, graph thread) is exactly where it was."""
-        self.ep.reset()
-        self._barged = False
-        self.epoch = epoch
-        if self._susp_at is not None:
-            self._susp_total += time.monotonic() - self._susp_at
-            self._susp_at = None
-        self._suspended = False
-        self._ev("ai_resumed", epoch=epoch)
+    @property
+    def speech_lock(self) -> asyncio.Lock:
+        """Held while a response is being spoken. The hand-over notice takes it, so it can never overlap the assistant's last words (M4.1)."""
+        return self._speak_lock
 
     def reserve_turn_id(self) -> int:
         """A turn id for the staff member's audio. Taken from the same counter as the AI's, so it is above every earlier response and below

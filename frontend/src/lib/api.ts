@@ -1,7 +1,8 @@
 /** Typed client for the SupportGraph API. All calls go to same-origin `/api` (proxied by Next). Errors become `ApiError` with a message
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
-import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, History, LiveCall, PublicConfig, Role, Session } from "./types";
+import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
+  PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -62,4 +63,26 @@ export const api = {
   calls: (token: string) => call<LiveCall[]>("/staff/calls", { token }),
   callAction: (token: string, id: string, action: CallAction) => call<LiveCall>(`/staff/calls/${encodeURIComponent(id)}/${action}`, { method: "POST", token }),
   analytics: (token: string, days: number) => call<Analytics>(`/admin/analytics?days=${days}`, { token }),
+  // M4.1: transcript and intervention feedback (the server decides who may read or write them: the call's intervention owner alone writes)
+  transcript: (token: string, id: string) => call<Transcript>(`/staff/calls/${encodeURIComponent(id)}/transcript`, { token }),
+  feedback: (token: string, id: string) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback`, { token }),
+  submitFeedback: (token: string, id: string, body: FeedbackInput) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback`, { method: "POST", token, body }),
+  editFeedback: (token: string, id: string, body: FeedbackInput) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback`, { method: "PUT", token, body }),
+  skipFeedback: (token: string, id: string) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback/skip`, { method: "POST", token }),
+  interventions: (token: string) => call<Interventions>("/staff/interventions", { token }),
+  // M5: Trial Verification Mode (administrators only, except the read-only flag)
+  trialStatus: (token: string) => call<{ enabled: boolean; recording_offered: boolean }>("/staff/trial", { token }),
+  trial: (token: string) => call<TrialView>("/admin/trial", { token }),
+  saveTrial: (token: string, expectedVersion: number, patch: TrialPatch) => call<TrialView>("/admin/trial", { method: "PUT", token, body: { expected_version: expectedVersion, ...patch } }),
+  trialEvents: (token: string) => call<TrialEventRow[]>("/admin/trial/events?limit=50", { token }),
+  trialMetrics: (token: string, from?: string, to?: string) =>
+    call<TrialMetrics>(`/admin/trial/metrics${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) })}` : ""}`, { token }),
+  trialFeedback: (token: string, status?: string) => call<FeedbackQueue>(`/admin/trial/feedback${status ? `?status=${encodeURIComponent(status)}` : ""}`, { token }),
+  reviewFeedback: (token: string, callId: string, status: string, note?: string) =>
+    call<Feedback>(`/admin/trial/feedback/${encodeURIComponent(callId)}/review`, { method: "POST", token, body: { status, ...(note ? { note } : {}) } }),
+  retention: (token: string) => call<RetentionStatus>("/admin/trial/retention", { token }),
+  purge: (token: string, dryRun: boolean) => call<PurgeResult>("/admin/trial/retention/purge", { method: "POST", token, body: { dry_run: dryRun } }),
+  recordings: (token: string) => call<RecordingRow[]>("/admin/trial/recordings", { token }),
+  holdRecording: (token: string, id: string, hold: boolean, reason?: string) =>
+    call<RecordingRow>(`/admin/trial/recordings/${encodeURIComponent(id)}/hold`, { method: "POST", token, body: { hold, ...(reason ? { reason } : {}) } }),
 };

@@ -1,7 +1,10 @@
 """The call lifecycle and the ONE place ownership moves (M4).
 
-    created --connected--> active_ai --takeover--> staff_takeover --begin_return--> returning_to_ai --finish_return--> active_ai
+    created --connected--> active_ai --takeover--> staff_takeover            (M4.1: a human-owned call NEVER goes back to the AI)
     (any non-terminal state) --end--> ended          (any non-terminal state) --fail--> failed          ended / failed are terminal
+
+`returning_to_ai` (M4) is kept in the vocabulary ONLY so that a row written by M4 is still legal and readable (and can still be ended or failed):
+no move leads INTO it any more, and none leads out of it except to a terminal state. The database CHECK constraint still lists it (0006 is not rewritten).
 
 Listening is NOT a state: any number of staff may listen while the AI (or another staff member) owns the audio, and a listener
 coming or going changes nothing about who speaks. Only ownership is a state, so the states cannot multiply.
@@ -24,8 +27,8 @@ OWNER_OF = {"created": "none", "active_ai": "ai", "staff_takeover": "staff", "re
 ALLOWED: dict[str, frozenset[str]] = {
     "created": frozenset({"active_ai", "ended", "failed"}),
     "active_ai": frozenset({"staff_takeover", "ended", "failed"}),
-    "staff_takeover": frozenset({"returning_to_ai", "ended", "failed"}),
-    "returning_to_ai": frozenset({"active_ai", "ended", "failed"}),
+    "staff_takeover": frozenset({"ended", "failed"}),
+    "returning_to_ai": frozenset({"ended", "failed"}),       # legacy rows only; see the module docstring
     "ended": frozenset(),
     "failed": frozenset(),
 }
@@ -57,11 +60,10 @@ def transition(db: Session, tenant_id: str, call_id: str, src: str, dst: str, *,
     values: dict = {"status": dst, "owner": OWNER_OF[dst], "epoch": Call.epoch + 1}
     if dst == "staff_takeover":
         values["owner_subject"] = subject
-    elif dst in ("active_ai", "returning_to_ai", "ended", "failed"):
+        values["intervention_owner"] = subject        # M4.1: the durable fact; never cleared, never reassigned (the WHERE clause below allows one takeover)
+    elif dst in ("active_ai", "ended", "failed"):
         values["owner_subject"] = None
-    if dst == "active_ai" and src == "returning_to_ai":
-        values["returned_at"] = now()
-    elif dst in _STAMP:
+    if dst in _STAMP:
         values[_STAMP[dst]] = now()
     if dst in TERMINAL:
         values["end_reason"] = (reason or "unspecified")[:32]

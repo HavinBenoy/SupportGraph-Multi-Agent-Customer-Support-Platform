@@ -13,8 +13,12 @@ Protocol (JSON text messages unless noted):
                      {"type":"audio_start","sample_rate"} + binary PCM16 chunks + {"type":"audio_end","interrupted"}   {"type":"interrupted"}
                      {"type":"metrics","turn_id","timing"}   M3: once per spoken answer, the four latencies of the turn (see docs/M3.md)
                      {"type":"error","detail","fatal"?}
-  M4: {"type":"ownership","owner":"staff"|"ai","epoch":N}   a staff member took the call / handed it back to the AI (staff audio arrives as an ordinary
-      response: audio_start with "staff":true, binary frames, audio_end). {"type":"call_end","reason":"ended_by_staff"} when staff end the call.
+  M4: {"type":"ownership","owner":"staff"|"ai","epoch":N}   a staff member took the call (staff audio arrives as an ordinary response: audio_start with
+      "staff":true, binary frames, audio_end). {"type":"call_end","reason":"ended_by_staff"} when staff end the call.
+  M4.1: a takeover is final: the assistant never speaks again on that call. The spoken hand-over announcement arrives as a response with "notice":"handover".
+  M5 (only while Trial Verification Mode is on): {"type":"trial_notice","disclosure":"...","recording":{"offered":bool,"policy_version":N,"notice":"...","retention_days":D}}
+      the spoken disclosure is a response with "notice":"disclosure". client -> server {"type":"consent","decision":"granted"|"declined"|"withdrawn","policy_version":N}
+      (an explicit choice: never inferred); server -> client {"type":"consent","status"|"error"} and {"type":"recording","state":"on"|"off","reason"?}.
 
 Identity is decided exactly as for POST /api/chat (token => tenant+student from the signed token; otherwise anonymous in the requested tenant;
 ticket ids are signed and bound to that identity). Chat rate limits, analytics events, escalation, approvals and RBAC are the text path's own code.
@@ -195,9 +199,21 @@ async def voice_ws(ws: WebSocket) -> None:
     # voice line still works exactly as before, without staff features; the problem is logged.
     hub = ws.app.state.call_hub
     live = None
+    trial_cfg = None
+    try:                                                   # M5: is Trial Verification Mode on for this tenant? (read fresh from the database for every call)
+        from app.db.session import session_scope
+        from app.trial import settings as trial_settings
+
+        def read_trial():
+            with session_scope() as db:
+                return trial_settings.load(db, tenant_id)
+        trial_cfg = await asyncio.to_thread(read_trial)
+    except Exception as e:  # noqa: BLE001 - e.g. migration 0008 not applied yet: the call simply runs in normal mode
+        log.warning("trial settings could not be read (%s); the call runs in normal mode. Run `make db-migrate`.", type(e).__name__)
+    in_trial = bool(trial_cfg and trial_cfg.enabled)
     try:
         live = await hub.open(tenant_id, ticket_id, student_id if student_id != ANONYMOUS else None, send_json=ws.send_json, send_bytes=send_bytes,
-                              close_caller=hang_up)
+                              close_caller=hang_up, trial_mode=in_trial)
     except Exception as e:  # noqa: BLE001
         log.warning("call could not be registered for staff (%s); run `make db-migrate`. The call continues without staff features.", type(e).__name__)
 
@@ -216,6 +232,13 @@ async def voice_ws(ws: WebSocket) -> None:
         await live.mark_connected()
     await ws.send_json({"type": "ready", "ticket_id": ticket_id, "signed_in": student_id != ANONYMOUS, "tenant_name": tenant_cfg.name,
                         "sample_rate": tts.sample_rate})
+    if live is not None and in_trial:
+        from app.trial.call import TrialCall
+        live.trial = TrialCall(live, trial_cfg, ws.app.state.recording_provider)
+        try:
+            await live.trial.start()                       # the disclosure (text + spoken) and, if offered, the recording consent options
+        except Exception:  # noqa: BLE001 - the call goes on; the text disclosure is the minimum
+            log.warning("trial notice could not be started")
     outcome, failed = "caller_disconnected", False
     try:
         while True:
@@ -233,6 +256,12 @@ async def voice_ws(ws: WebSocket) -> None:
                 if kind == "stop":
                     outcome = "caller_ended"
                     break
+                if kind == "consent":                      # M5: an explicit decision from the caller's own browser (the only way recording can start or stop)
+                    if live is not None and live.trial is not None:
+                        hub.spawn(live.trial.handle(data))
+                    else:
+                        await ws.send_json({"type": "consent", "error": "Recording is not available on this call."})
+                    continue
                 if kind == "playback" and data.get("state") == "ended" and isinstance(data.get("turn_id"), int):
                     session.playback_ended(data["turn_id"])   # the browser finished playing that response
                     continue

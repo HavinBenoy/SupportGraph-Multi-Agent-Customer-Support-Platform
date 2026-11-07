@@ -29,8 +29,31 @@ def test_create_gives_unique_ids_tenant_and_ticket_association_and_a_created_eve
 def test_transition_table_is_exactly_the_documented_lifecycle():
     assert ALLOWED == {
         "created": {"active_ai", "ended", "failed"}, "active_ai": {"staff_takeover", "ended", "failed"},
-        "staff_takeover": {"returning_to_ai", "ended", "failed"}, "returning_to_ai": {"active_ai", "ended", "failed"}, "ended": set(), "failed": set()}
+        "staff_takeover": {"ended", "failed"}, "returning_to_ai": {"ended", "failed"}, "ended": set(), "failed": set()}     # M4.1: no way back to the AI
     assert all(not ALLOWED[s] for s in TERMINAL)
+    assert not any("returning_to_ai" in dst or (src == "staff_takeover" and "active_ai" in dst) for src, dst in ALLOWED.items())   # nothing leads INTO it, nothing returns to active_ai
+
+
+def test_a_human_owned_call_cannot_be_moved_to_active_ai_or_returning_even_by_a_direct_call():
+    with session_scope() as db:
+        cid = new_call(db).id
+        transition(db, T, cid, "created", "active_ai")
+        transition(db, T, cid, "active_ai", "staff_takeover", subject="staff1")
+    for dst in ("active_ai", "returning_to_ai", "created", "staff_takeover"):
+        with session_scope() as db, pytest.raises(TransitionError):
+            transition(db, T, cid, "staff_takeover", dst)
+    with session_scope() as db:
+        c = db.get(Call, (T, cid))
+        assert (c.status, c.owner, c.owner_subject, c.intervention_owner) == ("staff_takeover", "staff", "staff1", "staff1")
+
+
+def test_a_legacy_returning_to_ai_row_can_still_be_read_and_ended():
+    with session_scope() as db:
+        c = new_call(db)
+        db.execute(Call.__table__.update().where(Call.id == c.id).values(status="returning_to_ai", owner="none"))
+        cid = c.id
+    with session_scope() as db:
+        assert svc.finish(db, T, cid, reason="server_restart", failed=True).status == "failed"
 
 
 @pytest.mark.parametrize("src,dst", list(itertools.product(STATES, STATES)))
@@ -73,12 +96,9 @@ def test_every_ownership_move_bumps_the_epoch_and_stamps_its_timestamp():
         assert (c.epoch, c.owner, c.connected_at is not None) == (1, "ai", True)
         c = transition(db, T, cid, "active_ai", "staff_takeover", subject="staff1")
         assert (c.epoch, c.owner, c.owner_subject, c.takeover_at is not None) == (2, "staff", "staff1", True)
-        c = transition(db, T, cid, "staff_takeover", "returning_to_ai")
-        assert (c.epoch, c.owner, c.owner_subject, c.returned_at) == (3, "none", None, None)
-        c = transition(db, T, cid, "returning_to_ai", "active_ai")
-        assert (c.epoch, c.owner, c.returned_at is not None) == (4, "ai", True)
-        c = transition(db, T, cid, "active_ai", "ended", reason="done")
-        assert (c.epoch, c.owner, c.ended_at is not None, c.end_reason) == (5, "none", True, "done")
+        assert c.intervention_owner == "staff1"                                          # M4.1: persisted with the takeover
+        c = transition(db, T, cid, "staff_takeover", "ended", reason="done")
+        assert (c.epoch, c.owner, c.owner_subject, c.intervention_owner, c.ended_at is not None, c.end_reason) == (3, "none", None, "staff1", True, "done")
 
 
 def test_a_terminal_call_can_never_move_again():

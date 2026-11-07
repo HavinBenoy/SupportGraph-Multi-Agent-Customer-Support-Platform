@@ -3,27 +3,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { createLiveClient, liveWsUrl, realLiveDeps, type LiveClient, type LiveHandlers, type LiveMsg, type LiveState } from "@/lib/live";
-import type { CallAction, CallStatus, LiveCall } from "@/lib/types";
+import type { CallAction, LiveCall, Transcript as TranscriptData } from "@/lib/types";
+import { FeedbackForm } from "./FeedbackForm";
+import { CATEGORY_LABEL, StatusBadge } from "./CallStatus";
+import { Transcript } from "./Transcript";
 
 const POLL_MS = 3000;
-const STATUS_LABEL: Record<CallStatus, string> = {
-  created: "Connecting", active_ai: "Assistant on call", staff_takeover: "Staff on call", returning_to_ai: "Returning to assistant", ended: "Ended", failed: "Failed",
-};
 const END_REASON: Record<string, string> = {
   ended_by_staff: "ended by staff", caller_disconnected: "caller hung up", caller_ended: "caller ended it", goodbye: "caller said goodbye", limit: "reached its limit",
-  error: "ended by an error", server_restart: "server restarted", server_shutdown: "server stopped", return_failed: "could not be returned to the assistant",
+  error: "ended by an error", server_restart: "server restarted", server_shutdown: "server stopped", staff_unreachable: "the staff member who took it over lost their connection",
 };
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
 const clock = (s: number) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 
 export interface LiveCallsDeps { createClient: (h: LiveHandlers) => LiveClient; wsUrl: (callId: string) => string }
 const realDeps: LiveCallsDeps = { createClient: (h) => createLiveClient(h, realLiveDeps), wsUrl: (id) => liveWsUrl(id) };
-interface Conn { callId: string; state: LiveState; speaking: boolean; muted: boolean }
+interface Conn { callId: string; state: LiveState; speaking: boolean; muted: boolean; announcing: boolean; ownerGone: boolean }
 interface Line { id: number; speaker: "caller" | "ai"; text: string }
 let lineId = 1;
 
-/** Staff Live Calls (M4). What the buttons allow comes from the SERVER's view of each call (owner, status, is_mine), refreshed every few seconds and after
- *  every action; the browser only remembers its own audio connection. The server re-checks every action, so a stale screen can only get a clear refusal. */
+/** Staff Live Calls (M4/M4.1). What the buttons allow comes from the SERVER's view of each call (`can_takeover`, `can_end`, `can_listen`), refreshed every few seconds and
+ *  after every action; the browser only remembers its own audio connection. The server re-checks every action, so a stale screen can only get a clear refusal.
+ *  A call taken over by a staff member stays theirs until it ends: there is no way to give it back to the assistant, and nobody else can end it. */
 export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
   const { withToken, session } = useAuth();
   const [calls, setCalls] = useState<LiveCall[] | null>(null);
@@ -36,6 +37,7 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
   const [now, setNow] = useState(Date.now());
   const [conn, setConn] = useState<Conn | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  const [aiMsgs, setAiMsgs] = useState<{ index: number; text: string }[]>([]);   // the assistant's messages, for "which message was it?" in the feedback form
   const client = useRef<LiveClient | null>(null);
   const pendingSpeak = useRef<string | null>(null);   // speak as soon as the audio connection for this call is joined (set by a takeover)
   const inflight = useRef(false);                     // blocks a second click before React has re-rendered the disabled button
@@ -58,6 +60,7 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
   const stopClient = useCallback(() => { const c = client.current; client.current = null; pendingSpeak.current = null; c?.disconnect(); setConn(null); }, []);
   useEffect(() => stopClient, [stopClient]);                // leaving the page releases the socket, the microphone and the audio context
 
+  const onTranscript = useCallback((t: TranscriptData) => setAiMsgs(t.entries.filter((e) => e.speaker === "ai" && e.text && e.index != null).map((e) => ({ index: e.index as number, text: e.text as string }))), []);
   const patch = (c: LiveCall) => setCalls((l) => (l ? l.map((x) => (x.id === c.id ? c : x)) : l));
 
   function startListening(id: string, speakAfter = false) {
@@ -68,7 +71,7 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
     const handlers: LiveHandlers = {
       onState: (s) => {
         if (client.current !== c) return;
-        setConn((x) => ({ callId: id, state: s, speaking: x?.speaking ?? false, muted: false }));
+        setConn((x) => ({ callId: id, state: s, speaking: x?.speaking ?? false, muted: false, announcing: x?.announcing ?? false, ownerGone: false }));
         if (s === "joined" && pendingSpeak.current === id) { pendingSpeak.current = null; void c.speak(); }
         if (s === "closed") { client.current = null; setConn(null); load(); }
       },
@@ -78,12 +81,18 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
         if (client.current !== c) return;
         if (m.type === "transcript") setLines((l) => [...l.slice(-29), { id: lineId++, speaker: m.speaker, text: m.text }]);
         else if (m.type === "ownership") load();
+        else if (m.type === "joined") setConn((x) => (x ? { ...x, announcing: !!m.announcing } : x));
+        else if (m.type === "announcement") {
+          setConn((x) => (x ? { ...x, announcing: m.state === "started" } : x));
+          if (m.state === "failed") setError("The hand-over announcement could not be played to the caller. You can still speak to them.");
+          load();
+        } else if (m.type === "owner_disconnected") setConn((x) => (x ? { ...x, ownerGone: true } : x));
         else if (m.type === "call_ended") { stopClient(); setNotice("This call has ended."); load(); }
       },
     };
     const c = deps.createClient(handlers);
     client.current = c;
-    setConn({ callId: id, state: "connecting", speaking: false, muted: false });
+    setConn({ callId: id, state: "connecting", speaking: false, muted: false, announcing: false, ownerGone: false });
     c.connect(deps.wsUrl(id), session.token);
   }
 
@@ -107,11 +116,6 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
     else startListening(c.id, true);
     load();
   });
-  const giveBack = (c: LiveCall) => run("return", async () => {
-    client.current?.stopSpeaking();                                              // stop sending first, then hand the call back
-    const u = await withToken((t) => api.callAction(t, c.id, "return"));
-    patch(u); setNotice(`Call ${u.short_id} is back with the assistant.`); load();
-  });
   const endIt = (c: LiveCall) => run("end", async () => {
     setConfirmEnd(false);
     if (conn?.callId === c.id) stopClient();
@@ -122,18 +126,17 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
   const sel = calls?.find((c) => c.id === selId) ?? null;
   useEffect(() => { setConfirmEnd(false); }, [selId]);
   const duration = (c: LiveCall) => (c.live ? c.duration_s + Math.max(0, Math.floor((now - fetchedAt.current) / 1000)) : c.duration_s);
-  const owner = (c: LiveCall) => (c.owner === "staff" ? `Staff: ${c.owner_staff ?? "?"}${c.is_mine ? " (you)" : ""}` : c.owner === "ai" ? "Assistant" : "—");
+  const owner = (c: LiveCall) => (c.owner === "staff" ? `Staff: ${c.owner_staff ?? "?"}${c.is_mine ? " (you)" : ""}` : c.owner === "ai" ? "Assistant" : c.intervention_by ? `Staff: ${c.intervention_by}${c.intervention_by === me ? " (you)" : ""} (took over before it ended)` : "—");
   const hearing = (c: LiveCall) => (c.listening || (conn?.callId === c.id && conn.state === "joined") ? "You are listening" : c.listeners > 0 ? `${c.listeners} listening` : "");
 
   const mine = sel ? conn?.callId === sel.id : false;
   const joined = mine && conn?.state === "joined";
   const live = !!sel?.live;
   const can = {
-    listen: live && !(mine && (conn?.state === "joined" || conn?.state === "connecting")),
+    listen: !!sel?.can_listen && !(mine && (conn?.state === "joined" || conn?.state === "connecting")),
     stop: mine,
-    takeover: live && sel!.owner === "ai" && sel!.status === "active_ai",
-    giveBack: live && sel!.owner === "staff" && (sel!.is_mine || isAdmin),
-    end: live,
+    takeover: !!sel?.can_takeover,
+    end: !!sel?.can_end,
   };
   const off = busy !== null;
 
@@ -147,8 +150,8 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
         <ul className="list">
           {calls?.map((c) => (
             <li key={c.id}>
-              <button className={`row ${selId === c.id ? "sel" : ""}`} onClick={() => setSelId(c.id)} aria-label={`Call ${c.short_id}, ${STATUS_LABEL[c.status]}`}>
-                <strong>{c.short_id}</strong> <span className={`pill call-${c.status}`}>{STATUS_LABEL[c.status]}</span>{" "}
+              <button className={`row ${selId === c.id ? "sel" : ""}`} onClick={() => setSelId(c.id)} aria-label={`Call ${c.short_id}, ${CATEGORY_LABEL[c.category]}`}>
+                <strong>{c.short_id}</strong> <StatusBadge call={c} />{" "}
                 {hearing(c) && <span className="pill">{hearing(c)}</span>}
                 <span className="muted block">{owner(c)} · {c.caller === "student" ? "student" : "visitor"} {c.ticket_ref} · started {new Date(c.created_at).toLocaleTimeString()} · {clock(duration(c))}</span>
               </button>
@@ -160,7 +163,7 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
         {!sel && <p className="muted">Select a call to listen, take over or end it.</p>}
         {sel && (
           <article className="card">
-            <h2>Call {sel.short_id} <span className={`pill call-${sel.status}`}>{STATUS_LABEL[sel.status]}</span></h2>
+            <h2>Call {sel.short_id} <StatusBadge call={sel} />{sel.trial_mode && <span className="pill" title="Made while Trial Verification Mode was on">Trial call</span>}</h2>
             <dl>
               <dt>Audio owner</dt><dd>{owner(sel)}</dd>
               <dt>Caller</dt><dd>{sel.caller === "student" ? "Signed-in student" : "Visitor"} · ref {sel.ticket_ref}{sel.student_id ? ` · ${sel.student_id}` : ""}</dd>
@@ -171,29 +174,31 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
             </dl>
             {error && <p role="alert" className="error">{error}</p>}
             {notice && <p role="status" className="banner done">{notice}</p>}
-            {sel.live && sel.owner === "staff" && sel.is_mine && <p role="status" className="banner">You are on the call. {mine && conn?.speaking ? (conn.muted ? "Your microphone is muted." : "The caller can hear you.") : "Your microphone is off: the caller cannot hear you."} Use headphones to avoid echo.</p>}
-            {sel.live && sel.owner === "staff" && !sel.is_mine && <p role="status" className="banner">{sel.owner_staff} has taken over this call.</p>}
+            {sel.live && sel.owner === "staff" && sel.is_mine && <p role="status" className="banner">You are on the call and it stays with you until it ends. {mine && conn?.announcing ? "The hand-over announcement is playing to the caller: you can speak when it finishes. " : ""}{mine && conn?.speaking ? (conn.muted ? "Your microphone is muted." : "The caller can hear you.") : "Your microphone is off: the caller cannot hear you."} Use headphones to avoid echo.</p>}
+            {sel.live && sel.owner === "staff" && !sel.is_mine && <p role="status" className="banner">{sel.owner_staff} has taken over this call. You can listen, but only {sel.owner_staff} can speak on it or end it.</p>}
+            {mine && conn?.ownerGone && <p role="status" className="banner">The staff member on this call lost their connection. The call ends if they do not come back shortly; it does not return to the assistant.</p>}
             {mine && conn?.state === "connecting" && <p className="muted" aria-busy="true">Connecting audio…</p>}
             <div className="actions">
               <button className="btn" disabled={off || !can.listen} onClick={() => void listen(sel)}>Listen</button>
               <button className="btn" disabled={off || !can.stop} onClick={() => void stop()}>Stop listening</button>
               <button className="btn primary" disabled={off || !can.takeover} onClick={() => void takeOver(sel)}>Take over</button>
-              <button className="btn" disabled={off || !can.giveBack} onClick={() => void giveBack(sel)}>Return to AI</button>
               {!confirmEnd
                 ? <button className="btn danger" disabled={off || !can.end} onClick={() => setConfirmEnd(true)}>End call</button>
                 : <span className="actions"><button className="btn danger" disabled={off} onClick={() => void endIt(sel)}>Confirm end call</button><button className="btn" onClick={() => setConfirmEnd(false)}>Cancel</button></span>}
-              {sel.is_mine && sel.owner === "staff" && joined && !conn?.speaking && <button className="btn" disabled={off} onClick={() => void client.current?.speak()}>Enable microphone</button>}
+              {sel.is_mine && sel.owner === "staff" && joined && !conn?.speaking && <button className="btn" disabled={off || !!conn?.announcing} onClick={() => void client.current?.speak()}>Enable microphone</button>}
               {conn?.speaking && <button className="btn" aria-pressed={conn.muted} onClick={() => { const v = !conn.muted; client.current?.mute(v); setConn({ ...conn, muted: v }); }}>{conn.muted ? "Unmute microphone" : "Mute microphone"}</button>}
             </div>
-            {sel.live && sel.is_mine && sel.owner === "staff" && !mine && <p className="muted">Your audio connection is not open. Press Listen to reconnect; the call returns to the assistant if you stay away.</p>}
+            {sel.live && sel.is_mine && sel.owner === "staff" && !mine && <p className="muted">Your audio connection is not open. Press Listen to reconnect; if you stay away the call ends. It is never given to the AI again.</p>}
             {mine && joined && (
               <div className="log" role="log" aria-label="Call transcript" aria-live="polite">
                 {lines.length === 0 && <p className="muted empty">Listening. The conversation appears here as text too.</p>}
                 {lines.map((l) => <div key={l.id} className={`msg ${l.speaker === "caller" ? "user" : "assistant"}`}><span className="sr-only">{l.speaker === "caller" ? "Caller" : "Assistant"}: </span><p>{l.text}</p></div>)}
               </div>
             )}
+            <Transcript callId={sel.id} live={sel.live} onData={onTranscript} />
           </article>
         )}
+        {sel?.feedback && !sel.live && (sel.feedback.form_open || sel.feedback.state === "submitted") && <FeedbackForm key={sel.id} callId={sel.id} aiMessages={aiMsgs} onChanged={load} />}
       </section>
     </div>
   );

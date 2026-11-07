@@ -13,9 +13,21 @@ from sqlalchemy.orm import Session
 from app.calls.state import LIVE, TERMINAL, TransitionError, now, transition
 from app.db.models import Call, CallEvent
 
-EVENT_KINDS = frozenset({"created", "connected", "listen_started", "listen_stopped", "takeover_requested", "takeover_succeeded", "takeover_failed",
-                         "returned_to_ai", "ended", "failed", "participant_disconnected"})
-SAFE_DETAIL_KEYS = frozenset({"reason", "role", "epoch", "listeners", "previous_owner", "duration_s", "connection", "status"})
+EVENT_KINDS = frozenset({
+    "created", "connected", "listen_started", "listen_stopped", "takeover_requested", "takeover_succeeded", "takeover_failed",
+    "returned_to_ai",                      # LEGACY (M4): history written before M4.1 may contain it; nothing writes it any more
+    "ended", "failed", "participant_disconnected",
+    # M4.1
+    "control_denied",                      # a staff/admin tried a control action on a call another staff member holds (refused)
+    "announcement_started", "announcement_finished", "announcement_failed",    # the spoken hand-over notice to the caller
+    "staff_mic_started", "staff_mic_stopped",                                  # spans in which the human spoke (the speech itself is NOT transcribed)
+    "transcript_viewed", "feedback_submitted", "feedback_edited", "feedback_skipped",
+    # M5
+    "trial_notice_played", "consent_offered", "consent_granted", "consent_declined", "consent_withdrawn",
+    "recording_started", "recording_stopped", "recording_failed",
+})
+SAFE_DETAIL_KEYS = frozenset({"reason", "role", "epoch", "listeners", "previous_owner", "duration_s", "connection", "status",
+                              "action", "category", "policy_version", "recording_id", "variant"})
 MAX_DETAIL_STR = 64
 
 
@@ -40,8 +52,9 @@ def new_call_id() -> str:
     return "c_" + secrets.token_hex(8)
 
 
-def create_call(db: Session, tenant_id: str, ticket_id: str, student_id: str | None) -> Call:
-    call = Call(tenant_id=tenant_id, id=new_call_id(), ticket_id=ticket_id, student_id=student_id, status="created", owner="none", epoch=0, created_at=now())
+def create_call(db: Session, tenant_id: str, ticket_id: str, student_id: str | None, trial_mode: bool = False) -> Call:
+    call = Call(tenant_id=tenant_id, id=new_call_id(), ticket_id=ticket_id, student_id=student_id, status="created", owner="none", epoch=0, created_at=now(),
+                trial_mode=trial_mode)
     db.add(call)
     add_event(db, tenant_id, call.id, "created", "caller", status="created")
     db.flush()
@@ -96,6 +109,18 @@ def list_events(db: Session, tenant_id: str, call_id: str, limit: int = 200) -> 
     get_call(db, tenant_id, call_id)
     return list(db.execute(select(CallEvent).where(CallEvent.tenant_id == tenant_id, CallEvent.call_id == call_id)
                            .order_by(CallEvent.id).limit(limit)).scalars().all())
+
+
+def record_once(db: Session, tenant_id: str, call_id: str, kind: str, actor: str, *, within_s: int = 600, **detail) -> bool:
+    """Write an audit event unless the same actor already produced the same kind for this call in the last `within_s` seconds (a page that
+    refreshes every few seconds must not flood the trail). Returns whether it wrote one."""
+    since = now().timestamp() - within_s
+    last = db.execute(select(CallEvent).where(CallEvent.tenant_id == tenant_id, CallEvent.call_id == call_id, CallEvent.kind == kind,
+                                              CallEvent.actor == actor[:64]).order_by(CallEvent.id.desc()).limit(1)).scalars().first()
+    if last is not None and last.created_at is not None and _aware(last.created_at).timestamp() >= since:
+        return False
+    add_event(db, tenant_id, call_id, kind, actor, **detail)
+    return True
 
 
 def sweep_orphans(db: Session) -> int:

@@ -1,7 +1,7 @@
 "use client";
-import { AdminDashboard } from "@/components/AdminDashboard";
+import { AdminConsole } from "@/components/AdminConsole";
 import { RequireRole } from "@/components/RequireRole";
 
 export default function AdminPage() {
-  return <RequireRole roles={["admin"]}><AdminDashboard /></RequireRole>;
+  return <RequireRole roles={["admin"]}><AdminConsole /></RequireRole>;
 }

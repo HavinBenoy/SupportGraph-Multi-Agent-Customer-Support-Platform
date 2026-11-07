@@ -16,3 +16,7 @@ evals/voice/
 
 # M3 latency benchmark output (machine-specific)
 evals/bench-voice/
+
+# M5 trial recordings (personal data: never commit)
+data/recordings/
+backend/data/recordings/
