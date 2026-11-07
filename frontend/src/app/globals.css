@@ -68,3 +68,10 @@ figure { margin: 0; } figcaption { font-weight: 600; margin-bottom: 8px; }
 .btn.danger { background: #b3261e; color: #fff; border-color: #b3261e; }
 .phase { font-weight: 600; } .phase.hearing { color: var(--accent); } .phase.speaking { color: var(--bar); }
 .voice .composer input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
+
+/* M4: live calls */
+.pill.call-active_ai { background: color-mix(in srgb, var(--ok) 15%, var(--surface)); color: var(--ok); border-color: transparent; }
+.pill.call-staff_takeover { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.pill.call-returning_to_ai, .pill.call-created { color: var(--muted); }
+.pill.call-ended, .pill.call-failed { opacity: .7; }
+.pill.call-failed { color: #b3261e; }

@@ -37,6 +37,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const [withStaff, setWithStaff] = useState(false);   // M4: a staff member has taken the call (the assistant is silent until they hand it back)
   const [text, setText] = useState("");
   const [showLogin, setShowLogin] = useState(false);
   const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false), callNo = useRef(0), fillerNow = useRef(false);
@@ -58,7 +59,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
     sock.current?.close(); sock.current = null;
     mic.current?.stop(); mic.current = null;
     player.current?.stop(); player.current = null;
-    setPhase("idle"); setMuted(false);
+    setPhase("idle"); setMuted(false); setWithStaff(false);
   }, []);
   useEffect(() => hangUp, [hangUp]); // leaving the page ends the call and releases the microphone
 
@@ -85,15 +86,19 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         setStatus(m.status as ChatStatus);
         setLines((l) => [...l, { id: nextId++, turn: key(m.turn_id), role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus, stale: m.stale }]);
         setPhase(m.stale ? "listening" : "speaking"); break;      // a stale answer (a newer question exists) is shown but never spoken
-      case "audio_start": fillerNow.current = !!m.filler; if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
+      case "audio_start": fillerNow.current = !!m.filler; if (m.turn_id !== undefined) { if (m.staff) player.current?.begin(m.turn_id, m.sample_rate, 150); else player.current?.begin(m.turn_id, m.sample_rate); } break;   // a live human voice gets a bigger start-up buffer
       case "audio_end":
         if (m.turn_id !== undefined) { if (m.interrupted) player.current?.stop(m.turn_id); else player.current?.end(m.turn_id); }
         if (!m.filler) setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p));   // a holding phrase is not the end of the turn
         break;
       case "interrupted": player.current?.stop(m.turn_id); break;
+      case "ownership": // M4: the server says who is speaking with the caller; the answer in progress was already cut by an `interrupted` message
+        setWithStaff(m.owner === "staff");
+        setNotice(m.owner === "staff" ? "A staff member has joined your call. The assistant is paused." : "The assistant is back on the call.");
+        setPhase((p) => (p === "idle" ? p : "listening")); break;
       case "call_end": { // goodbye: let the spoken closing finish playing, then hang up cleanly (no "call ended" error)
         ending.current = true;
-        const finish = () => { if (!ending.current) return; ending.current = false; hangUp(); setNotice("Call ended. Thanks for calling."); };
+        const finish = () => { if (!ending.current) return; ending.current = false; hangUp(); setNotice(m.reason === "ended_by_staff" ? "The call was ended by a staff member. Your conversation is saved in the chat." : "Call ended. Thanks for calling."); };
         if (player.current?.playing) { player.current.onidle = finish; setTimeout(finish, 20000); } else finish();
         break;
       }
@@ -169,14 +174,15 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         <div ref={endRef} />
       </div>
 
+      {withStaff && <p className="banner" role="status">You are speaking with a staff member. Talk as you would on a phone call.</p>}
       {status && BANNERS[status] && <p className={`banner ${status}`} role="status">{BANNERS[status]}</p>}
       {notice && <p className="muted tiny" role="status">{notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
 
       <form className="composer" onSubmit={send}>
         <label className="sr-only" htmlFor="voice-text">Type instead</label>
-        <input id="voice-text" value={text} maxLength={1000} placeholder={live ? "Or type your question" : "Start a call to type or speak"} disabled={!live} onChange={(e) => setText(e.target.value)} />
-        <button className="btn" disabled={!live || !text.trim()}>Send</button>
+        <input id="voice-text" value={text} maxLength={1000} placeholder={!live ? "Start a call to type or speak" : withStaff ? "A staff member is on the call" : "Or type your question"} disabled={!live || withStaff} onChange={(e) => setText(e.target.value)} />
+        <button className="btn" disabled={!live || withStaff || !text.trim()}>Send</button>
       </form>
       <p className="muted tiny">Your voice is processed on this institute’s own server and is not stored; only the text of the conversation is saved, like the chat.</p>
     </section>

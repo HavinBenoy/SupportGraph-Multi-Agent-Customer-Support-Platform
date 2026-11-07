@@ -9,9 +9,10 @@ export type ServerMsg =
   | { type: "interrupted"; turn_id?: number; reason?: string }
   | { type: "transcript"; turn_id?: number; text: string; final?: boolean; ignored?: boolean; segments?: number }
   | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Timing; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
-  | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean }
+  | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean; staff?: boolean }
   | { type: "metrics"; turn_id: number; timing: Timing }   // M3: the four latencies of a spoken answer
-  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; timing?: Timing }
+  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; staff?: boolean; timing?: Timing }
+  | { type: "ownership"; owner: "staff" | "ai"; epoch: number }   // M4: a staff member took the call / handed it back to the assistant
   | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };
@@ -59,7 +60,7 @@ export function parseAudioFrame(buf: ArrayBuffer): { turn: number; seq: number; 
 export type Timing = Record<string, number | boolean | string[] | Record<string, number>>;
 
 export interface Player {
-  begin(turn: number, sampleRate: number): void;   // a new response: whatever else was playing is stopped first
+  begin(turn: number, sampleRate: number, leadMs?: number): void;   // a new response: whatever else was playing is stopped first. leadMs: start-up buffer (a live human voice needs more than a prepared answer)
   push(turn: number, pcm16: ArrayBuffer): void;    // ignored unless `turn` is the response being played
   end(turn: number): void;                         // the server finished sending this response
   stop(turn?: number): void;                       // cancel that response (or the current one); late chunks of it are ignored for good
@@ -83,13 +84,13 @@ export function createPlayer(ctxFactory: () => AudioContext = () => new AudioCon
   const p: Player = {
     get playing() { return active.size > 0 || (cur !== null && !finished); },
     get current() { return cur; },
-    begin(turn, sampleRate) {
+    begin(turn, sampleRate, leadMs = 50) {
       if (retired.has(turn) || turn < latest) return;          // an old or cancelled response must never (re)start
       const reopen = cur === turn;
       if (cur !== null && cur !== turn) { silence(); retired.add(cur); }
       ctx ??= ctxFactory(); rate = sampleRate; latest = turn; cur = turn; finished = false;
       announced = false;
-      nextAt = Math.max(reopen ? nextAt : 0, ctx.currentTime + 0.05);   // the same turn may speak again (a holding phrase, then the answer): queue after it
+      nextAt = Math.max(reopen ? nextAt : 0, ctx.currentTime + leadMs / 1000);   // the same turn may speak again (a holding phrase, then the answer): queue after it
     },
     push(turn, pcm) {
       if (!ctx || turn !== cur || finished) return;

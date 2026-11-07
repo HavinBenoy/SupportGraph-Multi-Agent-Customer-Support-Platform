@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice test-calls
 
 venv:
 	python3 -m venv .venv
@@ -229,3 +229,7 @@ eval:
 
 judge-calibrate:  ## agreement of the judge with human labels; ARGS="--relabel" lets you label the cases yourself
 	cd backend && ../.venv/bin/python scripts/judge_calibrate.py $(ARGS)
+
+test-calls:  ## M4: call sessions, staff live calls, takeover (SQLite, sandbox-safe: fake audio, no models)
+	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/unit/test_m4_embedder_keepalive.py
+

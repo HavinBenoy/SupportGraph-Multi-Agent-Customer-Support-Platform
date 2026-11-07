@@ -244,3 +244,56 @@ describe("VoiceCall: first audible sound ack (M3)", () => {
     expect(acks).toEqual([{ type: "playback", turn_id: 5, state: "started", filler: true }, { type: "playback", turn_id: 5, state: "started", filler: false }]);
   });
 });
+
+describe("VoiceCall: staff takeover (M4)", () => {
+  async function inCall() {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start();
+    await r.open();
+    await r.serverSays(READY);
+    await screen.findByText(/Listening/);
+    return r;
+  }
+
+  it("tells the caller a staff member joined, pauses typing, and stops the assistant's audio that was playing", async () => {
+    const r = await inCall();
+    await r.serverSays({ type: "interrupted", turn_id: 3, reason: "takeover" });
+    expect(r.player.stop).toHaveBeenCalledWith(3);
+    await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
+    expect(await screen.findByText(/A staff member has joined your call\. The assistant is paused\./)).toBeInTheDocument();
+    expect(screen.getByText(/You are speaking with a staff member/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Type instead")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "End call" })).toBeEnabled();      // the caller can always hang up
+  });
+
+  it("plays the staff member's voice as a normal response, with a bigger start-up buffer than the assistant's", async () => {
+    const r = await inCall();
+    await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
+    await r.serverSays({ type: "audio_start", turn_id: 5, sample_rate: 16000, staff: true });
+    expect(r.player.begin).toHaveBeenCalledWith(5, 16000, 150);
+    await r.serverSays({ type: "audio_start", turn_id: 6, sample_rate: 22050 });
+    expect(r.player.begin).toHaveBeenLastCalledWith(6, 22050);                    // the assistant's calls keep their original two-argument form
+    await r.serverSays({ type: "audio_end", turn_id: 5, staff: true });
+    expect(r.player.end).toHaveBeenCalledWith(5);
+  });
+
+  it("when the staff member hands the call back, typing works again and the caller is told", async () => {
+    const r = await inCall();
+    await r.serverSays({ type: "ownership", owner: "staff", epoch: 2 });
+    await r.serverSays({ type: "ownership", owner: "ai", epoch: 4 });
+    expect(await screen.findByText("The assistant is back on the call.")).toBeInTheDocument();
+    expect(screen.queryByText(/You are speaking with a staff member/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Type instead")).toBeEnabled();
+  });
+
+  it("a call ended by staff says so and releases the microphone and socket", async () => {
+    const r = await inCall();
+    await r.serverSays({ type: "call_end", reason: "ended_by_staff" });
+    expect(await screen.findByText(/The call was ended by a staff member/)).toBeInTheDocument();
+    expect(r.micStop).toHaveBeenCalled();
+    expect(r.close).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "End call" })).not.toBeInTheDocument();
+  });
+});

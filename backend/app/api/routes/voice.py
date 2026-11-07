@@ -13,6 +13,8 @@ Protocol (JSON text messages unless noted):
                      {"type":"audio_start","sample_rate"} + binary PCM16 chunks + {"type":"audio_end","interrupted"}   {"type":"interrupted"}
                      {"type":"metrics","turn_id","timing"}   M3: once per spoken answer, the four latencies of the turn (see docs/M3.md)
                      {"type":"error","detail","fatal"?}
+  M4: {"type":"ownership","owner":"staff"|"ai","epoch":N}   a staff member took the call / handed it back to the AI (staff audio arrives as an ordinary
+      response: audio_start with "staff":true, binary frames, audio_end). {"type":"call_end","reason":"ended_by_staff"} when staff end the call.
 
 Identity is decided exactly as for POST /api/chat (token => tenant+student from the signed token; otherwise anonymous in the requested tenant;
 ticket ids are signed and bound to that identity). Chat rate limits, analytics events, escalation, approvals and RBAC are the text path's own code.
@@ -189,11 +191,32 @@ async def voice_ws(ws: WebSocket) -> None:
         except Exception:  # noqa: BLE001 - already closed
             pass
 
-    session = VoiceSession(s=s, vad=vad, stt=stt, tts=tts, run_turn=turn, send_json=ws.send_json, send_bytes=send_bytes, on_end=hang_up,
+    # M4: register the call so staff can see it, listen, take it over and end it. If the calls table is missing (migration 0006 not applied) the
+    # voice line still works exactly as before, without staff features; the problem is logged.
+    hub = ws.app.state.call_hub
+    live = None
+    try:
+        live = await hub.open(tenant_id, ticket_id, student_id if student_id != ANONYMOUS else None, send_json=ws.send_json, send_bytes=send_bytes,
+                              close_caller=hang_up)
+    except Exception as e:  # noqa: BLE001
+        log.warning("call could not be registered for staff (%s); run `make db-migrate`. The call continues without staff features.", type(e).__name__)
+
+    async def on_goodbye() -> None:
+        if live is not None:
+            live.end_hint = "goodbye"
+        await hang_up()
+
+    session = VoiceSession(s=s, vad=vad, stt=stt, tts=tts, run_turn=turn, send_json=live.from_ai_json if live else ws.send_json,
+                           send_bytes=live.from_ai_bytes if live else send_bytes, on_end=on_goodbye, tap_caller=live.tap_caller_audio if live else None,
                            stt_prompt=f"{tenant_cfg.name}. PySpiders, QSpiders, batch, attendance, make-up class, fee, instalment. Please end the call. Cut the call. Hang up. Goodbye.")
+    if live is not None:
+        live.attach_session(session)
     await session.start()
+    if live is not None:
+        await live.mark_connected()
     await ws.send_json({"type": "ready", "ticket_id": ticket_id, "signed_in": student_id != ANONYMOUS, "tenant_name": tenant_cfg.name,
                         "sample_rate": tts.sample_rate})
+    outcome, failed = "caller_disconnected", False
     try:
         while True:
             msg = await ws.receive()
@@ -208,6 +231,7 @@ async def voice_ws(ws: WebSocket) -> None:
                     continue
                 kind = data.get("type")
                 if kind == "stop":
+                    outcome = "caller_ended"
                     break
                 if kind == "playback" and data.get("state") == "ended" and isinstance(data.get("turn_id"), int):
                     session.playback_ended(data["turn_id"])   # the browser finished playing that response
@@ -218,11 +242,21 @@ async def voice_ws(ws: WebSocket) -> None:
                 if kind == "text" and isinstance(data.get("text"), str) and data["text"].strip():
                     await session.submit_text(data["text"].strip()[:MAX_TEXT])
     except SessionLimit as e:
+        outcome = "limit"
         await _fail(ws, str(e), code=1000)
     except WebSocketDisconnect:
         pass
+    except Exception:
+        outcome, failed = "error", True
+        raise
     finally:
-        await session.close()
+        try:
+            await session.close()
+        finally:
+            if live is not None:   # M4: persist how the call ended (a no-op if staff already ended it) and tell any staff attached.
+                # Shielded: even if this handler is cancelled (server shutdown, test client), the end of the call is still recorded.
+                await asyncio.shield(hub.spawn(live.end("caller" if not live.end_hint else "ai", live.end_hint or outcome, failed=failed, close_caller=False,
+                                                        participant="caller" if outcome == "caller_disconnected" and not live.end_hint else None)))
         try:
             await ws.close()
         except Exception:  # noqa: BLE001

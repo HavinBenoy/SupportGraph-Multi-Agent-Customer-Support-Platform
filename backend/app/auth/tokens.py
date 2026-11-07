@@ -47,6 +47,11 @@ def issue_token(secret: str, p: Principal, *, ttl_seconds: int, now: float | Non
 
 
 def verify_token(secret: str, token: str, *, now: float | None = None) -> Principal:
+    return verify_token_exp(secret, token, now=now)[0]
+
+
+def verify_token_exp(secret: str, token: str, *, now: float | None = None) -> tuple[Principal, float]:
+    """verify_token plus the expiry (epoch seconds), for long-lived connections that must close when their token does (M4)."""
     try:
         body, sig = token.split(".")
         if not hmac.compare_digest(sig, _sign(secret, body)):
@@ -56,7 +61,7 @@ def verify_token(secret: str, token: str, *, now: float | None = None) -> Princi
             raise TokenError("expired")
         if d["r"] not in ("student", "staff", "admin"):
             raise TokenError("bad role")
-        return Principal(tenant_id=d["t"], role=d["r"], subject=d["s"], student_id=d.get("st"))
+        return Principal(tenant_id=d["t"], role=d["r"], subject=d["s"], student_id=d.get("st")), float(d["exp"])
     except TokenError:
         raise
     except (ValueError, KeyError, TypeError) as e:

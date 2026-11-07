@@ -356,3 +356,55 @@ class ChatEvent(Base):
     awaiting: Mapped[str] = mapped_column(String(16), default="")
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+CALL_STATUSES = ("created", "active_ai", "staff_takeover", "returning_to_ai", "ended", "failed")
+CALL_OWNERS = ("ai", "staff", "none")
+
+
+class Call(Base):
+    """M4: one voice call and who currently owns its audio. The row is the durable record; the live audio state lives in app.calls.hub.
+
+    Ownership moves only through app.calls.state.transition (an atomic compare-and-set on `status`), and every move bumps `epoch`.
+    Holds identifiers and timestamps only: never audio, never transcripts."""
+
+    __tablename__ = "calls"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("status IN ('created','active_ai','staff_takeover','returning_to_ai','ended','failed')", name="status_valid"),
+        CheckConstraint("owner IN ('ai','staff','none')", name="owner_valid"),
+        Index("ix_calls_tenant_status", "tenant_id", "status"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String(80))
+    student_id: Mapped[str | None] = mapped_column(String(64))      # None = anonymous caller
+    status: Mapped[str] = mapped_column(String(24), default="created")
+    owner: Mapped[str] = mapped_column(String(8), default="none")
+    owner_subject: Mapped[str | None] = mapped_column(String(64))   # the staff account that holds the call while owner = 'staff'
+    epoch: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    takeover_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))    # the latest takeover
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))    # the latest return to the AI
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[str | None] = mapped_column(String(32))
+
+
+class CallEvent(Base):
+    """M4: the audit trail of a call (created, listen started, takeover, returned, ended ...). Ids, actors and safe metadata only."""
+
+    __tablename__ = "call_events"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["calls.tenant_id", "calls.id"]),
+        Index("ix_call_events_call", "tenant_id", "call_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    call_id: Mapped[str] = mapped_column(String(40))
+    kind: Mapped[str] = mapped_column(String(32))
+    actor: Mapped[str] = mapped_column(String(64))                  # staff username, "caller", "ai" or "system"
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

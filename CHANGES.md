@@ -1,3 +1,79 @@
+# M4 - Call sessions, staff Live Calls, listening and human takeover (complete, one change set)
+
+Apply (from the project root): `unzip -o ../supportgraph-m4-complete.zip`, then `make db-migrate` (migration 0006, additive). No new dependency, no model/embedding/voice-engine change, `.env` untouched, nothing deleted. Full write-up (state machine, protocols, failure table, manual test): **docs/M4.md**.
+
+## 1. What was implemented
+- **Call sessions:** every voice call is a durable `calls` row (unique id, tenant, ticket/caller association, status, audio owner, ownership epoch, timestamps for creation, connection, latest takeover, latest return, end) with an audit trail in `call_events`.
+- **Backend lifecycle:** states `created, active_ai, staff_takeover, returning_to_ai, ended, failed`; every move is validated and applied as an atomic compare-and-set; idempotent repeats; one staff member per call; ended/failed calls can never resume.
+- **Staff API:** list, get, listen, take over, return, end, events; staff/admin only; tenant-isolated; no ticket ids, no student data for plain staff.
+- **Real-time audio:** a staff WebSocket per call (auth in the first message, Origin check, expiry and account re-check). Listening (caller + assistant + other staff audio, short transcript lines), takeover (assistant silenced at once; staff microphone to the caller; caller audio to staff only), return to AI (same session, same conversation), end (everything stopped, state persisted, sockets closed).
+- **Ownership multiplexer:** audio is accepted only from the current owner; every ownership change has an epoch; stale or replayed audio is dropped.
+- **Live Calls UI** inside the existing staff console: list with short id, status, start time, running duration, owner, caller reference, who is listening; Listen / Stop listening / Take over / Return to AI / End call driven by server state.
+- **Events:** `created, connected, listen_started, listen_stopped, takeover_requested, takeover_succeeded, takeover_failed, returned_to_ai, ended, failed, participant_disconnected`, each with call id, tenant id, actor, timestamp and safe metadata.
+- **M3.1 fix:** the nomic embedder is now loaded with `keep_alive` (as seconds), so Ollama stops unloading it after 5 idle minutes (your `ollama ps` showed only `qwen3:1.7b`). Note: the first version of this fix (a `"30m"` string) would have crashed the embedder, because `OllamaEmbeddings` takes an integer; the new test with the real `langchain_ollama` caught it before shipping.
+
+## 2. Architecture and design decisions (reasons in docs/M4.md section 2)
+Listening is not a state (only ownership is); `returning_to_ai` is a real state so nobody owns the audio during a hand-back; the database compare-and-set is the referee and a per-call lock orders operations in the process; ownership epochs reject stale audio; a grace period returns an abandoned takeover to the assistant; live state is in the one API process (leftover live rows are marked failed at startup); the voice line keeps working if the tables are missing; the assistant's time limit does not count staff time; event details accept only safe scalar keys; the API shows a ticket *reference*, never the ticket id.
+
+## 3. Call lifecycle and ownership state machine
+`created -> active_ai <-> staff_takeover (via returning_to_ai)`; any live state -> `ended` or `failed`. Table with owners and epochs: docs/M4.md section 3.
+
+## 4. How listening works
+REST `listen` validates; the staff socket authenticates and joins the call's listener set; each listener has its own bounded outbox; leaving never touches the call. docs/M4.md section 4.
+
+## 5. How takeover works
+Database compare-and-set, then ONE synchronous switch (owner, epoch, assistant suspended: speech cut, queues dropped, in-flight reply discarded), then the staff microphone (owner + connection + epoch + size + rate checked per message). docs/M4.md section 5.
+
+## 6. How return-to-AI works
+Holder or admin only; `staff_takeover -> returning_to_ai` (nobody owns audio), staff routing stopped, `returning_to_ai -> active_ai`, assistant resumed in the same session; nothing replayed; a failed hand-back fails the call safely. docs/M4.md section 6.
+
+## 7. Failures and disconnects
+Table of 17 situations (takeover mid-speech, mid-graph, two staff at once, staff tab closed/refresh/token expiry, no microphone, caller disconnect, handler cancelled, return write fails, restart ...): docs/M4.md section 7. During this work a real bug of this class was found and fixed: a cancelled socket handler could leave a dead staff connection attached (now removal and call-end persistence run as tasks that outlive the handler).
+
+## 8. Security and privacy
+Staff/admin only; tenant from the token; 404/"not found" across tenants; WebSocket auth in the first message + Origin + role + tenant-scoped lookup + expiry/account re-check + limits; epoch and connection checks on every microphone message; no audio or transcript stored or logged (tested); `ticket_ref` not ticket id; `student_id` admin-only; no call recording, no voice-based identification. docs/M4.md section 8.
+
+## 9. Database changes
+Migration `0006_calls`: new tables `calls` and `call_events` only (CHECKs, composite keys with `tenant_id`, indexes). Downgrade drops exactly those two. No earlier migration edited, no data touched. `make db-migrate`. If you forget, the voice line still works and the log tells you.
+
+## 10. Dependencies and environment
+No new dependency. Optional `.env` keys (all defaults, in `.env.example`): `SG_CALLS_TAKEOVER_GRACE_S`, `SG_CALLS_MAX_LISTENERS`, `SG_CALLS_LISTENER_QUEUE`, `SG_CALLS_RECHECK_S`, `SG_CALLS_KEEP_ENDED_MINUTES` (and `SG_CALLS_STAFF_FRAME_MAX`). New Make target: `make test-calls`.
+
+## 11. Tests actually executed (sandbox: fake STT/TTS/VAD, synthetic audio, fake browser audio layer)
+All run in the sandbox on the final code (Python 3.13, Postgres 16, vitest, tsc):
+- Backend, SQLite, full suite (`pytest -n 4`): **1494 passed, 34 skipped, 0 failed** (the skips are Postgres-only tests when no `SG_TEST_DATABASE_URL`).
+- Backend, M4 tests alone (`tests/calls`, `tests/voice`): 260 passed, repeated 3 times in a row with 0 failures (after fixing one flaky test, see section 7).
+- Backend, Postgres 16 (`SG_TEST_DATABASE_URL=...`, `tests/db` + `tests/calls/test_calls_api.py`): **49 passed** (includes the 4 migration/CAS tests in `tests/db/test_postgres_m4.py`).
+- Backend with numpy hidden (simulating a machine without `make voice-setup`): 1234 passed, 34 skipped; the voice/call tests are skipped cleanly, nothing else breaks.
+- Frontend: vitest **109 passed** (8 files, incl. 16 in `live.test.ts`, 28 in `LiveCalls.test.tsx`, 4 new in `VoiceCall.test.tsx`); `tsc --noEmit` clean.
+- New test counts: state/service 47, hub 37 (incl. a seeded fuzz of "the caller never hears AI and staff at once"), API/WebSocket 17 (incl. the 11-step end-to-end sequence with a log-leak check), Postgres 4, embedder keep-alive 1 file.
+Not run: `next build`.
+
+## 12. Tests NOT executable in the sandbox
+Real microphone capture and speaker playback (echo, jitter, browser permission prompts, autoplay rules); Whisper/Piper/Silero/Ollama behaviour under a takeover; the 150 ms staff jitter buffer on a real network; a real browser driving the Live Calls tab (the component is tested with a fake audio client); `make test-pg` on your Postgres 16 (the sandbox Postgres 16 was used).
+
+## 13. Exact local commands
+```bash
+cd ~/supportgraph            # your project root
+unzip -o ../supportgraph-m4-complete.zip
+make db-migrate              # 0006_calls
+make test-calls              # fast, SQLite, no models
+make test-fast               # whole backend suite
+make test-pg                 # Postgres (needs make db-up)
+make frontend-test           # vitest
+cd frontend && npx tsc --noEmit
+make api                     # terminal 1
+make frontend-dev            # terminal 2
+```
+
+## 14. Manual browser test
+docs/M4.md section 12 (13 steps: caller window + staff window, listen, take over mid-answer, speak both ways, mute, return and follow-up, staff tab closed -> back to the assistant after ~15 s, second staff refused, end, caller hang-up, events via curl).
+
+## 15. Known limitations
+Real audio is unverified here; one API process; no adaptive jitter buffer; the human part of a call is not transcribed or recorded, so the assistant does not know what staff said after a return; a reconnecting caller gets a new call record on the same ticket; staff transcript lines cover assistant-handled speech only; no M5 dashboard yet. Details: docs/M4.md section 13.
+
+---
+
 # M3 - Evidence-based voice latency (complete, one change set)
 
 Apply (from the project root): `unzip -o ../supportgraph-m3-complete.zip`. No migration, no dependency, no model/embedding change, `.env` untouched. Every behaviour change has a regression test; everything that could cost accuracy is OFF by default. Full write-up, metric reference, configuration, caching rules, troubleshooting and the verification checklist: **docs/M3.md**.

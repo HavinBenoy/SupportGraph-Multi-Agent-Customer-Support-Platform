@@ -169,6 +169,14 @@ class Settings(BaseSettings):
     # cors_origins are allowed too. A client that sends no Origin (scripts, tests) is allowed: it still needs a valid ticket/token to act.
     voice_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # --- M4: staff live calls (listen / take over / return to AI) ---
+    calls_takeover_grace_s: int = Field(default=15, ge=1, le=300)      # staff who took over must have an audio connection attached; if it is gone this long the call goes back to the AI
+    calls_max_listeners: int = Field(default=5, ge=1, le=50)           # staff audio connections per call (each one may listen; at most one speaks)
+    calls_listener_queue: int = Field(default=200, ge=10, le=5000)     # frames buffered per listener; a slow listener drops its OWN oldest audio, never delays the call
+    calls_staff_frame_max: int = Field(default=16 * 1024, ge=1024, le=64 * 1024)   # one staff microphone message (a normal 40 ms frame is 1280 bytes)
+    calls_recheck_s: int = Field(default=30, ge=5, le=600)             # a staff socket re-checks token expiry and that the account is still enabled this often
+    calls_keep_ended_minutes: int = Field(default=30, ge=0, le=1440)   # ended calls stay visible in the list this long
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

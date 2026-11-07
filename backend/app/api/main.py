@@ -15,7 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.ratelimit import SlidingWindow
-from app.api.routes import admin, auth, chat, staff, voice
+from app.calls.hub import CallHub
+from app.api.routes import admin, auth, calls, chat, staff, voice
 from app.config import Settings, get_settings
 from app.graph.checkpointer import get_checkpointer
 from app.graph.support import build_support_graph
@@ -35,6 +36,19 @@ def create_app(settings: Settings | None = None, graph=None) -> FastAPI:
     if len(secret) < MIN_SECRET_LENGTH:
         raise RuntimeError("SG_AUTH_SECRET must be set to at least 32 characters (generate one with `make auth-init`)")
 
+    def _sweep_orphan_calls() -> None:
+        """M4: a call still marked live at startup belongs to a process that no longer exists (the audio lives in memory): mark it failed."""
+        try:
+            from app.calls.service import sweep_orphans
+            from app.db.session import session_scope
+
+            with session_scope() as db:
+                n = sweep_orphans(db)
+            if n:
+                log.warning("marked %d call(s) left over from a previous run as failed", n)
+        except Exception as e:  # noqa: BLE001 - e.g. migration 0006 not applied yet: the API must still start
+            log.warning("could not check for left-over calls (%s); run `make db-migrate`", type(e).__name__)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         for line in describe_llm(s):
@@ -43,18 +57,21 @@ def create_app(settings: Settings | None = None, graph=None) -> FastAPI:
             enforce(s)  # off | warn | strict
             start_llm_warmup(app, s)  # M3: models + triage + retrieval, in the background, one after the other
         app.state.graph = graph or build_support_graph(settings=s, checkpointer=get_checkpointer(s))
+        _sweep_orphan_calls()
         yield
+        await app.state.call_hub.shutdown()   # M4: every live call is ended cleanly (staff sockets told, rows closed)
 
     app = FastAPI(title="SupportGraph API", version="0.5.0", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.settings, app.state.secret = s, secret
     app.state.login_limiter = SlidingWindow(s.login_max_failures, s.login_lockout_seconds)
     app.state.chat_limiter = SlidingWindow(s.chat_max_messages_per_minute, 60)
+    app.state.call_hub = CallHub(s)
     if graph is not None:
         app.state.graph = graph
     origins = [o.strip() for o in s.cors_origins.split(",") if o.strip()]
     if origins:
         app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
-    for r in (auth.router, chat.router, staff.router, admin.router, voice.router):
+    for r in (auth.router, chat.router, staff.router, admin.router, voice.router, calls.router):
         app.include_router(r)
 
     @app.get("/api/health")

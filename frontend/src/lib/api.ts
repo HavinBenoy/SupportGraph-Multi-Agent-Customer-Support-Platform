@@ -1,7 +1,7 @@
 /** Typed client for the SupportGraph API. All calls go to same-origin `/api` (proxied by Next). Errors become `ApiError` with a message
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
-import type { Analytics, Approval, ChatReply, Decision, EscalationDetail, EscalationRow, History, PublicConfig, Role, Session } from "./types";
+import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, History, LiveCall, PublicConfig, Role, Session } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -59,5 +59,7 @@ export const api = {
   resolve: (token: string, id: string, note: string) => call<EscalationDetail>(`/staff/escalations/${encodeURIComponent(id)}/resolve`, { method: "POST", token, body: { note } }),
   approvals: (token: string) => call<Approval[]>("/staff/approvals", { token }),
   decide: (token: string, requestId: string, approve: boolean) => call<Decision>(`/staff/approvals/${encodeURIComponent(requestId)}/decision`, { method: "POST", token, body: { approve } }),
+  calls: (token: string) => call<LiveCall[]>("/staff/calls", { token }),
+  callAction: (token: string, id: string, action: CallAction) => call<LiveCall>(`/staff/calls/${encodeURIComponent(id)}/${action}`, { method: "POST", token }),
   analytics: (token: string, days: number) => call<Analytics>(`/admin/analytics?days=${days}`, { token }),
 };

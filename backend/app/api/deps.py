@@ -7,7 +7,7 @@ from the request body, so a staff member of one tenant cannot name another tenan
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.auth.tokens import Principal, TokenError, verify_token
+from app.auth.tokens import Principal, TokenError, verify_token_exp
 from app.db.models import Account
 from app.db.session import session_scope
 
@@ -25,8 +25,13 @@ def secret_of(request: Request) -> str:
 def principal_from_token(secret: str, token: str) -> Principal:
     """Verify a bearer token AND that its account still exists, is enabled and has the same role/student. Raises HTTPException(401).
     Shared by the HTTP dependency below and the voice WebSocket (which cannot send an Authorization header from a browser)."""
+    return principal_and_expiry(secret, token)[0]
+
+
+def principal_and_expiry(secret: str, token: str) -> tuple[Principal, float]:
+    """principal_from_token plus the token's expiry (epoch seconds): long-lived staff sockets (M4) close when it passes."""
     try:
-        principal = verify_token(secret, token)
+        principal, exp = verify_token_exp(secret, token)
     except TokenError:
         raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"}) from None
     # A valid signature is not enough: the account must still exist and be enabled, so disabling it, or changing its role or student, cuts off a live token at once.
@@ -34,7 +39,7 @@ def principal_from_token(secret: str, token: str) -> Principal:
         acct = db.get(Account, (principal.tenant_id, principal.subject))
         if acct is None or acct.disabled or acct.role != principal.role or acct.student_id != principal.student_id:
             raise HTTPException(401, "invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
-    return principal
+    return principal, exp
 
 
 def optional_principal(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> Principal | None:

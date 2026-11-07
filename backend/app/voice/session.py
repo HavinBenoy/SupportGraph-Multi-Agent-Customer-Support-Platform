@@ -15,6 +15,11 @@ Rules this class guarantees (M2.2; root causes in docs/M2_2.md):
   * barge-in cancels exactly the response that is playing; nothing from it can resume;
   * `speaking` stays true while the audio is still audible in the browser (the server paces the stream at about real time), so barge-in,
     the echo guard and the next response all agree with what the caller hears.
+M4: audio ownership. A session can be SUSPENDED by a staff takeover (`suspend_ai`): the AI is silenced at once (the speech in progress is cut, a graph run
+in flight finishes but its reply is discarded, pending and queued turns are dropped, the endpointer is reset) and caller audio is only forwarded
+(`tap_caller`), never recognised. `resume_ai` hands the call back. Every suspend/resume carries an ownership EPOCH; a response remembers the epoch it
+started under and is never spoken, not even one more frame, after the epoch moved. The graph context (the ticket id) is untouched, so after
+a return the AI continues in the same conversation.
 Everything that decides what the caller may see or do (tenant, student, ticket, RBAC, escalation, approvals) lives in `run_turn`, which the
 route builds from the text chat's own code. This class adds no powers: it converts audio to text and the reply back to audio.
 """
@@ -88,6 +93,7 @@ class _Speech:
     endpoint: float = 0.0                     # monotonic time the caller stopped talking (latency baseline for this turn)
     timing: dict = field(default_factory=dict)   # the turn's shared timing dict (the browser's "started" ack writes into it)
     audible: bool = False                     # the browser already reported the first audible sound of this response
+    epoch: int = 0                            # M4: the ownership epoch this response started under; frames are never sent once it has moved on
 
     @property
     def cancelled(self) -> bool:
@@ -104,6 +110,7 @@ class VoiceSession:
     send_json: SendJson
     send_bytes: SendBytes
     on_end: Callable[[], Awaitable[None]] | None = None   # called after a goodbye has been spoken (the route closes the socket)
+    tap_caller: Callable[[bytes], None] | None = None     # M4: every caller audio message is also offered here (staff listening); must not block or raise
     stt_prompt: str = ""
     turns: int = 0
     speaking: bool = False
@@ -124,6 +131,10 @@ class VoiceSession:
     _latest_content: int = 0                 # id of the newest finalized turn that is a real question/request
     _barged: bool = False
     _closed: bool = False
+    epoch: int = 0                           # M4: ownership epoch (bumped by every ownership change; see app/calls/hub.py)
+    _suspended: bool = False                 # M4: a staff member owns the call's audio: the AI neither hears nor speaks
+    _susp_at: float | None = None            # M4: when the current suspension began (monotonic)
+    _susp_total: float = 0.0                 # M4: seconds the assistant has been suspended; they do not count against the assistant's time limit
 
     def __post_init__(self) -> None:
         self.ep = Endpointer(self.vad, threshold=self.s.voice_vad_threshold, silence_ms=self.s.voice_silence_ms,
@@ -163,10 +174,15 @@ class VoiceSession:
         self._pending = None
 
     def _check_limits(self) -> None:
-        if time.monotonic() - self._started > self.s.voice_max_session_s:
+        if self._active_s() > self.s.voice_max_session_s:
             raise SessionLimit("This call has reached its time limit. Please start a new call.")
         if self.turns >= self.s.voice_max_turns:
             raise SessionLimit("This call has reached its turn limit. Please start a new call.")
+
+    def _active_s(self) -> float:
+        """Seconds of this call the ASSISTANT has had it. The time limit protects the assistant's resources, so a staff takeover does not use it up."""
+        now = time.monotonic()
+        return now - self._started - self._susp_total - ((now - self._susp_at) if self._susp_at is not None else 0.0)
 
     # ---- audio in ----------------------------------------------------------------------------------------------------------
     async def feed_audio(self, pcm16: bytes) -> None:
@@ -178,6 +194,13 @@ class VoiceSession:
         elapsed_ms = (time.monotonic() - self._started) * 1000
         if self._audio_ms > 3 * elapsed_ms + BURST_MS:
             raise SessionLimit("Audio is arriving faster than real time.")
+        if self.tap_caller is not None:          # M4: staff listening sees the caller's audio whoever owns the call
+            try:
+                self.tap_caller(pcm16)
+            except Exception:  # noqa: BLE001 - a listener problem must never touch the call
+                log.warning("tap_caller failed")
+        if self._suspended:                      # M4: a staff member owns the call: the AI does not hear, so nothing is recognised or answered
+            return
         # While the assistant is audible, speech must last `voice_barge_in_ms` to count: coughs, clicks and echo of its own voice do not.
         self.ep.start_ms = max(self._normal_start_ms, self.s.voice_barge_in_ms) if self.speaking else self._normal_start_ms
         for ev in self.ep.feed(pcm16):
@@ -238,6 +261,9 @@ class VoiceSession:
     async def submit_text(self, text: str) -> None:
         """Typed fallback inside a voice call: a finished turn at once; it interrupts whatever is being spoken."""
         self._check_limits()
+        if self._suspended:                      # M4: a staff member is on the call; typed text is not routed to the AI meanwhile
+            await self._send({"type": "notice", "detail": "A staff member is speaking with you now."})
+            return
         t = Turn(id=self._next_id, typed=True, text=text, after_barge_in=self._barged)
         self._next_id += 1
         self._barged = False
@@ -304,6 +330,9 @@ class VoiceSession:
     async def _runner(self) -> None:
         while not self._closed:
             t = await self._queue.get()
+            if self._suspended:                  # M4: queued before the takeover: never answered
+                self.stats["discarded_ownership"] = self.stats.get("discarded_ownership", 0) + 1
+                continue
             try:
                 if await self._process(t):   # the caller said goodbye: the closing has been spoken, end the call
                     await self._send({"type": "call_end", "reason": "goodbye"})
@@ -323,6 +352,7 @@ class VoiceSession:
         """Run one finalized turn through the graph and speak the reply if it is still the current one. True = end the call afterwards."""
         self._check_limits()
         self.turns += 1
+        ep0 = self.epoch                         # M4: the ownership epoch this turn began under
         timing = {"stt_ms": t.stt_ms}
         await self._send({"type": "thinking", "turn_id": t.id})
         async with self._graph_lock:         # never two graph runs for one call
@@ -336,7 +366,7 @@ class VoiceSession:
                 after = self.s.voice_filler_after_ms / 1000
                 if after:                    # M3: a slow answer is preceded by one short, fixed holding phrase (same turn, same sequential playback)
                     done, _ = await asyncio.wait({job}, timeout=after)
-                    if not done and not self._closed and not self.ep.in_speech and not self._is_stale_now(t):
+                    if not done and not self._closed and not self.ep.in_speech and not self._is_stale_now(t) and ep0 == self.epoch and not self._suspended:
                         self.stats["fillers"] = self.stats.get("fillers", 0) + 1
                         await self._speak(t, FILLERS[t.id % len(FILLERS)], timing, filler=True)
                 out = await job
@@ -359,6 +389,10 @@ class VoiceSession:
         self._ev("graph_done", t.id, ms=timing["turn_ms"], nodes=timing.get("nodes"), stages=timing.get("stages"), cold=timing.get("cold"),
                  unaccounted_ms=timing.get("unaccounted_ms"), endpoint_to_graph_done_ms=timing.get("endpoint_to_graph_done_ms"), status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
         await self._wait_for_caller()
+        if self._suspended or ep0 != self.epoch:   # M4: ownership changed while the graph ran: the reply is dropped (never shown, never spoken)
+            self.stats["discarded_ownership"] = self.stats.get("discarded_ownership", 0) + 1
+            self._ev("reply_discarded_ownership", t.id)
+            return False
         stale = self._is_stale(t, out)
         kind = "continuation" if t.merged else "interruption" if t.after_barge_in else (out.get("context") or out.get("intent") or "new")
         info = {"turn_id": t.id, "segments": len(t.segments), "audio_ms": t.audio_ms, "merged": t.merged, "kind": kind}
@@ -368,7 +402,7 @@ class VoiceSession:
             self._ev("reply_stale", t.id, latest=self._latest_content)
             return False
         await self._speak(t, out["reply"], timing, must=out.get("status") in MUST_SPEAK)
-        return bool(out.get("end_call")) and not self._closed and not self._is_stale(t, out)
+        return bool(out.get("end_call")) and not self._closed and not self._is_stale(t, out) and not self._suspended and ep0 == self.epoch
 
     def _is_stale(self, t: Turn, out: dict) -> bool:
         """An ordinary answer is stale once a newer real question exists. Outcomes the caller must hear (a hand-off, an approval) never are."""
@@ -379,6 +413,57 @@ class VoiceSession:
         deadline = time.monotonic() + WAIT_FOR_CALLER_S
         while (self.ep.in_speech or self._pending is not None) and time.monotonic() < deadline and not self._closed:
             await asyncio.sleep(0.05)
+
+    # ---- M4: audio ownership -----------------------------------------------------------------------------------------------
+    @property
+    def suspended(self) -> bool:
+        return self._suspended
+
+    def suspend_ai(self, epoch: int) -> int | None:
+        """A staff member takes the call. Synchronous on purpose (no await, so nothing can interleave): silence the AI NOW.
+        Cuts the response being spoken, drops the pending turn and everything queued, resets the endpointer. A graph run that is still in
+        flight finishes, but `_process` sees the new epoch and drops its reply. Returns the turn id of the response that was cut (or None)."""
+        if self._susp_at is None:
+            self._susp_at = time.monotonic()
+        self._suspended = True
+        self.epoch = epoch
+        cut = None
+        if self._speech is not None and not self._speech.cancelled:
+            cut = self._speech.turn_id
+            self._speech.cancel.set()
+            self._ev("speech_cancelled", cut, reason="takeover")
+        for task in list(self._timers.values()):
+            task.cancel()
+        self._timers.clear()
+        self._pending = None
+        while True:
+            try:
+                self._queue.get_nowait()
+                self.stats["discarded_ownership"] = self.stats.get("discarded_ownership", 0) + 1
+            except asyncio.QueueEmpty:
+                break
+        self.ep.reset()
+        self.speaking = False
+        self._ev("ai_suspended", epoch=epoch)
+        return cut
+
+    def resume_ai(self, epoch: int) -> None:
+        """The staff member hands the call back. The conversation (ticket id, turn counter, graph thread) is exactly where it was."""
+        self.ep.reset()
+        self._barged = False
+        self.epoch = epoch
+        if self._susp_at is not None:
+            self._susp_total += time.monotonic() - self._susp_at
+            self._susp_at = None
+        self._suspended = False
+        self._ev("ai_resumed", epoch=epoch)
+
+    def reserve_turn_id(self) -> int:
+        """A turn id for the staff member's audio. Taken from the same counter as the AI's, so it is above every earlier response and below
+        every later one, and the browser's player (which drops responses older than the newest turn it has seen) plays it."""
+        n = self._next_id
+        self._next_id += 1
+        return n
 
     # ---- audio out ---------------------------------------------------------------------------------------------------------
     async def _interrupt(self, reason: str) -> None:
@@ -422,9 +507,9 @@ class VoiceSession:
             self.stats["overlap_prevented"] += 1
             self._ev("overlap_prevented", t.id)
         async with self._speak_lock:
-            if self._closed or (self._is_stale_now(t) and not must):
+            if self._closed or self._suspended or (self._is_stale_now(t) and not must):
                 return
-            sp = self._speech = _Speech(turn_id=t.id, filler=filler, endpoint=t.last_endpoint, timing=timing)
+            sp = self._speech = _Speech(turn_id=t.id, filler=filler, endpoint=t.last_endpoint, timing=timing, epoch=self.epoch)
             self.speaking = True
             rate = self.tts.sample_rate
             t0 = time.perf_counter()
@@ -468,6 +553,9 @@ class VoiceSession:
                             if pace:             # stay at most `lead` ahead of playback, so a cancel really cuts the audio the caller hears
                                 await self._wait(sp.cancel, sent_ms / 1000 - (time.perf_counter() - t0) - lead)
                             if sp.cancelled:
+                                break
+                            if sp.epoch != self.epoch or self._suspended:   # M4: ownership moved on: not one more AI frame
+                                sp.cancel.set()
                                 break
                             await self.send_bytes(frame_audio(t.id, seq, piece))
                             seq += 1

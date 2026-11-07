@@ -28,3 +28,13 @@ export interface Analytics {
   tickets_by_status: Record<string, number>;
   notes: string[];
 }
+
+/** M4: one call as the staff API describes it. `ticket_ref` is a short reference, never the ticket id; `student_id` only comes for admins. */
+export type CallStatus = "created" | "active_ai" | "staff_takeover" | "returning_to_ai" | "ended" | "failed";
+export interface LiveCall {
+  id: string; short_id: string; status: CallStatus; owner: "ai" | "staff" | "none"; owner_staff: string | null; epoch: number;
+  ticket_ref: string; caller: "student" | "anonymous"; student_id?: string;
+  created_at: string; connected_at: string | null; takeover_at: string | null; returned_at: string | null; ended_at: string | null; end_reason: string | null;
+  duration_s: number; live: boolean; listeners: number; listening_staff: string[]; mic_open: boolean; is_mine: boolean; listening: boolean;
+}
+export type CallAction = "listen" | "takeover" | "return" | "end";

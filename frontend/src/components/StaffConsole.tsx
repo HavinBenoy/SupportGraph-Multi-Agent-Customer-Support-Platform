@@ -4,8 +4,9 @@ import { ApiError } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Approval, EscalationDetail, EscalationRow } from "@/lib/types";
+import { LiveCalls } from "./LiveCalls";
 
-type Tab = "escalations" | "approvals";
+type Tab = "escalations" | "approvals" | "calls";
 const STATUSES = ["open", "claimed", "resolved"] as const;
 const when = (iso: string) => new Date(iso).toLocaleString();
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
@@ -18,8 +19,9 @@ export function StaffConsole() {
       <div role="tablist" aria-label="Queues" className="tabs">
         <button role="tab" aria-selected={tab === "escalations"} onClick={() => setTab("escalations")}>Escalations</button>
         <button role="tab" aria-selected={tab === "approvals"} onClick={() => setTab("approvals")}>Make-up approvals</button>
+        <button role="tab" aria-selected={tab === "calls"} onClick={() => setTab("calls")}>Live calls</button>
       </div>
-      {tab === "escalations" ? <Escalations /> : <Approvals />}
+      {tab === "escalations" ? <Escalations /> : tab === "approvals" ? <Approvals /> : <LiveCalls />}
     </div>
   );
 }

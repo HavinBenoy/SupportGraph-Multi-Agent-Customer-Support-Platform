@@ -52,3 +52,22 @@ describe("api client", () => {
     expect(loadSession()).toBeNull();
   });
 });
+
+describe("live calls API (M4)", () => {
+  it("lists calls and posts an action to the right path with the bearer token, and surfaces the server's message on a refusal", async () => {
+    const calls: [string, RequestInit | undefined][] = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string, init?: RequestInit) => {
+      calls.push([u, init]);
+      return u.endsWith("/takeover") ? new Response(JSON.stringify({ detail: "another staff member has already taken over this call" }), { status: 409 }) : new Response("[]", { status: 200 });
+    }));
+    const { api, ApiError } = await import("./api");
+    await api.calls("tok");
+    expect(calls[0][0]).toBe("/api/staff/calls");
+    expect((calls[0][1]!.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+    await expect(api.callAction("tok", "c_1", "takeover")).rejects.toMatchObject({ status: 409, message: "another staff member has already taken over this call" });
+    expect(calls[1][0]).toBe("/api/staff/calls/c_1/takeover");
+    expect(calls[1][1]!.method).toBe("POST");
+    expect(ApiError).toBeDefined();
+    vi.unstubAllGlobals();
+  });
+});

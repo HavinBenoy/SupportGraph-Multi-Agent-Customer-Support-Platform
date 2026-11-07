@@ -109,6 +109,18 @@ def _prefix_tag(query_prefix: str, document_prefix: str) -> str:
     return "@px-" + hashlib.sha1(f"{query_prefix}|{document_prefix}".encode()).hexdigest()[:6]
 
 
+def keep_alive_seconds(value: str) -> int:
+    """Ollama's keep_alive as a whole number of seconds: "30m" -> 1800, "1h" -> 3600, "90s" -> 90, "300" -> 300, "-1" -> -1 (forever), "0" -> 0 (unload now)."""
+    v = str(value).strip().lower()
+    units = {"s": 1, "m": 60, "h": 3600}
+    try:
+        if v and v[-1] in units:
+            return int(float(v[:-1]) * units[v[-1]])
+        return int(float(v))
+    except ValueError:
+        raise ValueError(f"SG_LLM_KEEP_ALIVE must look like 30m, 1h, 90s, 300 or -1, not {value!r}") from None
+
+
 def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
     """Return the configured embedding model, wrapped so vectors are always the width the database stores.
 
@@ -134,7 +146,8 @@ def get_embedding_client(settings: Settings | None = None) -> EmbeddingClient:
             from langchain_ollama import OllamaEmbeddings
         except ImportError as e:
             raise RuntimeError('Ollama provider needs: pip install -e "backend[ollama]"') from e
-        inner = OllamaEmbeddings(model=s.embedding_model, base_url=s.embedding_base_url)
+        # M3.1: without keep_alive Ollama unloads the embedder after its 5-minute default. OllamaEmbeddings takes SECONDS (an int), chat models take "30m".
+        inner = OllamaEmbeddings(model=s.embedding_model, base_url=s.embedding_base_url, keep_alive=keep_alive_seconds(s.llm_keep_alive))
         return EmbeddingClient(inner=inner, name=f"ollama:{s.embedding_model}{tag}", **common)
 
     if s.embedding_provider == "openai_compat":
