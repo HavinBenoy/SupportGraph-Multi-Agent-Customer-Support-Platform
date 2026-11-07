@@ -40,7 +40,8 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"(?:let'?s|we can|we may|i think we can) (?:wrap(?: this)? up|end(?: it)? here|stop here|finish here|call it a day)|(?:we can |you can )?wrap(?: this)? up|"
         r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|proceed to|feel free to|also)\s+)*(?:please\s+)?(?:go ahead and )?(?:hang ?up|disconnect)(?: (?:the|this|our|my|that)(?: (?:call|chat|conversation|session|line|phone))?)?(?: now| here| for now| please)*|"
         r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:i|we)\s+(?:want|would like|wanna|'d like) (?:you )?to\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|proceed to|feel free to|also)\s+)*(?:please\s+)?(?:go ahead and )?(?:stop|end|finish|cut|close|drop|terminate|kill)(?: (?:off|up|out))?(?: (?:the|this|our|my|that|it))?"
-        r" (?:call|chat|conversation|session|line|cord|phone|connection|call here)(?: (?:now|here|for now|off|please))*|"
+        r" (?:call|chat|conversation|session|line|cord|phone|connection|call here|gore|coal|caul|cull|calls)(?: (?:now|here|for now|off|please))*|"
+        r"(?:(?:let me|let'?s|lets|i (?:want|would like|wanna|need|'d like) to|i'?m going to|i will|we can|we may|you can|you may|please|kindly|just|now)\s+)+(?:end|finish|wrap up|wrap|close|conclude|terminate)(?: (?:up|off))?(?: (?:this|it|here|now|the|our|call|chat|conversation))+(?: (?:now|here|for now|please))*|"
         r"(?:(?:you|u)\s+)?(?:(?:can|may|could|would|should|will|might)\s+)?(?:(?:just|please|kindly|now|simply|go ahead and|proceed to|feel free to|also)\s+)*(?:please\s+)?(?:go ahead and )?cut (?:it|this|that)(?: (?:off|out|short))(?: now| here| for now| please)*|"
         r"(?:you|u)\s+(?:can|may|could|would)\s+(?:(?:just|please|kindly|now|simply|go ahead and|proceed to|feel free to|also)\s+)*(?:please\s+)?(?:go|leave)(?: now)?|(?:i )?(?:have to|need to|got to|gotta) (?:go|leave|run|hang up))$", re.I)),
     (THANKS, re.compile(
@@ -73,7 +74,7 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"^(?:hi+|hello+|hey+|hiya|hi there|hello there|hey there|howdy|yo|namaste|namaskar|good (?:morning|afternoon|evening|day)|greetings|hi,? (?:how are you|good (?:morning|afternoon|evening))|"
         r"(?:hi|hello|hey)[\s,]+(?:how (?:are|r) (?:you|u)(?: (?:doing|today))?|how'?s it going)|"
         r"how (?:are|r) (?:you|u)(?: (?:doing|today))?|how'?s it going|how do you do|what'?s up|"
-        r"(?:hello|hi|hey)?[\s,?]*(?:is (?:anyone|anybody|someone) (?:there|here|available|listening)|are you (?:there|here|listening|available|awake)|can you (?:hear|understand) me|do you (?:hear|understand) me|am i audible|can you hear me (?:now|ok(?:ay)?|clearly)|hello[\s,?]+(?:hello[\s,?]*)+)|"
+        r"(?:hello|hi|hey)?[\s,?]*(?:is (?:anyone|anybody|someone) (?:there|here|available|listening)|are you (?:there|here|listening|available|awake)|can you (?:hear|understand|get|follow) me|do you (?:hear|understand|get|follow) me|(?:are|r) you (?:getting|understanding|following|hearing) me|can you (?:hear|understand) what i(?:'m| am) (?:saying|asking)|am i audible|can you hear me (?:now|ok(?:ay)?|clearly)|hello[\s,?]+(?:hello[\s,?]*)+)|"
         r"(?:hello|hi|hey)[\s,]*(?:is (?:anyone|anybody|someone) (?:there|here)|can you hear me))$", re.I)),
 ]
 # Sentences that are only a lead-in to the greeting ("Hi, this is Meera"): not matched here, so the normal flow handles them.

@@ -495,7 +495,8 @@ def test_m22_playback_ack_is_accepted_and_the_call_continues(api):  # noqa: F811
 
 
 @pytest.mark.parametrize("said", ["Okay, I think that's it.", "No thanks, you may proceed to cut the call.", "Thanks for having me. Bye-bye.",
-                                  "You can end the call it's file."])
+                                  "You can end the call it's file.", "Okay, thank you so much. Let me end this. Please cut the call.",
+                                  "Please cut the gore."])
 def test_m22_real_call_goodbyes_end_the_call_after_the_closing(api, said):  # noqa: F811
     setup_parts(api, [said])
     with api.websocket_connect("/api/voice/ws") as ws:

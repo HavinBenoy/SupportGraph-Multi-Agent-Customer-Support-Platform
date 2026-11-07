@@ -132,3 +132,12 @@ def test_signed_in_records_questions_are_unchanged_by_context(graph):
     ask(graph, FEE, student="stu_asha")
     out = ask(graph, "Show me my attendance for PYF-101", student="stu_asha")
     assert out["context_kind"] == "" and out["route"] == "action"
+
+
+@pytest.mark.parametrize("text", ["Let me end this.", "Okay, thank you so much. Let me end this.", "Is that all?", "Tell me this again"])
+def test_a_bare_pronoun_does_not_borrow_the_previous_course(text):
+    assert resolve(text, [FEE]) == (text, "")
+
+
+def test_a_pronoun_with_something_being_asked_still_follows_up():
+    assert resolve("Does it have a certificate?", [FEE]) == ("Does it have a certificate for Python Full Stack?", FOLLOW_UP)

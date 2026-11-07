@@ -113,6 +113,19 @@ describe("VoiceCall", () => {
     expect(screen.getByText(/Not spoken/)).toBeInTheDocument();
   });
 
+  it("a second call (turn ids restart at 1) never overwrites the first call's transcript", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays({ type: "transcript", turn_id: 1, text: "first call question", final: true });
+    await userEvent.click(screen.getByRole("button", { name: "End call" }));
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays({ type: "transcript", turn_id: 1, text: "second call question", final: false });
+    await r.serverSays({ type: "transcript", turn_id: 1, text: "second call question", final: true });
+    expect(screen.getByText("first call question")).toBeInTheDocument();
+    expect(screen.getByText("second call question")).toBeInTheDocument();
+  });
+
   it("signed-in student: token goes in the start message and the saved ticket is resumed", async () => {
     signedIn("student", "asha");
     sessionStorage.setItem("sg.ticket.t1.asha", "s-7.sig");

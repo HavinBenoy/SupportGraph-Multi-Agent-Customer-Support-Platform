@@ -1,3 +1,32 @@
+# M2.2.1 - Final M2.2 fixes from your second real call (closes M2)
+
+Apply: `unzip -o ../supportgraph-m2-2-1.zip` over the project (M2.2 already applied). No migration, dependency or model change; `.env`/databases untouched.
+
+## What your transcript showed, and the cause of each
+| Symptom | Cause | Fix |
+|---|---|---|
+| After the first call, your side of the conversation was not printed (you could not tell whether it heard you) | **My M2.2 bug.** Transcript lines were keyed by turn id, and turn ids restart at 1 on every call. Call 2's "turn 1" matched call 1's "turn 1" and rewrote that old line in place, so new speech never appeared (and the chat looked scrambled: replies without "You" lines, or the wrong sentence next to a reply) | line keys now include the call number; test: a second call never overwrites the first call's transcript |
+| "Okay, thank you so much. Let me end this. Please cut the call." was answered with the fee | "Let me end this" was not a recognised goodbye, so the whole utterance went to the knowledge flow (and the old context rule treated "this" as a reference to the earlier fee question) | `let me / let's / I want to / we can ... end this / it / here / the call` are goodbyes (whole utterance only); a bare "this"/"it" no longer borrows the previous course, only a pronoun together with something being asked ("Does it have a certificate?") does |
+| "Please cut the gore." -> "I couldn't find that" | speech recognition heard "call" as "gore" | after a command verb + "the", `gore/coal/caul/cull` count as the call word (whole utterance only: "cut the core", "what is the cold fee" are not goodbyes); the Whisper prompt now contains "Please end the call. Cut the call. Hang up. Goodbye." to bias recognition |
+| "Do you get me and not understanding ...?" -> escalated to "management" | no rule for "do you understand me"; the model classified the complaint as a person-needed case | "do you get/understand/follow me", "are you getting/understanding me", "can you understand what I'm saying" are handled like "can you hear me" (no escalation). The long garbled sentence itself is still the model's call |
+| Several "I couldn't find that in our help articles" replies in call 2 | consequence of the above: unrecognised or misheard command-like speech reaches the knowledge flow, which abstains correctly (no guessing) | covered by the fixes above; abstention itself is unchanged |
+Note: because of the first bug, the pairing of "You" lines and replies in your pasted chat is not reliable; the replies themselves were produced correctly.
+
+## Results (sandbox)
+SQLite 1271 passed / 30 skipped; PostgreSQL 1299 passed / 2 skipped; frontend 55 passed, `tsc` clean. New tests: `test_intents.py` (+2 groups), `test_m22_context.py` (+2), `test_voice_ws.py` (+2 goodbyes over the real socket), `VoiceCall.test.tsx` (second call). Your local results for M2.2 (SQLite 1244/31, PostgreSQL 1272/3, frontend 54, e2e 22/22 with 0 hard failures) were already green.
+
+## Run locally
+```
+unzip -o ../supportgraph-m2-2-1.zip
+make test-fast && git diff --check && make test-pg
+cd frontend && npm test && npx tsc --noEmit && cd .. && make e2e-local
+```
+Then one real call: end it, start a second call, and confirm your lines appear in the transcript; say "Let me end this, please cut the call".
+
+## Still not covered
+Real microphone/speaker timing and recognition quality (see docs/M2_2.md). If recognition mishears a command in some other way, say what you saw and I will add it, but phrase lists cannot cover every mishearing: STT quality is the limit.
+
+---
 # M2.2 - Voice turn management, utterance aggregation, sequential response playback
 
 Apply: `unzip -o ../supportgraph-m2-2.zip` over the project (M2.1.1 already applied). No migration, no schema change, no new dependency, no model change. `.env`, databases and volumes untouched (new settings are optional, defaults below; `.env.example` lists them commented out).

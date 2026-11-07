@@ -7,7 +7,7 @@ import { browserMic, browserSocket, createPlayer, parseAudioFrame, voiceWsUrl, t
 import { LoginForm } from "./LoginForm";
 
 type Phase = "idle" | "connecting" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
-interface Line { id: number; turn?: number; role: "user" | "assistant"; text: string; citations?: Citation[]; status?: ChatStatus; stale?: boolean; partial?: boolean }
+interface Line { id: number; turn?: string; role: "user" | "assistant"; text: string; citations?: Citation[]; status?: ChatStatus; stale?: boolean; partial?: boolean }
 let nextId = 1;
 
 const PHASE_LABEL: Record<Phase, string> = {
@@ -39,7 +39,9 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   const [muted, setMuted] = useState(false);
   const [text, setText] = useState("");
   const [showLogin, setShowLogin] = useState(false);
-  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false);
+  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false), callNo = useRef(0);
+  // Turn ids restart at 1 on every call: line keys include the call number so call 2 can never overwrite call 1's transcript.
+  const key = (turn?: number) => (turn === undefined ? undefined : `${callNo.current}:${turn}`);
   const live = phase !== "idle";
   const tenantArg = tenant ?? cfg?.tenant_id;
 
@@ -73,15 +75,15 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         if (m.ignored || !m.text) { setPhase("listening"); break; }
         // one line per user turn: a partial transcript is updated in place when the same turn is merged or finalised
         setLines((l) => {
-          const i = m.turn_id === undefined ? -1 : l.findIndex((x) => x.role === "user" && x.turn === m.turn_id);
-          if (i < 0) return [...l, { id: nextId++, turn: m.turn_id, role: "user", text: m.text, partial: m.final === false }];
+          const i = m.turn_id === undefined ? -1 : l.findIndex((x) => x.role === "user" && x.turn === key(m.turn_id));
+          if (i < 0) return [...l, { id: nextId++, turn: key(m.turn_id), role: "user", text: m.text, partial: m.final === false }];
           const copy = l.slice(); copy[i] = { ...copy[i], text: m.text, partial: m.final === false }; return copy;
         });
         break;
       case "thinking": setPhase("thinking"); setNotice(null); break;
       case "reply":
         setStatus(m.status as ChatStatus);
-        setLines((l) => [...l, { id: nextId++, turn: m.turn_id, role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus, stale: m.stale }]);
+        setLines((l) => [...l, { id: nextId++, turn: key(m.turn_id), role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus, stale: m.stale }]);
         setPhase(m.stale ? "listening" : "speaking"); break;      // a stale answer (a newer question exists) is shown but never spoken
       case "audio_start": if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
       case "audio_end":
@@ -100,6 +102,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   }, [storeKey, hangUp]);
 
   async function startCall() {
+    callNo.current += 1;
     setError(null); setNotice(null); setPhase("connecting");
     try {
       player.current = deps.player();

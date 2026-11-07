@@ -121,3 +121,22 @@ def test_m22_real_call_phrases(text, want):
 ])
 def test_m22_widened_phrases_still_leave_real_requests_alone(text):
     assert detect_intent(text) is None
+
+
+# ---- M2.2.1: the phrases from the second real call ----------------------------------------------------------------------------------------
+@pytest.mark.parametrize("text,want", [
+    ("Okay, thank you so much. Let me end this. Please cut the call.", "goodbye"),
+    ("Let me end this", "goodbye"), ("let's end this call", "goodbye"), ("I want to end this", "goodbye"), ("we can end it here", "goodbye"),
+    ("Please cut the gore.", "goodbye"), ("please end the coal", "goodbye"),           # speech recognition hearing "call" wrongly
+    ("Do you get me?", "greeting"), ("Are you understanding me", "greeting"), ("Can you understand what I'm saying?", "greeting"),
+])
+def test_m221_second_call_phrases(text, want):
+    assert detect_intent(text) == want
+
+
+@pytest.mark.parametrize("text", [
+    "how do I end this subscription", "let me end the fee payment", "how do I end the course", "end this", "stop this", "cut the core",
+    "Let me end this and tell me the fee", "what is the cold fee", "do you get weekend batches",
+])
+def test_m221_look_alikes_are_not_call_ending(text):
+    assert detect_intent(text) is None

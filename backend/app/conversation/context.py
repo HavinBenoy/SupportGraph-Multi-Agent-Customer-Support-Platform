@@ -112,7 +112,8 @@ def resolve(text: str, history: list[str], looks_like_injection=lambda _t: False
                 return q, CORRECTION       # the same topic again: nothing to change
     if extract_topic(text) is not None or len(text.split()) > MAX_FOLLOWUP_WORDS:
         return text, ""                    # it names its own subject: a new question
-    if not (_START.search(text) or _REF.search(text) or (_ASKS.search(text) and len(text.split()) <= 7)):
+    # A bare "this"/"it" proves nothing ("Let me end this"): a pronoun only counts together with something the caller is asking about.
+    if not (_START.search(text) or (_REF.search(text) and _ASKS.search(text)) or (_ASKS.search(text) and len(text.split()) <= 7)):
         return text, ""
     for q in prior:
         topic = extract_topic(q)

@@ -161,7 +161,7 @@ async def voice_ws(ws: WebSocket) -> None:
             pass
 
     session = VoiceSession(s=s, vad=vad, stt=stt, tts=tts, run_turn=turn, send_json=ws.send_json, send_bytes=send_bytes, on_end=hang_up,
-                           stt_prompt=f"{tenant_cfg.name}. PySpiders, QSpiders, batch, attendance, make-up class, fee, instalment.")
+                           stt_prompt=f"{tenant_cfg.name}. PySpiders, QSpiders, batch, attendance, make-up class, fee, instalment. Please end the call. Cut the call. Hang up. Goodbye.")
     await session.start()
     await ws.send_json({"type": "ready", "ticket_id": ticket_id, "signed_in": student_id != ANONYMOUS, "tenant_name": tenant_cfg.name,
                         "sample_rate": tts.sample_rate})
