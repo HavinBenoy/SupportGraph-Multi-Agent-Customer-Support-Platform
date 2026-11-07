@@ -9,8 +9,8 @@ export type ServerMsg =
   | { type: "interrupted"; turn_id?: number; reason?: string }
   | { type: "transcript"; turn_id?: number; text: string; final?: boolean; ignored?: boolean; segments?: number }
   | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Record<string, number>; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
-  | { type: "audio_start"; turn_id?: number; sample_rate: number }
-  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; timing?: Record<string, number> }
+  | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean }
+  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; timing?: Record<string, number> }
   | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };
@@ -80,9 +80,10 @@ export function createPlayer(ctxFactory: () => AudioContext = () => new AudioCon
     get current() { return cur; },
     begin(turn, sampleRate) {
       if (retired.has(turn) || turn < latest) return;          // an old or cancelled response must never (re)start
+      const reopen = cur === turn;
       if (cur !== null && cur !== turn) { silence(); retired.add(cur); }
       ctx ??= ctxFactory(); rate = sampleRate; latest = turn; cur = turn; finished = false;
-      nextAt = ctx.currentTime + 0.05;
+      nextAt = Math.max(reopen ? nextAt : 0, ctx.currentTime + 0.05);   // the same turn may speak again (a holding phrase, then the answer): queue after it
     },
     push(turn, pcm) {
       if (!ctx || turn !== cur || finished) return;

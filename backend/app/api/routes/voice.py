@@ -64,6 +64,30 @@ def _components(app, s):
     return app.state.voice_parts
 
 
+def _warm(app, s) -> None:
+    """Load Whisper, Piper and Silero and run each once, so the FIRST real question does not pay the model-loading time (M3).
+    Runs in a background thread when the voice page asks for /status; harmless to repeat; real provider only."""
+    if s.voice_provider != "real" or getattr(app.state, "voice_warm", None) is not None:
+        return
+    app.state.voice_warm = "running"
+
+    def work() -> None:
+        try:
+            vad_factory, stt, tts = _components(app, s)
+            vad_factory()
+            getattr(tts, "sample_rate")
+            for _ in tts.synthesize("Okay."):
+                pass
+            stt.transcribe(b"\x00\x00" * 16000)
+            app.state.voice_warm = "ready"
+        except Exception as e:  # noqa: BLE001 - a missing model is reported by /status and at call start; never crash here
+            log.warning("voice warm-up failed (%s: %s)", type(e).__name__, e)
+            app.state.voice_warm = "failed"
+
+    import threading
+    threading.Thread(target=work, name="voice-warm", daemon=True).start()
+
+
 @router.get("/status")
 def voice_status(request: Request) -> dict:
     """Is the voice line usable? Does not load anything heavy except checking the pieces exist."""
@@ -87,7 +111,9 @@ def voice_status(request: Request) -> dict:
             import os
             if not os.path.isfile(s.voice_tts_voice):
                 problems.append(f"Piper voice file not found: {s.voice_tts_voice}")
-    return {"enabled": True, "ready": not problems, "problems": problems, "provider": s.voice_provider, "stt_model": s.voice_stt_model}
+    if not problems:
+        _warm(request.app, s)
+    return {"enabled": True, "ready": not problems, "warm": getattr(request.app.state, "voice_warm", None), "problems": problems, "provider": s.voice_provider, "stt_model": s.voice_stt_model}
 
 
 async def _fail(ws: WebSocket, detail: str, code: int = 1008) -> None:

@@ -71,6 +71,8 @@ _RULES: list[tuple[str, re.Pattern]] = [
     (AFFIRM, re.compile(
         r"^(?:yes|yeah|yea|yep|yup|ya|aye|of course|sure thing|absolutely|definitely|certainly|go ahead|please do|do it|that'?s (?:right|correct)|that is (?:right|correct)|correct|exactly|indeed|affirmative|yes please|yes sure|yeah sure|yes of course|yeah of course|why not)$", re.I)),
     (GREETING, re.compile(
+        r"^(?:(?:sorry|hello|hi|hey|no|okay|ok)[\s,]+)*(?:(?:i|we) (?:said|asked|meant|was asking|am asking|wanted to know)[\s,]+)?(?:whether |if |that )?(?:am i|are we|i'?m|i am|we are|we'?re) (?:audible|clear|coming through|loud enough)(?:[\s,]+(?:or not|to you|now|clearly|properly))*$", re.I)),
+    (GREETING, re.compile(
         r"^(?:hi+|hello+|hey+|hiya|hi there|hello there|hey there|howdy|yo|namaste|namaskar|good (?:morning|afternoon|evening|day)|greetings|hi,? (?:how are you|good (?:morning|afternoon|evening))|"
         r"(?:hi|hello|hey)[\s,]+(?:how (?:are|r) (?:you|u)(?: (?:doing|today))?|how'?s it going)|"
         r"how (?:are|r) (?:you|u)(?: (?:doing|today))?|how'?s it going|how do you do|what'?s up|"
@@ -78,6 +80,30 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"(?:hello|hi|hey)[\s,]*(?:is (?:anyone|anybody|someone) (?:there|here)|can you hear me))$", re.I)),
 ]
 # Sentences that are only a lead-in to the greeting ("Hi, this is Meera"): not matched here, so the normal flow handles them.
+
+
+# M2.2.2: a sentence made ONLY of call-ending vocabulary is an instruction to end the call, however it is phrased ("let me end this session",
+# "cut the call and call them directly"). Speech recognition often garbles the verb ("set the call", "send the conversation"): those weak
+# verbs count only when the same utterance also says goodbye/thanks/"that's it". Any other word ("fee", "course", "how", "enrolment") breaks it.
+WEAK = "goodbye?"
+_CALLWORDS = frozenset({"call", "calls", "chat", "session", "conversation", "line", "cord", "phone", "connection", "gore", "coal", "caul", "cull"})
+_STRONG = frozenset({"end", "cut", "stop", "close", "finish", "drop", "terminate", "kill", "disconnect", "conclude", "wrap"})
+_WEAK_VERBS = frozenset({"set", "send", "get", "cat", "cap", "bend", "spend", "sent"})
+_GLUE = frozenset({"please", "kindly", "just", "you", "can", "may", "could", "would", "will", "might", "let's", "lets", "let", "me", "us", "we", "i", "want",
+                   "to", "like", "now", "then", "the", "this", "that", "our", "my", "it", "here", "and", "them", "directly", "up", "off", "out", "for", "today",
+                   "sir", "okay", "ok", "thanks", "thank", "you're", "i'd", "i'll", "i'm", "going", "need", "wanna", "a", "an", "is", "it's", "that's", "go",
+                   "ahead", "feel", "free", "proceed", "so", "fine", "all", "right", "also", "now", "myself", "yourself", "own"})
+
+
+def _call_ending(s: str) -> str | None:
+    words = [w for w in re.split(r"[\s,?-]+", s) if w]
+    if not 2 <= len(words) <= 14 or not any(w in _CALLWORDS for w in words):
+        return None
+    if any(w not in _GLUE and w not in _CALLWORDS and w not in _STRONG and w not in _WEAK_VERBS for w in words):
+        return None
+    if any(w in _STRONG for w in words):
+        return GOODBYE
+    return WEAK if any(w in _WEAK_VERBS for w in words) else None
 
 
 def _clean(sentence: str) -> str:
@@ -107,6 +133,10 @@ def _classify(sentence: str) -> str | None:
         for kind, pattern in _RULES:
             if pattern.match(cand):
                 return kind
+    for cand in candidates:
+        kind = _call_ending(cand)
+        if kind:
+            return kind
     return None  # filler only ("hmm", "um"): not an intent, the normal flow decides
 
 
@@ -134,6 +164,10 @@ def detect_intent(text: str) -> str | None:
             return None  # a sentence with real content: not a pure pleasantry
         if k:
             kinds.append(k)
+    if WEAK in kinds:   # a garbled-looking command needs a clear closing signal in the same utterance
+        if not any(k in (GOODBYE, THANKS, ACK) for k in kinds):
+            return None
+        kinds = [GOODBYE if k == WEAK else k for k in kinds]
     if not kinds:
         return None
     for want in _PRIORITY:

@@ -140,3 +140,27 @@ def test_m221_second_call_phrases(text, want):
 ])
 def test_m221_look_alikes_are_not_call_ending(text):
     assert detect_intent(text) is None
+
+
+# ---- M2.2.2: the third real call --------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "Okay, thank you. That's it. Please set the call.", "Okay. Please cut the call and call them directly.", "Okay, you may end the call. It's fine.",
+    "Okay, let's send the conversation. That's it. Thank you.", "Okay, that's everything. Let's end this session.", "Let's end the call. Please end the call.",
+    "Okay, please end the chat and thank you", "that's it, kill the line",
+])
+def test_m222_call_ending_phrases_from_the_third_call(text):
+    assert detect_intent(text) == "goodbye"
+
+
+@pytest.mark.parametrize("text", [
+    "Please set the call", "let's send the conversation", "Please set the call for tomorrow", "can you call me", "how do I end the call",
+    "stop the call recording", "what is the fee of the call center", "send me the call link. thanks", "when does the call start",
+    "end the call and tell me the fee",
+])
+def test_m222_a_garbled_verb_alone_or_any_other_content_is_not_a_goodbye(text):
+    assert detect_intent(text) is None
+
+
+@pytest.mark.parametrize("text", ["am I audible", "Sorry, I said whether I'm audible or not.", "are we clear"])
+def test_m222_audibility_checks_are_handled_without_the_knowledge_base(text):
+    assert detect_intent(text) in ("greeting", "interruption", "acknowledgement")

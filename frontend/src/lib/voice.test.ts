@@ -102,3 +102,14 @@ describe("player: one response at a time (M2.2)", () => {
     expect(played).toEqual([]);
   });
 });
+
+describe("player: a holding phrase and the answer of the same turn (M3)", () => {
+  it("the answer queues after the holding phrase instead of on top of it, and is not cut", () => {
+    const a = fakeAudio(); const p = createPlayer(() => a.ctx);
+    p.begin(1, 22050); p.push(1, pcm(2)); p.end(1);                 // "One moment please." (2 s)
+    a.clock(0.5);
+    p.begin(1, 22050); p.push(1, pcm(3));                            // the real answer, same turn
+    expect(a.sources[0].stopped).toBe(false);
+    expect(a.sources[1].start).toBeGreaterThanOrEqual(a.sources[0].end - 1e-9);
+  });
+});

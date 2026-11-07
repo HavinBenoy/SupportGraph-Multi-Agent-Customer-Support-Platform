@@ -543,3 +543,92 @@ async def test_the_queue_is_bounded():
     assert any(m.get("detail") == "Still working on your previous question." for m in msgs(tl, "notice"))
     gate.append(1)
     await v.close()
+
+
+# ---- M3 slice: latency numbers and the holding phrase --------------------------------------------------------------------------------------
+@pytest.mark.anyio
+async def test_a_slow_answer_gets_one_holding_phrase_then_the_answer_in_order():
+    def slow(text):
+        time.sleep(0.5)
+        return {"reply": "The fee is 45,000 INR.", **OK}
+
+    tts = FakeTts()
+    v, tl, _ = mk(turn=slow, tts=tts, voice_filler_after_ms=150)
+    await v.start()
+    await v.submit_text("What is the fee for Python?")
+    await until(lambda: n_of(tl, "audio_end") == 2)
+    starts = msgs(tl, "audio_start")
+    assert [bool(m.get("filler")) for m in starts] == [True, False] and {m["turn_id"] for m in starts} == {1}
+    order = [m["type"] for m in msgs(tl) if m["type"] in ("audio_start", "audio_end", "reply")]
+    assert order.index("reply") > order.index("audio_end")          # holding phrase fully played before the real answer starts
+    assert tts.spoken[0] in sess_fillers() and "45,000" in tts.spoken[1] or "45" in tts.spoken[1]
+    assert v.stats["fillers"] == 1 and v.stats["max_concurrent_graph"] == 1
+    await v.close()
+
+
+def sess_fillers():
+    from app.voice.session import FILLERS
+    return FILLERS
+
+
+@pytest.mark.anyio
+async def test_a_quick_answer_gets_no_holding_phrase():
+    v, tl, _ = mk(voice_filler_after_ms=1500)
+    await v.start()
+    await v.submit_text("okay")
+    await until(lambda: n_of(tl, "audio_end") == 1)
+    assert not any(m.get("filler") for m in msgs(tl, "audio_start")) and v.stats.get("fillers", 0) == 0
+    await v.close()
+
+
+@pytest.mark.anyio
+async def test_no_holding_phrase_when_it_is_switched_off_or_the_turn_went_stale():
+    def slow(text):
+        time.sleep(0.4)
+        return {"reply": "An answer.", **OK}
+
+    v, tl, _ = mk(turn=slow, voice_filler_after_ms=0)
+    await v.start()
+    await v.submit_text("What is the fee for Python?")
+    await until(lambda: n_of(tl, "audio_end") == 1)
+    assert v.stats.get("fillers", 0) == 0
+    await v.close()
+    v2, tl2, _ = mk(turn=slow, voice_filler_after_ms=100)
+    await v2.start()
+    await v2.submit_text("What is the fee for Python?")
+    await v2.submit_text("Actually what is the duration?")          # the first turn is already stale: nothing is said for it
+    await until(lambda: n_of(tl2, "reply") == 2 and not v2.speaking)
+    assert all(m["turn_id"] == 2 for m in msgs(tl2, "audio_start"))
+    await v2.close()
+
+
+@pytest.mark.anyio
+async def test_a_barge_in_cuts_the_holding_phrase_and_nothing_resumes():
+    class SlowFiller(SlowTts):
+        pass
+
+    def slow(text):
+        time.sleep(0.6)
+        return {"reply": "An answer.", **OK}
+
+    v, tl, _ = mk(turn=slow, tts=SlowFiller(), voice_filler_after_ms=100)
+    await v.start()
+    await v.submit_text("What is the fee for Python?")
+    await until(lambda: len(frames(tl)) >= 2)
+    await v.submit_text("What is the duration of Java?")
+    await until(lambda: n_of(tl, "reply") == 2 and not v.speaking, timeout=8)
+    end1 = next(i for i, (k, m) in enumerate(tl) if k == "json" and m["type"] == "audio_end" and m["turn_id"] == 1 and m.get("interrupted"))
+    assert not any(k == "audio" and m["turn_id"] == 1 for k, m in tl[end1 + 1:])
+    await v.close()
+
+
+@pytest.mark.anyio
+async def test_latency_from_the_end_of_speech_to_first_audio_is_measured():
+    v, tl, _ = mk(stt=FakeStt(["What is the fee for Python?"]))
+    await v.start()
+    await feed(v, utterance())
+    await until(lambda: n_of(tl, "audio_end") == 1)
+    end = msgs(tl, "audio_end")[0]["timing"]
+    assert end["endpoint_to_first_audio_ms"] >= 0 and msgs(tl, "reply")[0]["timing"]["endpoint_to_reply_ms"] >= 0
+    assert any(e["event"] == "latency" for e in v.events)
+    await v.close()

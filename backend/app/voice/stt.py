@@ -61,7 +61,7 @@ class FasterWhisperStt:
         audio = np.frombuffer(pcm16, dtype="<i2").astype("float32") / 32768.0
         t0 = time.perf_counter()
         segments, info = self._model().transcribe(
-            audio, language=self.s.voice_stt_language, beam_size=1, vad_filter=False, condition_on_previous_text=False,
+            audio, language=self.s.voice_stt_language, beam_size=self.s.voice_stt_beam, vad_filter=False, condition_on_previous_text=False,
             initial_prompt=prompt or None, without_timestamps=True, temperature=0.0)
         segs = list(segments)
         text = " ".join(x.text.strip() for x in segs).strip()

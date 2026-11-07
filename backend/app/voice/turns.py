@@ -80,6 +80,7 @@ class Turn:
     after_barge_in: bool = False     # this turn started by interrupting the assistant
     supersedes: bool = True          # a real question/request; light replies (hello, okay, thanks) do not make earlier answers stale
     wait_for: object | None = None   # settle task of an earlier sealed turn that must be committed first (keeps turns in order)
+    last_endpoint: float = 0.0       # monotonic time of the newest segment endpoint: where the caller stopped talking (latency baseline)
     created: float = field(default_factory=time.monotonic)
     _stt_for: int = -1               # audio length the current `text` was transcribed from (so a re-arm does not transcribe twice)
 

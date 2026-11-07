@@ -523,3 +523,19 @@ def test_m22_human_support_still_escalates_and_is_spoken(api):  # noqa: F811
         start(ws)
         msgs, audio = say(ws)
     assert reply_of(msgs)["status"] == "escalated" and reply_of(msgs)["escalation_id"] and audio > 0
+
+
+@pytest.mark.parametrize("said", ["Okay, thank you. That's it. Please set the call.", "Okay, that's everything. Let's end this session.",
+                                  "Okay. Please cut the call and call them directly."])
+def test_m222_third_call_goodbyes_end_the_call_over_the_socket(api, said):  # noqa: F811
+    setup_parts(api, [said])
+    with api.websocket_connect("/api/voice/ws") as ws:
+        start(ws)
+        send_audio(ws, utterance())
+        msgs, _ = collect(ws, "call_end")
+    assert reply_of(msgs)["end_call"] is True and reply_of(msgs)["citations"] == []
+
+
+def test_m3_warmup_is_a_no_op_for_the_fake_provider_and_status_reports_it(api):  # noqa: F811
+    j = api.get("/api/voice/status").json()
+    assert j["ready"] is True and j.get("warm") is None

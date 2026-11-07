@@ -88,7 +88,8 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       case "audio_start": if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
       case "audio_end":
         if (m.turn_id !== undefined) { if (m.interrupted) player.current?.stop(m.turn_id); else player.current?.end(m.turn_id); }
-        setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p)); break;
+        if (!m.filler) setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p));   // a holding phrase is not the end of the turn
+        break;
       case "interrupted": player.current?.stop(m.turn_id); break;
       case "call_end": { // goodbye: let the spoken closing finish playing, then hang up cleanly (no "call ended" error)
         ending.current = true;

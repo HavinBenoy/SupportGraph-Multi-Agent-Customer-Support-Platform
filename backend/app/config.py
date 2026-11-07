@@ -127,6 +127,8 @@ class Settings(BaseSettings):
     voice_grace_incomplete_ms: int = Field(default=1600, ge=0, le=8000)  # ... trailing "and"/"about", a comma, "I want to know about"
     voice_max_turn_s: int = Field(default=30, ge=5, le=120)            # merged audio of one turn is never longer than this
     voice_max_pending_turns: int = Field(default=3, ge=1, le=10)       # finished turns waiting for the (single) graph runner
+    voice_filler_after_ms: int = Field(default=1800, ge=0, le=15000)   # M3: say "One moment" when the answer is still not ready after this long (0 = never)
+    voice_stt_beam: int = Field(default=1, ge=1, le=5)                 # 1 = fastest; 2-3 can hear unusual words better at some CPU cost
     voice_pace_audio: bool = True                                      # stream the reply at ~real time (tests switch it off)
     voice_pace_lead_ms: int = Field(default=1500, ge=200, le=10000)    # how far ahead of playback the server may send
     voice_min_utterance_ms: int = Field(default=300, ge=100, le=2000)  # shorter blips (clicks, coughs) are ignored

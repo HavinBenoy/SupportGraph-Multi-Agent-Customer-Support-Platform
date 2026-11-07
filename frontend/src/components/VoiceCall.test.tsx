@@ -126,6 +126,16 @@ describe("VoiceCall", () => {
     expect(screen.getByText("second call question")).toBeInTheDocument();
   });
 
+  it("a holding phrase does not end the thinking phase; the real answer follows", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start(); await r.open(); await r.serverSays(READY);
+    await r.serverSays({ type: "thinking", turn_id: 1 });
+    await r.serverSays({ type: "audio_start", turn_id: 1, sample_rate: 22050, filler: true });
+    await r.serverSays({ type: "audio_end", turn_id: 1, filler: true });
+    expect(screen.getByText(/Thinking/)).toBeInTheDocument();
+  });
+
   it("signed-in student: token goes in the start message and the saved ticket is resumed", async () => {
     signedIn("student", "asha");
     sessionStorage.setItem("sg.ticket.t1.asha", "s-7.sig");

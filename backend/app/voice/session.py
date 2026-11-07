@@ -43,6 +43,7 @@ SPEECH_CHUNK = 8192                 # bytes of PCM per outgoing websocket messag
 AUDIO_HEADER = struct.Struct("<II")  # every outgoing audio frame: uint32 turn id, uint32 sequence number, then PCM16
 MUST_SPEAK = frozenset({"escalated", "awaiting_staff", "awaiting_confirmation"})  # outcomes the caller must hear even if a newer question arrived
 LIGHT_INTENTS = frozenset({ACK, AFFIRM, THANKS, GREETING, INTERRUPTION})  # "okay", "thanks", "hello?" do not invalidate an answer that is on its way
+FILLERS = ("One moment please.", "Let me check that for you.", "Just a moment.")   # fixed wording: nothing from the caller or the graph is ever spoken here
 WAIT_FOR_CALLER_S = 8.0             # a ready reply waits at most this long for a caller who is mid-sentence
 
 SendJson = Callable[[dict], Awaitable[None]]
@@ -193,6 +194,7 @@ class VoiceSession:
         t.segments.append(audio)
         t.segment_ms.append(ms)
         t.holding = False
+        t.last_endpoint = time.monotonic()
         self.stats["segments"] += 1
         if t.merged:
             self.stats["merged_turns"] += 1 if len(t.segments) == 2 else 0
@@ -307,10 +309,19 @@ class VoiceSession:
             self._ev("graph_start", t.id)
             t0 = time.perf_counter()
             try:
-                out = await asyncio.to_thread(self.run_turn, t.text)
+                job = asyncio.ensure_future(asyncio.to_thread(self.run_turn, t.text))
+                after = self.s.voice_filler_after_ms / 1000
+                if after:                    # M3: a slow answer is preceded by one short, fixed holding phrase (same turn, same sequential playback)
+                    done, _ = await asyncio.wait({job}, timeout=after)
+                    if not done and not self._closed and not self.ep.in_speech and not self._is_stale_now(t):
+                        self.stats["fillers"] = self.stats.get("fillers", 0) + 1
+                        await self._speak(t, FILLERS[t.id % len(FILLERS)], dict(timing), filler=True)
+                out = await job
             finally:
                 self._graph_active -= 1
         timing["turn_ms"] = round((time.perf_counter() - t0) * 1000)
+        if t.last_endpoint:
+            timing["endpoint_to_reply_ms"] = round((time.monotonic() - t.last_endpoint) * 1000)
         self._ev("graph_done", t.id, ms=timing["turn_ms"], status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
         await self._wait_for_caller()
         stale = self._is_stale(t, out)
@@ -359,7 +370,7 @@ class VoiceSession:
         except asyncio.TimeoutError:
             pass
 
-    async def _speak(self, t: Turn, reply: str, timing: dict, must: bool = False) -> None:
+    async def _speak(self, t: Turn, reply: str, timing: dict, must: bool = False, filler: bool = False) -> None:
         spoken = speakable(reply, max_chars=self.s.voice_max_reply_chars)
         if not spoken or self._closed:
             return
@@ -376,9 +387,9 @@ class VoiceSession:
             sent_ms, seq, first = 0.0, 0, True
             pace = self.s.voice_pace_audio
             lead = self.s.voice_pace_lead_ms / 1000
-            self._ev("tts_start", t.id, chars=len(spoken))
+            self._ev("tts_start", t.id, chars=len(spoken), filler=filler)
             try:
-                await self._send({"type": "audio_start", "turn_id": t.id, "sample_rate": rate})
+                await self._send({"type": "audio_start", "turn_id": t.id, "sample_rate": rate, **({"filler": True} if filler else {})})
                 self._ev("playback_start", t.id)
                 for sent in sentences(spoken):
                     if sp.cancelled:
@@ -390,6 +401,10 @@ class VoiceSession:
                             break
                         if first:
                             timing["tts_first_ms"] = round((time.perf_counter() - t0) * 1000)
+                            if t.last_endpoint:   # the number M3 is about: from the caller finishing the sentence to the first audible sound
+                                key = "endpoint_to_filler_ms" if filler else "endpoint_to_first_audio_ms"
+                                timing[key] = round((time.monotonic() - t.last_endpoint) * 1000)
+                                self._ev("latency", t.id, **{key: timing[key]})
                             self._ev("tts_first_audio", t.id, ms=timing["tts_first_ms"])
                             first = False
                         for i in range(0, len(chunk), SPEECH_CHUNK):
@@ -418,7 +433,7 @@ class VoiceSession:
                 if self._speech is sp:
                     self._speech = None
                 self._ev("playback_done", t.id, interrupted=sp.cancelled, audio_ms=round(sent_ms))
-                await self._send({"type": "audio_end", "turn_id": t.id, "interrupted": sp.cancelled, "timing": dict(timing)})
+                await self._send({"type": "audio_end", "turn_id": t.id, "interrupted": sp.cancelled, "timing": dict(timing), **({"filler": True} if filler else {})})
 
     @staticmethod
     async def _first_of(sp: _Speech, out: asyncio.Event) -> None:

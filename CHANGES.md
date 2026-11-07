@@ -1,3 +1,45 @@
+# M2.2.2 + M3.0 - Close M2, first safe latency slice
+
+Apply: `unzip -o ../supportgraph-m2-2-2.zip` (M2.2.1 already applied). No migration, dependency or model change; `.env`, databases, volumes untouched.
+
+## Analysis of your third real call (decision: close M2, start M3)
+Good news, verified by the transcript: your speech now prints for every call, one answer per turn, no overlapping voices, "connect me to the support team" escalates, "Let's end the call" ends it, the model abstains instead of guessing (CEO salary, trainers: nothing in the sample docs).
+The misses are all of two kinds, and neither is turn management:
+| Heard | Meant | Kind |
+|---|---|---|
+| "am I old of them?" | am I audible | speech recognition (base.en); nothing to match |
+| "please set the call", "let's send the conversation" | cut / end | recognition garbled the verb |
+| "let's end this session", "cut the call and call them directly", "you may end the call. It's fine." | goodbye | phrase gaps (fixed) |
+| "I'm not able to give a reliable answer to that here" | - | the router's honest fallback for unclassified text; correct behaviour |
+**Decision:** more per-sentence patching has diminishing returns, so M2.2.2 replaces it with a general deterministic rule and M2 closes.
+
+## M2.2.2 - call-ending rule (all in the shared graph)
+A sentence made ONLY of call-ending vocabulary (please/let's/you can/the/this/call/chat/session/conversation/line + end/cut/stop/close/finish/drop/kill/disconnect...) is a goodbye. Recognition-garbled verbs (`set`, `send`, `get`, `cat`...) count only when the same utterance also says goodbye/thanks/"that's it". Any other word (fee, course, how, recording, tomorrow, center, link, ...) breaks the rule, so "stop the call recording", "send me the call link", "how do I end the call", "end the call and tell me the fee", "please set the call" alone are NOT goodbyes. Also: "am I audible / whether I'm audible or not / are we clear" are answered like "can you hear me" with no knowledge-base lookup.
+
+## M3.0 - latency, the safe part (grounding untouched)
+Where the time goes (docs/M2.md): end-of-speech wait + Whisper + the text path (4-8 s with the 1.7B model) + first sentence of speech. The answer text cannot be streamed to the caller before it has been validated (citations, grounding, abstention), so M3.0 does not stream unvalidated tokens. What it does:
+1. **Measured baseline.** `timing.endpoint_to_first_audio_ms` (caller stopped talking -> first sound), `endpoint_to_reply_ms`, `endpoint_to_filler_ms`, `tts_first_ms`, `turn_ms`, `stt_ms` in every `reply`/`audio_end`, plus a `latency` event. Use these before and after any later change.
+2. **Holding phrase.** If the answer is not ready after `SG_VOICE_FILLER_AFTER_MS` (default 1800; 0 = off) one fixed phrase ("One moment please." / "Let me check that for you." / "Just a moment.") is spoken, in the same turn, through the same one-at-a-time playback (it can be interrupted, is never spoken for a stale turn, is never spoken for instant replies such as greetings or goodbyes, and no model or caller text ever goes into it). The browser keeps "Thinking..." during it and queues the answer after it.
+3. **Warm-up.** Opening the voice page (`GET /api/voice/status`) loads Whisper, Piper and Silero in a background thread and runs each once, so the first real question no longer pays model-loading time. Status now reports `warm`.
+4. `SG_VOICE_STT_BEAM` (default 1, unchanged) lets you try 2-3 for better recognition of unusual words at some CPU cost; not changed by default and not claimed to help: you can test it on your own voice.
+Not done (needs your measurements first): lowering the silence window, a faster model, speculative graph runs. Recognition model choice (base.en vs small.en) is a measurement for M3.1 with your numbers.
+
+## Results (sandbox, fakes only)
+SQLite 1301 passed / 30 skipped; PostgreSQL 1329 passed / 2 skipped; voice + intents with numpy hidden 186 passed; frontend 57 passed, `tsc` clean. New tests: call-ending groups and look-alikes (`test_intents.py`), three goodbyes over the real WebSocket, holding phrase (in order, none when quick/off/stale, cut by barge-in), latency fields, warm-up no-op, player re-open of the same turn, "Thinking" kept during the phrase.
+Your M2.2.1 local run was fully green (SQLite 1270/31, PostgreSQL 1298/3, frontend 55, e2e 22/22).
+
+## Run locally
+```
+unzip -o ../supportgraph-m2-2-2.zip
+make test-fast && git diff --check && make test-pg
+cd frontend && npm test && npx tsc --noEmit && cd .. && make e2e-local
+```
+Real call: open the voice page, wait ~10 s (warm-up), ask the fee question and read `timing` (browser dev tools > WebSocket > `reply`, or `grep voice_event` in the API log for `latency`). Expect a spoken "One moment please." if the answer takes over ~1.8 s. Please send me one `reply`/`audio_end` timing block and I will plan M3.1 from real numbers.
+
+## Not verified
+Real microphone/speaker timing, recognition quality, and real model warm-up time (no models in the sandbox).
+
+---
 # M2.2.1 - Final M2.2 fixes from your second real call (closes M2)
 
 Apply: `unzip -o ../supportgraph-m2-2-1.zip` over the project (M2.2 already applied). No migration, dependency or model change; `.env`/databases untouched.
