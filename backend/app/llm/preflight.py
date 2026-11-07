@@ -89,6 +89,14 @@ def enforce(s: Settings) -> PreflightResult | None:
     return res
 
 
+def runner_options(s: Settings) -> dict:
+    """The Ollama options that decide whether a loaded model can be reused (see warm_up). Must match what the gateway sends."""
+    out: dict = {"num_ctx": s.llm_num_ctx}
+    if s.llm_num_thread:
+        out["num_thread"] = s.llm_num_thread
+    return out
+
+
 def warm_up(s: Settings) -> list[tuple[str, float | str]]:
     """Load each model into memory once (keep_alive keeps it there). Returns (model, seconds) or (model, error name)."""
     import httpx
@@ -96,7 +104,11 @@ def warm_up(s: Settings) -> list[tuple[str, float | str]]:
     out: list[tuple[str, float | str]] = []
     jobs: list[tuple[str, str, str, dict]] = []
     if s.llm_provider == "ollama":
-        jobs += [(m, s.llm_base_url, "/api/generate", {"model": m, "keep_alive": s.llm_keep_alive}) for m in chat_models_in_use(s)]
+        # M3: the preload must use the SAME runner options as the real calls (context size, threads). Ollama starts a new runner (a full
+        # model reload) when they differ, so a warm-up with other options would leave the first real question to pay for the load again.
+        opts = runner_options(s)
+        jobs += [(m, s.llm_base_url, "/api/generate", {"model": m, "keep_alive": s.llm_keep_alive, "options": {**opts, "num_predict": 1}})
+                 for m in chat_models_in_use(s)]
     if s.embedding_provider == "ollama":
         jobs.append((s.embedding_model, s.embedding_base_url, "/api/embed", {"model": s.embedding_model, "input": "warm up", "keep_alive": s.llm_keep_alive}))
     for model, base, path, body in jobs:

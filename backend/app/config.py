@@ -93,6 +93,33 @@ class Settings(BaseSettings):
     llm_preflight: Literal["off", "warn", "strict"] = "warn"
     llm_warmup: bool = True
 
+    # --- M3: latency (every default keeps the pre-M3 behaviour unless noted; see docs/M3.md) ---
+    # Ollama CPU threads for chat calls AND the warm-up preload (they must agree, or Ollama reloads the model). None = Ollama's own default.
+    # On a 4-core/8-thread laptop try 4 (physical cores) - measure with `make bench-voice` before keeping it.
+    llm_num_thread: int | None = Field(default=None, ge=1, le=64)
+    obs_ollama_metrics: bool = True                    # record Ollama's load / prompt-eval / decode counters per call (names and numbers only)
+    obs_cold_load_ms: int = Field(default=800, ge=0)   # a call whose model load took at least this long marks the turn "cold"
+    obs_cold_embed_ms: int = Field(default=1500, ge=0)  # ... or an embedding call at least this slow
+    warmup_prime_triage: bool = True                   # the warm-up also runs one real (fixed, synthetic) triage call and one embedding + DB query
+    # Triage: "compact" is a shorter prompt (fewer prompt tokens = less CPU time). It is OFF until `make eval-routing` shows no regression
+    # with the real model on your machine. triage_max_output_tokens caps the structured answer (0 = the global llm_max_output_tokens).
+    triage_prompt: Literal["full", "compact"] = "full"
+    triage_max_output_tokens: int = Field(default=0, ge=0, le=4096)
+    # Same message text => same classification, so a repeated question skips the triage model call. Only successful model answers are cached.
+    triage_cache_size: int = Field(default=256, ge=0, le=10000)          # 0 = off
+    triage_cache_ttl_seconds: int = Field(default=3600, ge=1)
+    # Validated-answer cache for repeated FAQ questions (anonymous callers only by default). Keyed by tenant + normalised question + a
+    # fingerprint of the tenant's ingested documents and the answer-relevant settings; only a fully validated, cited answer is stored and it is
+    # re-validated on every hit. Re-ingesting a changed document changes the fingerprint, so stale answers are never served. 0 = off.
+    answer_cache_size: int = Field(default=128, ge=0, le=5000)
+    answer_cache_ttl_seconds: int = Field(default=1800, ge=1)
+    answer_cache_anonymous_only: bool = True
+    # Prompt size controls (both OFF by default: they can drop the passage that holds the answer). 0 = off.
+    # band: keep only passages scoring within this distance of the best one. max_chars: cap the total passage text sent to the model.
+    # The best passage is always kept.
+    rag_context_band: float = Field(default=0.0, ge=0.0, le=1.0)
+    rag_max_context_chars: int = Field(default=0, ge=0, le=20000)
+
     # --- Evaluation (build step 6) ---
     # Price per 1M tokens, only used to turn measured token counts into "cost per ticket". 0 = local/free model (cost reported as 0).
     eval_price_per_m_input: float = Field(default=0.0, ge=0.0)
@@ -128,6 +155,7 @@ class Settings(BaseSettings):
     voice_max_turn_s: int = Field(default=30, ge=5, le=120)            # merged audio of one turn is never longer than this
     voice_max_pending_turns: int = Field(default=3, ge=1, le=10)       # finished turns waiting for the (single) graph runner
     voice_filler_after_ms: int = Field(default=1800, ge=0, le=15000)   # M3: say "One moment" when the answer is still not ready after this long (0 = never)
+    voice_cache_fillers: bool = True                                   # M3: synthesise the fixed holding phrases once and reuse the audio (answers are never cached)
     voice_stt_beam: int = Field(default=1, ge=1, le=5)                 # 1 = fastest; 2-3 can hear unusual words better at some CPU cost
     voice_pace_audio: bool = True                                      # stream the reply at ~real time (tests switch it off)
     voice_pace_lead_ms: int = Field(default=1500, ge=200, le=10000)    # how far ahead of playback the server may send

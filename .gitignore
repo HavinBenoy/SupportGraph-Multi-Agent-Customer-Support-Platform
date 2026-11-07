@@ -13,3 +13,6 @@ node_modules/
 # voice models and smoke output (downloaded/generated locally)
 models/
 evals/voice/
+
+# M3 latency benchmark output (machine-specific)
+evals/bench-voice/

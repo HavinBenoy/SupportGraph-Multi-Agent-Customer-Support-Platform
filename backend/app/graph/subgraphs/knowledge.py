@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.config import Settings, get_settings
 from app.llm.gateway import get_rewriter
+from app.observability import stages
 from app.rag.faq import build_faq_graph
 from app.rag.rewrite import Rewriter
 from app.tenants.loader import load_tenant_config
@@ -46,9 +47,10 @@ def build_knowledge_graph(faq_graph=None, rewriter: Rewriter | None = None, sett
         tenant_id = ((config or {}).get("configurable") or {}).get("tenant_id")
         if not tenant_id:
             raise ScopeError("Knowledge graph run without tenant_id in config['configurable']")
-        synonyms = load_tenant_config(tenant_id).query_synonyms
         attempt = state.get("attempt", 0)
-        query = rewriter.rewrite(state["question"], attempt=attempt, synonyms=synonyms)
+        with stages.stage("rewrite"):   # M3: glossary expansion (no model call) unless SG_REWRITER_MODE=llm
+            synonyms = load_tenant_config(tenant_id).query_synonyms
+            query = rewriter.rewrite(state["question"], attempt=attempt, synonyms=synonyms)
         return {"query": query, "queries": [*state.get("queries", []), query]}
 
     def duplicate_query(state: KnowledgeState) -> bool:

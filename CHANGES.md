@@ -1,3 +1,46 @@
+# M3 - Evidence-based voice latency (complete, one change set)
+
+Apply (from the project root): `unzip -o ../supportgraph-m3-complete.zip`. No migration, no dependency, no model/embedding change, `.env` untouched. Every behaviour change has a regression test; everything that could cost accuracy is OFF by default. Full write-up, metric reference, configuration, caching rules, troubleshooting and the verification checklist: **docs/M3.md**.
+
+## Findings (from your two real calls; details in docs/M3.md sections 1-2)
+- The graph is 91-93% of the delay; STT is 5-9%; `endpoint_to_reply - turn_ms` equals the STT time, so nothing is hidden between the caller stopping and the graph starting. Node times explain all but 22-142 ms of `turn_ms` (graph/checkpointer overhead), now reported as `unaccounted_ms`.
+- QA ~0 ms is correct: citation validation runs inside the knowledge node (now visible as `stage.validate`); the QA node is deterministic checks only.
+- Cold start is NOT provably one thing from node timings. Found in the code: the old warm-up preloaded Ollama with no options while real calls send `num_ctx`, which makes Ollama start a new runner (a full reload). Fixed. Other candidates (model not loaded yet, embedding load, prompt-cache effects, lazy init) are now separable with the new Ollama counters. **Your repeat question benefited from llama.cpp's prompt cache, so 6.0 s is the best case, not the typical warm case.**
+
+## Implemented
+1. **Instrumentation:** per-run stage recorder (`triage_llm`, `rewrite`, `cache_check`, `embed`, `search`, `context`, `llm`, `llm_retry`, `validate`), `other` per node, `unaccounted_ms`, Ollama load/prompt-eval/decode counters per call, `cold` verdict with reasons. Numbers only, no text.
+2. **Four voice latencies:** `endpoint_to_graph_done_ms`, `endpoint_to_first_audio_ms` (any audio), `endpoint_to_answer_audio_ms` (never the holding phrase), `endpoint_to_playback_done_ms`, plus the browser's first-audible ack (`endpoint_to_first_audible_ms`, `endpoint_to_answer_audible_ms`). New `metrics` message before each answer's `audio_end`.
+3. **Model lifecycle:** complete, sequential, non-blocking, failure-tolerant warm-up (Ollama models with the real runner options, triage prime, embedding + DB prime, then voice models), status in `/api/voice/status` -> `warm_detail`.
+4. **Triage cache** (failures never cached; routing/auth/floor/injection run after it) and an opt-in compact prompt / output cap.
+5. **Validated-answer cache** for repeated anonymous FAQ questions (validated, cited, re-validated on every hit, invalidated by document fingerprint, QA and finalize still run).
+6. **Holding-phrase audio cache** (fixed phrases only).
+7. Opt-in `SG_RAG_CONTEXT_BAND`, `SG_RAG_MAX_CONTEXT_CHARS`, `SG_LLM_NUM_THREAD`.
+8. **`make bench-voice`:** scenarios (cold first, warm repeat/varied, unsupported, human, greeting, long utterance, context sizes), stats (mean/median/P90/P95 with sample-size rules), cold vs warm groups, CPU/memory, before/after compare.
+9. Evals (`app/evals/run.py`, `scripts/eval_routing.py`) run with the caches off.
+
+## Deliberately not implemented (reasons in docs/M3.md section 4)
+Parallel embedding with triage; keyword shortcuts for triage; streaming unvalidated tokens to TTS; concurrency or `OLLAMA_NUM_PARALLEL` changes in code; model/embedding/Whisper changes; caching for signed-in students; pre-rendering answers; lowering `num_ctx` by default.
+
+## Files
+New: `app/observability/stages.py`, `app/llm/warmup.py`, `app/rag/answer_cache.py`, `app/bench/latency.py`, `scripts/bench_voice_latency.py`, `docs/M3.md`, tests `tests/graph/test_m3_stages.py`, `tests/rag/test_m3_answer_cache.py`, `tests/rag/test_m3_context_trim.py`, `tests/unit/test_m3_triage_cache.py`, `tests/unit/test_m3_warmup.py`, `tests/voice/test_m3_latency_metrics.py`, `tests/voice/test_m3_ws.py`, `tests/bench/test_latency_bench.py`.
+Changed: `app/config.py`, `app/graph/support.py`, `app/graph/subgraphs/knowledge.py`, `app/agents/triage.py`, `app/rag/faq.py`, `app/llm/gateway.py`, `app/llm/preflight.py`, `app/api/main.py`, `app/api/routes/voice.py`, `app/voice/session.py`, `app/evals/run.py`, `scripts/eval_routing.py`, `frontend/src/lib/voice.ts`, `frontend/src/components/VoiceCall.tsx` (+ their tests), `Makefile`, `.env.example`, `docs/ROADMAP.md`, `docs/TESTING.md`, `docs/M2.md`.
+
+## Results (sandbox, fake models; NOT speed measurements)
+SQLite 1390 passed / 30 skipped; PostgreSQL 1418 passed / 2 skipped (real-Ollama tests); frontend 60 passed, `tsc` clean; non-voice suites pass with numpy hidden (1019 / 2). `make bench-voice` ran end to end against the sandbox database (labelled FAKE). Cannot be verified here: real Ollama timings, the cold verdict against real load times, real browser audio-clock latency, CPU/RAM.
+
+## Run locally
+```
+unzip -o ../supportgraph-m3-complete.zip
+make test-fast && git diff --check
+make test-pg
+cd frontend && npm test && npx tsc --noEmit && cd ..
+make e2e-local
+make bench-voice ARGS="--no-cache --n 10 --label before"
+make bench-voice ARGS="--cold"
+```
+Then restart the API, wait for `/api/voice/status` -> warm "ready", make a call, ask the fee question twice and a different question, and send the `metrics` blocks (docs/M3.md section 10).
+
+---
 # M3.0.1 - leak fix and per-node timings (from your first real timing)
 
 Apply: `unzip -o ../supportgraph-m2-2-3.zip` (M2.2.2/M3.0 already applied). No migration, dependency, model or default-setting change.

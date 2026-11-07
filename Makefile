@@ -1,4 +1,4 @@
-.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke
+.PHONY: venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice
 
 venv:
 	python3 -m venv .venv
@@ -99,6 +99,11 @@ bench-report:
 # Quick real-model check while developing: few tickets per split, no cold-start timing, own output folder (evals/bench-quick),
 # so it can never be mixed with a full run. Defaults to the smaller model; override: make bench-quick MODELS="qwen3:4b" N=6
 # NOT a decision benchmark: ~8 tickets per split cannot separate models. Use bench-full for that.
+# M3 latency benchmark of the whole support graph with stage timings (docs/M3.md). Needs `make db-up db-setup ingest` (and Ollama for real numbers).
+#   make bench-voice [ARGS="--cold --n 10 --no-cache --label before"]      compare two runs: make bench-voice ARGS="--compare ../evals/bench-voice/a.json ../evals/bench-voice/b.json"
+bench-voice:
+	cd backend && ../.venv/bin/python scripts/bench_voice_latency.py $(ARGS)
+
 bench-quick:
 	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-quick llm --models $(or $(MODELS),qwen3:1.7b) --limit $(or $(N),8) --no-cold-start $(ARGS)
 	cd backend && ../.venv/bin/python scripts/bench.py --out-dir ../evals/bench-quick report

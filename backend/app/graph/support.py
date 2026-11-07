@@ -16,6 +16,7 @@ and continues, possibly in another process, when `review.resume_ticket` answers 
 """
 
 import re
+import time
 import uuid
 from typing import Any
 
@@ -46,7 +47,10 @@ from app.graph.nodes.write import make_write_nodes
 from app.graph.state import TicketState
 from app.graph.subgraphs.knowledge import build_knowledge_graph
 from app.llm.gateway import get_critic, get_proposer, get_reviser, get_triager
+from app.db.session import session_scope
+from app.observability import stages
 from app.observability.tracing import instrument_config
+from app.rag.answer_cache import AnswerCache, kb_fingerprint, make_key, settings_fingerprint
 from app.qa.critic import Critic, Reviser
 from app.tenants.loader import load_tenant_config
 from app.tools.scope import ANONYMOUS, ScopeError
@@ -72,15 +76,21 @@ def _timed(name: str, fn):
             out = {**out, "node_ms": prev}
         return out
 
+    def enter() -> float:
+        rec = stages.current()
+        if rec is not None:
+            rec.node = name  # stages recorded inside this node are attributed to it (nodes run one at a time)
+        return time.perf_counter()
+
     if takes_config:
         @functools.wraps(fn)
         def wrapped(state, config):
-            t0 = time.perf_counter()
+            t0 = enter()
             return finish(name, state, fn(state, config), t0)
     else:
         @functools.wraps(fn)
         def wrapped(state):
-            t0 = time.perf_counter()
+            t0 = enter()
             return finish(name, state, fn(state), t0)
     return wrapped
 
@@ -90,10 +100,33 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
                         settings: Settings | None = None, checkpointer=None):
     s = settings or get_settings()
     triager = triager or get_triager(s)
+    injected_knowledge = knowledge
     knowledge = knowledge or build_knowledge_graph(settings=s)
     action = action or build_graph(model=action_model)
     write = make_write_nodes(proposer or get_proposer(s))
     qa = make_qa_nodes(reviser or get_reviser(s), critic if critic is not None else get_critic(s), s)
+    # M3: validated-answer cache for repeated anonymous FAQ questions (see app/rag/answer_cache.py). Only when the knowledge graph is the one built
+    # from settings here: an injected graph may use a different embedder, so its documents could not be fingerprinted reliably.
+    answer_cache = AnswerCache(s.answer_cache_size if injected_knowledge is None else 0, s.answer_cache_ttl_seconds)
+    _fp: dict = {}
+
+    def _cache_lookup(tenant_id: str, question: str):
+        """(key, cached output or None). Any problem (database, fingerprint) means 'no cache': the normal path runs."""
+        try:
+            with stages.stage("cache_check"):
+                if "emb" not in _fp:
+                    from app.llm.gateway import get_embedding_client
+                    _fp["emb"] = get_embedding_client(s).name
+                with session_scope() as db:
+                    fp = kb_fingerprint(db, tenant_id, _fp["emb"])
+                key = make_key(tenant_id, question, fp, settings_fingerprint(s, _fp["emb"]))
+                hit = answer_cache.get(key)
+            stages.note("answer_cache", "hit" if hit else "miss")
+            return key, hit
+        except Exception as e:  # noqa: BLE001
+            log.warning("answer cache skipped (%s)", type(e).__name__)
+            return None, None
+
     # No checkpointer given = in-memory (lost on restart). Production passes `get_checkpointer(settings)`.
     checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
 
@@ -131,8 +164,16 @@ def build_support_graph(*, triager: Triager | None = None, knowledge=None, actio
         return {"route": decision, "route_reason": reason}
 
     def knowledge_node(state: TicketState, config: RunnableConfig) -> dict:
+        question = state.get("resolved") or text_of(state)
         try:
-            out = knowledge.invoke({"question": state.get("resolved") or text_of(state)}, config)
+            out = None
+            key = None
+            if answer_cache.enabled and (not s.answer_cache_anonymous_only or not is_signed_in(cfg_of(config).get("student_id"))):
+                key, out = _cache_lookup(cfg_of(config)["tenant_id"], question)
+            if out is None:
+                out = knowledge.invoke({"question": question}, config)
+                if key is not None and answer_cache.put(key, out):
+                    stages.note("answer_cache", "stored")
         except ModelUnavailable as e:
             log.warning("knowledge: model unavailable (%s)", e.reason)
             return {"handled_by": KNOWLEDGE, "reply": replies.MODEL_UNAVAILABLE, "abstained": True,
@@ -226,4 +267,14 @@ def ask_support(graph, text: str, *, tenant_id: str, student_id: str = ANONYMOUS
     """Run one message through the graph and return the final state. If the run paused for an approval the result also has
     `awaiting` ("staff" | "student") and `pending` (the interrupt payload); `reply` is then what to show the student now."""
     config = support_config(tenant_id, student_id=student_id, ticket_id=ticket_id, **extra)
-    return _with_pause(graph, graph.invoke({"messages": [HumanMessage(text)]}, config), config)
+    rec, token = stages.start()
+    t0 = time.perf_counter()
+    try:
+        out = graph.invoke({"messages": [HumanMessage(text)]}, config)
+    finally:
+        graph_ms = (time.perf_counter() - t0) * 1000
+        stages.finish(token)
+    s = get_settings()
+    out = _with_pause(graph, out, config)
+    # M3: the reconciled latency picture of this run (node timings, stage timings, Ollama counters, cold/warm). Numbers and names only.
+    return {**out, "perf": rec.summary(out.get("node_ms"), graph_ms, cold_load_ms=s.obs_cold_load_ms, cold_embed_ms=s.obs_cold_embed_ms)}

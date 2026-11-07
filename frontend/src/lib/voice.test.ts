@@ -113,3 +113,33 @@ describe("player: a holding phrase and the answer of the same turn (M3)", () => 
     expect(a.sources[1].start).toBeGreaterThanOrEqual(a.sources[0].end - 1e-9);
   });
 });
+
+describe("player: first audible sound (M3)", () => {
+  it("announces the first sound once per response, when it is really audible, and never for a response that was cut first", () => {
+    vi.useFakeTimers();
+    try {
+      const a = fakeAudio(); const p = createPlayer(() => a.ctx); const started: number[] = [];
+      p.onstarted = (t) => started.push(t);
+      p.begin(1, 22050); p.push(1, pcm(1)); p.push(1, pcm(1));
+      expect(started).toEqual([]);                                  // scheduled, not yet audible (the audio clock starts it 50 ms later)
+      vi.advanceTimersByTime(100);
+      expect(started).toEqual([1]);                                 // exactly once, however many chunks follow
+      p.begin(2, 22050); p.push(2, pcm(1)); p.stop(2);              // cut before it became audible
+      vi.advanceTimersByTime(500);
+      expect(started).toEqual([1]);
+      p.begin(3, 22050); p.push(3, pcm(1)); p.end(3);
+      vi.advanceTimersByTime(500);
+      expect(started).toEqual([1, 3]);
+    } finally { vi.useRealTimers(); }
+  });
+  it("a holding phrase and the answer of the same turn each announce their own first sound", () => {
+    vi.useFakeTimers();
+    try {
+      const a = fakeAudio(); const p = createPlayer(() => a.ctx); const started: number[] = [];
+      p.onstarted = (t) => started.push(t);
+      p.begin(4, 22050); p.push(4, pcm(0.5)); vi.advanceTimersByTime(100);
+      p.begin(4, 22050); p.push(4, pcm(1)); vi.advanceTimersByTime(1000);   // the answer reopens the same turn
+      expect(started).toEqual([4, 4]);
+    } finally { vi.useRealTimers(); }
+  });
+});

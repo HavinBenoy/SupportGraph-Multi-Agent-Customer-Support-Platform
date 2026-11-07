@@ -8,9 +8,10 @@ export type ServerMsg =
   | { type: "transcribing" | "thinking"; turn_id?: number }
   | { type: "interrupted"; turn_id?: number; reason?: string }
   | { type: "transcript"; turn_id?: number; text: string; final?: boolean; ignored?: boolean; segments?: number }
-  | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Record<string, number>; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
+  | { type: "reply"; turn_id?: number; stale?: boolean; reply: string; status: string; citations: { id: string; heading: string }[]; escalation_id: string | null; ticket_id: string; end_call?: boolean; timing?: Timing; context?: string; intent?: string; turn?: { segments: number; audio_ms: number; merged: boolean; kind: string } }
   | { type: "audio_start"; turn_id?: number; sample_rate: number; filler?: boolean }
-  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; timing?: Record<string, number> }
+  | { type: "metrics"; turn_id: number; timing: Timing }   // M3: the four latencies of a spoken answer
+  | { type: "audio_end"; turn_id?: number; interrupted?: boolean; filler?: boolean; timing?: Timing }
   | { type: "call_end"; reason: string }   // the caller said goodbye: the closing was spoken, the server ends the call
   | { type: "notice"; detail: string }
   | { type: "error"; detail: string; fatal?: boolean };
@@ -54,6 +55,9 @@ export function parseAudioFrame(buf: ArrayBuffer): { turn: number; seq: number; 
   return { turn: v.getUint32(0, true), seq: v.getUint32(4, true), pcm: buf.slice(8) };
 }
 
+/** Timing numbers of a turn (M3): milliseconds, plus `cold` (boolean), `cold_reasons`, and `stages` / `nodes` (name -> ms). See docs/M3.md. */
+export type Timing = Record<string, number | boolean | string[] | Record<string, number>>;
+
 export interface Player {
   begin(turn: number, sampleRate: number): void;   // a new response: whatever else was playing is stopped first
   push(turn: number, pcm16: ArrayBuffer): void;    // ignored unless `turn` is the response being played
@@ -63,6 +67,7 @@ export interface Player {
   readonly current: number | null;
   onidle?: () => void;                             // nothing is playing or queued any more
   onplayed?: (turn: number) => void;               // a response finished playing naturally (not when it was cut)
+  onstarted?: (turn: number) => void;              // M3: the first sound of a response is audible now (once per begin())
 }
 
 /** Plays ONE response at a time with Web Audio. Chunks are scheduled on the audio clock (no gaps between sentences). Every chunk carries its
@@ -70,7 +75,7 @@ export interface Player {
  *  scheduled sources first, so two responses can never sound together. */
 export function createPlayer(ctxFactory: () => AudioContext = () => new AudioContext()): Player {
   let ctx: AudioContext | null = null;
-  let rate = 22050, nextAt = 0, cur: number | null = null, finished = true, latest = 0;
+  let rate = 22050, nextAt = 0, cur: number | null = null, finished = true, latest = 0, announced = true;
   let active = new Set<AudioBufferSourceNode>();
   const retired = new Set<number>();
   const silence = () => { for (const s of active) { try { s.onended = null; s.stop(); } catch { /* already stopped */ } } active = new Set(); };
@@ -83,6 +88,7 @@ export function createPlayer(ctxFactory: () => AudioContext = () => new AudioCon
       const reopen = cur === turn;
       if (cur !== null && cur !== turn) { silence(); retired.add(cur); }
       ctx ??= ctxFactory(); rate = sampleRate; latest = turn; cur = turn; finished = false;
+      announced = false;
       nextAt = Math.max(reopen ? nextAt : 0, ctx.currentTime + 0.05);   // the same turn may speak again (a holding phrase, then the answer): queue after it
     },
     push(turn, pcm) {
@@ -96,6 +102,11 @@ export function createPlayer(ctxFactory: () => AudioContext = () => new AudioCon
       const at = Math.max(nextAt, ctx.currentTime);
       src.start(at); nextAt = at + buf.duration;
       active.add(src);
+      if (!announced) {                                        // M3: tell the server when the first sound is really audible (the audio clock, not receipt)
+        announced = true;
+        const t = turn, wait = Math.max(0, (at - ctx.currentTime) * 1000);
+        setTimeout(() => { if (cur === t || active.size > 0) p.onstarted?.(t); }, wait);
+      }
       src.onended = () => { active.delete(src); if (active.size === 0 && finished && cur === turn) drained(turn); };
     },
     stop(turn) {

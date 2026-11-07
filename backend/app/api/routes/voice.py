@@ -5,11 +5,13 @@ Protocol (JSON text messages unless noted):
                      binary: PCM16 little-endian mono 16 kHz microphone audio, any chunk size <= 64 KB
                      {"type":"text","text":"..."}   typed fallback        {"type":"stop"}
                      {"type":"playback","turn_id":N,"state":"ended"}   the browser finished playing response N (M2.2)
+                     {"type":"playback","turn_id":N,"state":"started"}   the browser began playing response N: first audible sound (M3)
   M2.2: every event of a turn carries "turn_id". Audio frames are binary: uint32-LE turn_id, uint32-LE sequence, then PCM16.
         "transcript" is sent twice per turn (final false, then true after the aggregation grace period); "reply" has "stale" and "turn".
   server -> client   {"type":"ready","ticket_id","signed_in","tenant_name","sample_rate"}   speech_start / transcribing / transcript / thinking
                      {"type":"reply","reply","status","citations","escalation_id","ticket_id","timing"}
                      {"type":"audio_start","sample_rate"} + binary PCM16 chunks + {"type":"audio_end","interrupted"}   {"type":"interrupted"}
+                     {"type":"metrics","turn_id","timing"}   M3: once per spoken answer, the four latencies of the turn (see docs/M3.md)
                      {"type":"error","detail","fatal"?}
 
 Identity is decided exactly as for POST /api/chat (token => tenant+student from the signed token; otherwise anonymous in the requested tenant;
@@ -26,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from app.api.deps import principal_from_token
 from app.api.routes.chat import _identity, _ticket
 from app.api.service import record_event, run_turn
+from app.llm.warmup import warm_report
 from app.tenants.loader import load_tenant_config
 from app.tools.scope import ANONYMOUS
 from app.voice.session import SessionLimit, VoiceSession
@@ -65,27 +68,25 @@ def _components(app, s):
 
 
 def _warm(app, s) -> None:
-    """Load Whisper, Piper and Silero and run each once, so the FIRST real question does not pay the model-loading time (M3).
-    Runs in a background thread when the voice page asks for /status; harmless to repeat; real provider only."""
-    if s.voice_provider != "real" or getattr(app.state, "voice_warm", None) is not None:
-        return
-    app.state.voice_warm = "running"
+    """M3: warm the LLM side (Ollama models with the real runner options, a triage call, an embedding + DB round trip) and then the voice
+    models (Whisper, Piper, Silero), one after the other in background threads. Harmless to repeat; a no-op for the fake providers."""
+    from app.llm.warmup import start_llm_warmup, start_voice_warmup
 
-    def work() -> None:
-        try:
-            vad_factory, stt, tts = _components(app, s)
-            vad_factory()
-            getattr(tts, "sample_rate")
-            for _ in tts.synthesize("Okay."):
-                pass
-            stt.transcribe(b"\x00\x00" * 16000)
-            app.state.voice_warm = "ready"
-        except Exception as e:  # noqa: BLE001 - a missing model is reported by /status and at call start; never crash here
-            log.warning("voice warm-up failed (%s: %s)", type(e).__name__, e)
-            app.state.voice_warm = "failed"
+    start_llm_warmup(app, s)
 
-    import threading
-    threading.Thread(target=work, name="voice-warm", daemon=True).start()
+    def load_voice() -> None:
+        vad_factory, stt, tts = _components(app, s)
+        vad_factory()
+        getattr(tts, "sample_rate")
+        for _ in tts.synthesize("Okay."):
+            pass
+        stt.transcribe(b"\x00\x00" * 16000)
+        if s.voice_cache_fillers:
+            from app.voice.session import prerender_fillers
+
+            prerender_fillers(tts, s.voice_max_reply_chars)   # the holding phrases are rendered now, not while the LLM is busy
+
+    start_voice_warmup(app, s, load_voice)
 
 
 @router.get("/status")
@@ -113,7 +114,8 @@ def voice_status(request: Request) -> dict:
                 problems.append(f"Piper voice file not found: {s.voice_tts_voice}")
     if not problems:
         _warm(request.app, s)
-    return {"enabled": True, "ready": not problems, "warm": getattr(request.app.state, "voice_warm", None), "problems": problems, "provider": s.voice_provider, "stt_model": s.voice_stt_model}
+    return {"enabled": True, "ready": not problems, "warm": getattr(request.app.state, "voice_warm", None),
+            "warm_detail": warm_report(request.app), "problems": problems, "provider": s.voice_provider, "stt_model": s.voice_stt_model}
 
 
 async def _fail(ws: WebSocket, detail: str, code: int = 1008) -> None:
@@ -175,7 +177,8 @@ async def voice_ws(ws: WebSocket) -> None:
         record_event(tenant_id=tenant_id, ticket_id=ticket_id, signed_in=student_id != ANONYMOUS, out=out)
         return {"reply": resp.reply, "status": resp.status, "citations": [c.model_dump() for c in resp.citations],
                 "escalation_id": resp.escalation_id, "ticket_id": ticket_id, "end_call": bool(out.get("end_call")),
-                "intent": out.get("intent") or "", "context": out.get("context_kind") or "", "node_ms": out.get("node_ms") or {}}
+                "intent": out.get("intent") or "", "context": out.get("context_kind") or "", "node_ms": out.get("node_ms") or {},
+                "perf": out.get("perf") or {}}
 
     async def send_bytes(b: bytes) -> None:
         await ws.send_bytes(b)
@@ -208,6 +211,9 @@ async def voice_ws(ws: WebSocket) -> None:
                     break
                 if kind == "playback" and data.get("state") == "ended" and isinstance(data.get("turn_id"), int):
                     session.playback_ended(data["turn_id"])   # the browser finished playing that response
+                    continue
+                if kind == "playback" and data.get("state") == "started" and isinstance(data.get("turn_id"), int):
+                    session.playback_started(data["turn_id"], data.get("filler") if isinstance(data.get("filler"), bool) else None)   # M3: the first audible sound (browser ack) for the latency report
                     continue
                 if kind == "text" and isinstance(data.get("text"), str) and data["text"].strip():
                     await session.submit_text(data["text"].strip()[:MAX_TEXT])

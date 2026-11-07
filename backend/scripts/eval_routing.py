@@ -73,7 +73,7 @@ def main() -> int:
     s = get_settings()
     tickets = load_tickets(a.dataset)
     markers = internal_markers(tickets[0]["tenant_id"])
-    graph, faq = build_support_graph(), build_faq_graph()
+    graph, faq = build_support_graph(settings=s.model_copy(update={"answer_cache_size": 0, "triage_cache_size": 0})), build_faq_graph()  # M3: no caches in a measurement
     states: dict[str, dict] = {}
     run_id = uuid.uuid4().hex[:6]
     today = a.today or seed_today(tickets[0]["tenant_id"])

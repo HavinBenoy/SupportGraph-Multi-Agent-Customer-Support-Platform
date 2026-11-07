@@ -56,3 +56,13 @@ Timings below were measured on my 2-core sandbox; yours (4C/8T) should be faster
 - `tests/voice/test_voice_ws.py` (M2.2 block) and `tests/unit/test_intents.py` (M2.2 block): the same through the real WebSocket route; the real-call phrases.
 - `frontend`: `voice.test.ts` (fake AudioContext: no overlap, stale turns dropped), `VoiceCall.test.tsx` (barge-in only on `interrupted`, merged transcript line, playback ack).
 - Not covered by any test: real microphone/speaker timing. See docs/M2_2.md section 9.
+
+## Latency (M3)
+- `tests/graph/test_m3_stages.py`: recorder (attribution, `other`, reconciliation, cold verdict, Ollama counter parsing and callback), the FULL graph's stage report with no double counting and no question/answer text in it, the REAL langchain-ollama client against the mock server (counters, `num_thread`/`num_ctx`/triage cap reach the requests).
+- `tests/rag/test_m3_answer_cache.py`: what may be stored (only validated cited answers), who may be served (anonymous only), keys, TTL/LRU, tampering, invalidation by document and passage changes, QA/finalize still run on a hit, abstentions/injection/escalation/greetings never touch it, injected knowledge graph and failures fall back.
+- `tests/unit/test_m3_triage_cache.py`: failures never cached, expiry/bounds, compact prompt keeps every rule, routing/auth/floor/injection after the cache.
+- `tests/unit/test_m3_warmup.py`: preload options equal the real call's, sequential steps, once per process, failure tolerance, non-blocking, voice warm-up waits for the LLM warm-up.
+- `tests/voice/test_m3_latency_metrics.py`, `tests/voice/test_m3_ws.py`: the four latencies and their order, the `metrics` message before `audio_end`, browser acks (late/foreign/duplicate ignored), holding-phrase audio cache (fresh answers, cut phrase never stored), the socket protocol and `warm_detail`.
+- `tests/rag/test_m3_context_trim.py`, `tests/bench/test_latency_bench.py`: opt-in prompt trimming never makes an answer ungrounded; benchmark statistics, cold/warm grouping, comparison and CLI.
+- `frontend`: `voice.test.ts` (first-audible announce once per response), `VoiceCall.test.tsx` (the `started` ack carries the filler flag).
+- Not covered by any test: real Ollama timings, the `cold` verdict against real load times, real browser audio-clock latency, CPU/RAM. `make bench-voice` and docs/M3.md section 10.

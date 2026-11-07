@@ -41,6 +41,7 @@ from app.llm.gateway import get_chat_model, get_embedding_client
 from app.llm.guard import invoke_guarded
 from app.llm.reasoning import visible_answer
 from app.llm.truncation import finish_reason, is_truncated
+from app.observability import stages
 from app.observability.tracing import instrument_config
 from app.rag.prompts import CITATION, build_messages
 from app.rag.retrieval import RetrievedChunk, count_chunks, search
@@ -97,6 +98,23 @@ def declines_without_answer(text: str) -> bool:
     return not answered
 
 
+def trim_context(found: list[RetrievedChunk], s: Settings) -> list[RetrievedChunk]:
+    """M3 (opt-in, both settings default to 0 = off): send the model fewer passages. `rag_context_band` keeps only passages scoring within
+    that distance of the best one; `rag_max_context_chars` drops the lowest-ranked passages until the total text fits. The best passage is
+    ALWAYS kept, and a dropped passage can no longer be cited (a citation of it fails validation), so trimming can only turn an answer into
+    an abstention, never into an ungrounded answer. Passages are never cut mid-text."""
+    if not found:
+        return found
+    keep = list(found)
+    if s.rag_context_band > 0:
+        top = keep[0].score
+        keep = [c for c in keep if c.score >= top - s.rag_context_band] or keep[:1]
+    if s.rag_max_context_chars > 0:
+        while len(keep) > 1 and sum(len(c.text) for c in keep) > s.rag_max_context_chars:
+            keep.pop()
+    return keep
+
+
 class FaqState(TypedDict, total=False):
     question: str
     search_query: str  # optional: what to SEARCH for (a rewrite); the model is still asked `question`
@@ -146,11 +164,15 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
             return {"question": question[:80] + "...", "chunks": [], "top_score": None, "reason": "question_too_long"}
 
         search_text = " ".join((state.get("search_query") or question).split())[:MAX_SEARCH_CHARS]
-        vector = embedder.embed_query(search_text)
-        with session_scope() as db:
-            found = search(db, tenant_id=tenant_id, query_vector=vector, model_name=embedder.name, top_k=s.rag_top_k)
-            relevant = [c for c in found if c.score >= s.rag_min_score]
-            never_ingested = not found and count_chunks(db, tenant_id=tenant_id, model_name=embedder.name) == 0
+        with stages.stage("embed"):
+            vector = embedder.embed_query(search_text)
+        with stages.stage("search"):
+            with session_scope() as db:
+                found = search(db, tenant_id=tenant_id, query_vector=vector, model_name=embedder.name, top_k=s.rag_top_k)
+                relevant = trim_context([c for c in found if c.score >= s.rag_min_score], s)
+                never_ingested = not found and count_chunks(db, tenant_id=tenant_id, model_name=embedder.name) == 0
+        stages.note("context_chunks", len(relevant))
+        stages.note("context_chars", sum(len(c.text) for c in relevant))
         out: dict[str, Any] = {"question": question, "chunks": [c.to_dict() for c in relevant],
                                "top_score": round(found[0].score, 4) if found else None}
         if never_ingested:
@@ -161,9 +183,12 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         return "generate" if state.get("chunks") else "abstain"
 
     def generate(state: FaqState, config: RunnableConfig) -> dict:
-        institute_name = load_tenant_config(_tenant_of(config)).name
-        chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
-        reply = invoke_guarded(model, build_messages(state["question"], chunks, institute_name=institute_name), s)
+        with stages.stage("context"):
+            institute_name = load_tenant_config(_tenant_of(config)).name
+            chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
+            messages = build_messages(state["question"], chunks, institute_name=institute_name)
+        with stages.stage("llm"):
+            reply = invoke_guarded(model, messages, s)
         visible, unfinished = visible_answer(str(reply.content))
         return {"raw_answer": visible, "reasoning_unfinished": unfinished, "finish_reason": finish_reason(reply),
                 "truncated": is_truncated(reply, s.llm_max_output_tokens), "generation_attempts": 1}
@@ -174,7 +199,9 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         chunks = [RetrievedChunk.from_dict(c) for c in state["chunks"]]
         messages = build_messages(state["question"], chunks, institute_name=institute_name)
         messages.append(HumanMessage(CITATION_REMINDER.format(example=chunks[0].source_id, sentinel=SENTINEL)))
-        reply = invoke_guarded(model, messages, s)
+        stages.note("citation_regenerated", True)
+        with stages.stage("llm_retry"):
+            reply = invoke_guarded(model, messages, s)
         visible, unfinished = visible_answer(str(reply.content))
         return {"raw_answer": visible, "reasoning_unfinished": unfinished, "finish_reason": finish_reason(reply),
                 "truncated": is_truncated(reply, s.llm_max_output_tokens), "generation_attempts": 2}
@@ -184,6 +211,10 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
         return "regenerate" if retry else "end"
 
     def validate(state: FaqState) -> dict:
+        with stages.stage("validate"):
+            return _validate(state)
+
+    def _validate(state: FaqState) -> dict:
         raw = state.get("raw_answer", "")
         retrieved = {c["source_id"]: c for c in state["chunks"]}
         cited = list(dict.fromkeys(CITATION.findall(raw)))  # unique, in order of first use

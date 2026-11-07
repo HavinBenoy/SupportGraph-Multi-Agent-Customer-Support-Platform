@@ -11,7 +11,7 @@ function rig(opts: { status?: unknown; micError?: string } = {}) {
   let h: Parameters<VoiceDeps["socket"]>[1] | null = null;
   const micStop = vi.fn(), mute = vi.fn(), pushed: ArrayBuffer[] = [];
   const player = { begin: vi.fn(), push: (_turn: number, b: ArrayBuffer) => pushed.push(b), stop: vi.fn(), end: vi.fn(), playing: false, current: null as number | null,
-    onidle: undefined as undefined | (() => void), onplayed: undefined as undefined | ((t: number) => void) };
+    onidle: undefined as undefined | (() => void), onplayed: undefined as undefined | ((t: number) => void), onstarted: undefined as undefined | ((t: number) => void) };
   const close = vi.fn();
   let frame: ((p: ArrayBuffer) => void) | null = null;
   const deps: VoiceDeps = {
@@ -225,5 +225,22 @@ describe("VoiceCall", () => {
     expect(screen.getByText(/Call ended/)).toBeInTheDocument();
     await r.onclose();                                    // the server's close arrives afterwards: no error banner
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("VoiceCall: first audible sound ack (M3)", () => {
+  it("tells the server when playback became audible and whether it was a holding phrase", async () => {
+    const r = rig();
+    renderWithAuth(<VoiceCall deps={r.deps} />);
+    await start();
+    await r.open();
+    await r.serverSays(READY);
+    await r.serverSays({ type: "audio_start", turn_id: 5, sample_rate: 22050, filler: true });
+    act(() => r.player.onstarted?.(5));
+    await r.serverSays({ type: "audio_end", turn_id: 5, filler: true });
+    await r.serverSays({ type: "audio_start", turn_id: 5, sample_rate: 22050 });
+    act(() => r.player.onstarted?.(5));
+    const acks = r.sent.map(String).filter((m) => m.includes('"started"')).map((m) => JSON.parse(m));
+    expect(acks).toEqual([{ type: "playback", turn_id: 5, state: "started", filler: true }, { type: "playback", turn_id: 5, state: "started", filler: false }]);
   });
 });

@@ -41,7 +41,8 @@ def run_all(*, settings: Settings | None = None, datasets: dict[str, Path] | Non
     datasets = datasets if datasets is not None else {k: DATASETS_DIR / v for k, v in DEFAULTS.items()}
     security_path = security_path if security_path is not None else DATASETS_DIR / SECURITY
     labels_path = labels_path if labels_path is not None else DATASETS_DIR / LABELS
-    graph = graph or build_support_graph(settings=s)
+    # M3: measurements must see every model call, so the repeated-question caches stay off for evaluation runs.
+    graph = graph or build_support_graph(settings=s.model_copy(update={"answer_cache_size": 0, "triage_cache_size": 0}))
     faq = faq or (build_faq_graph(settings=s) if with_baseline else None)
     judge = judge or get_judge(s)
     run_id = uuid.uuid4().hex[:6]

@@ -24,6 +24,7 @@ import json
 import logging
 import struct
 import time
+import weakref
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -44,6 +45,24 @@ AUDIO_HEADER = struct.Struct("<II")  # every outgoing audio frame: uint32 turn i
 MUST_SPEAK = frozenset({"escalated", "awaiting_staff", "awaiting_confirmation"})  # outcomes the caller must hear even if a newer question arrived
 LIGHT_INTENTS = frozenset({ACK, AFFIRM, THANKS, GREETING, INTERRUPTION})  # "okay", "thanks", "hello?" do not invalidate an answer that is on its way
 FILLERS = ("One moment please.", "Let me check that for you.", "Just a moment.")   # fixed wording: nothing from the caller or the graph is ever spoken here
+
+# M3: the holding phrases are FIXED text, so their audio is synthesised once per speech engine and reused. A holding phrase is spoken at the moment the
+# language model is hogging the CPU; rendering it again then would slow both down and delay the phrase. Only these fixed phrases are ever cached:
+# an answer (anything derived from the caller or the documents) is always synthesised fresh. Keyed by the engine object, so a different voice or
+# engine never gets another's audio.
+_FILLER_AUDIO: "weakref.WeakKeyDictionary[object, dict[str, list[bytes]]]" = weakref.WeakKeyDictionary()
+
+
+def prerender_fillers(tts, max_chars: int = 600) -> int:
+    """Warm-up helper: synthesise every holding phrase once. Returns how many sentences were stored. Failures are the caller's to handle."""
+    store = _FILLER_AUDIO.setdefault(tts, {})
+    for phrase in FILLERS:
+        for sent in sentences(speakable(phrase, max_chars=max_chars)):
+            if sent not in store:
+                chunks = [c for c in tts.synthesize(sent) if c]
+                if chunks:
+                    store[sent] = chunks
+    return len(store)
 WAIT_FOR_CALLER_S = 8.0             # a ready reply waits at most this long for a caller who is mid-sentence
 
 SendJson = Callable[[dict], Awaitable[None]]
@@ -65,6 +84,10 @@ class _Speech:
     turn_id: int
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     played: asyncio.Event = field(default_factory=asyncio.Event)   # the browser said it finished playing this turn
+    filler: bool = False                      # a holding phrase, not the answer
+    endpoint: float = 0.0                     # monotonic time the caller stopped talking (latency baseline for this turn)
+    timing: dict = field(default_factory=dict)   # the turn's shared timing dict (the browser's "started" ack writes into it)
+    audible: bool = False                     # the browser already reported the first audible sound of this response
 
     @property
     def cancelled(self) -> bool:
@@ -315,16 +338,26 @@ class VoiceSession:
                     done, _ = await asyncio.wait({job}, timeout=after)
                     if not done and not self._closed and not self.ep.in_speech and not self._is_stale_now(t):
                         self.stats["fillers"] = self.stats.get("fillers", 0) + 1
-                        await self._speak(t, FILLERS[t.id % len(FILLERS)], dict(timing), filler=True)
+                        await self._speak(t, FILLERS[t.id % len(FILLERS)], timing, filler=True)
                 out = await job
             finally:
                 self._graph_active -= 1
         timing["turn_ms"] = round((time.perf_counter() - t0) * 1000)
         if t.last_endpoint:
             timing["endpoint_to_reply_ms"] = round((time.monotonic() - t.last_endpoint) * 1000)
+            timing["endpoint_to_graph_done_ms"] = timing["endpoint_to_reply_ms"]   # M3 name: caller stopped talking -> the validated answer exists
+        perf = out.get("perf") or {}
+        if perf:                                         # M3: the reconciled breakdown from the graph (see observability/stages.py)
+            timing["cold"] = bool(perf.get("cold"))
+            timing["unaccounted_ms"] = perf.get("unaccounted_ms", 0)
+            timing["stages"] = dict(perf.get("stages") or {})
+            timing["llm_load_ms"] = perf.get("llm_load_ms", 0)
+            if perf.get("cold_reasons"):
+                timing["cold_reasons"] = list(perf["cold_reasons"])
         if out.get("node_ms"):
             timing["nodes"] = dict(out["node_ms"])          # e.g. {"triage": 1400, "knowledge": 4500}: where this turn spent its time
-        self._ev("graph_done", t.id, ms=timing["turn_ms"], nodes=timing.get("nodes"), status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
+        self._ev("graph_done", t.id, ms=timing["turn_ms"], nodes=timing.get("nodes"), stages=timing.get("stages"), cold=timing.get("cold"),
+                 unaccounted_ms=timing.get("unaccounted_ms"), endpoint_to_graph_done_ms=timing.get("endpoint_to_graph_done_ms"), status=out.get("status"), intent=out.get("intent") or "", context=out.get("context") or "")
         await self._wait_for_caller()
         stale = self._is_stale(t, out)
         kind = "continuation" if t.merged else "interruption" if t.after_barge_in else (out.get("context") or out.get("intent") or "new")
@@ -363,6 +396,18 @@ class VoiceSession:
         if self._speech and self._speech.turn_id == turn_id:
             self._speech.played.set()
 
+    def playback_started(self, turn_id: int, filler: bool | None = None) -> None:
+        """The browser began to play this response (its ack): the first AUDIBLE sound, as far as the server can know (includes the network hop)."""
+        sp = self._speech
+        if sp is None or sp.turn_id != turn_id or sp.audible or not sp.endpoint or (filler is not None and filler != sp.filler):
+            return  # no such response, already reported, or a late ack for the other response of this turn (holding phrase vs answer)
+        sp.audible = True
+        ms = round((time.monotonic() - sp.endpoint) * 1000)
+        sp.timing.setdefault("endpoint_to_first_audible_ms", ms)       # any sound, a holding phrase included
+        if not sp.filler:
+            sp.timing["endpoint_to_answer_audible_ms"] = ms             # the answer itself
+        self._ev("playback_audible", turn_id, ms=ms, filler=sp.filler)
+
     @staticmethod
     async def _wait(ev: asyncio.Event, seconds: float) -> None:
         if seconds <= 0:
@@ -379,7 +424,7 @@ class VoiceSession:
         async with self._speak_lock:
             if self._closed or (self._is_stale_now(t) and not must):
                 return
-            sp = self._speech = _Speech(turn_id=t.id)
+            sp = self._speech = _Speech(turn_id=t.id, filler=filler, endpoint=t.last_endpoint, timing=timing)
             self.speaking = True
             rate = self.tts.sample_rate
             t0 = time.perf_counter()
@@ -393,18 +438,30 @@ class VoiceSession:
                 for sent in sentences(spoken):
                     if sp.cancelled:
                         break
-                    gen = self.tts.synthesize(sent)
+                    store = _FILLER_AUDIO.setdefault(self.tts, {}) if (filler and self.s.voice_cache_fillers) else None
+                    cached = store.get(sent) if store is not None else None
+                    gen = iter(cached) if cached is not None else self.tts.synthesize(sent)
+                    fresh: list[bytes] | None = [] if (store is not None and cached is None) else None
                     while not sp.cancelled:
                         chunk = await asyncio.to_thread(next, gen, None)
                         if chunk is None:
+                            if fresh and not sp.cancelled:
+                                store[sent] = fresh          # fully rendered, never cut: safe to reuse
                             break
+                        if fresh is not None:
+                            fresh.append(chunk)
                         if first:
-                            timing["tts_first_ms"] = round((time.perf_counter() - t0) * 1000)
-                            if t.last_endpoint:   # the number M3 is about: from the caller finishing the sentence to the first audible sound
-                                key = "endpoint_to_filler_ms" if filler else "endpoint_to_first_audio_ms"
-                                timing[key] = round((time.monotonic() - t.last_endpoint) * 1000)
-                                self._ev("latency", t.id, **{key: timing[key]})
-                            self._ev("tts_first_audio", t.id, ms=timing["tts_first_ms"])
+                            timing["tts_first_filler_ms" if filler else "tts_first_ms"] = round((time.perf_counter() - t0) * 1000)
+                            if t.last_endpoint:
+                                # M3: four different latencies, never mixed up. A holding phrase is the first audio but never "the answer".
+                                #   endpoint_to_first_audio_ms   first audio frame of ANY kind        endpoint_to_filler_ms        the holding phrase
+                                #   endpoint_to_answer_audio_ms  first frame of the ANSWER            endpoint_to_graph_done_ms    answer validated (above)
+                                #   endpoint_to_playback_done_ms the answer finished playing (below)  *_audible_ms                 browser ack (playback_started)
+                                ms = round((time.monotonic() - t.last_endpoint) * 1000)
+                                timing.setdefault("endpoint_to_first_audio_ms", ms)
+                                timing["endpoint_to_filler_ms" if filler else "endpoint_to_answer_audio_ms"] = ms
+                                self._ev("latency", t.id, filler=filler, endpoint_to_audio_ms=ms)
+                            self._ev("tts_first_audio", t.id, ms=timing["tts_first_filler_ms" if filler else "tts_first_ms"], filler=filler)
                             first = False
                         for i in range(0, len(chunk), SPEECH_CHUNK):
                             piece = chunk[i:i + SPEECH_CHUNK]
@@ -418,6 +475,9 @@ class VoiceSession:
                 self._ev("tts_done", t.id, frames=seq, audio_ms=round(sent_ms))
                 if pace and not sp.cancelled:    # keep "speaking" until the tail has been played (or the browser says it has)
                     await self._wait_any([sp.cancel, sp.played], sent_ms / 1000 - (time.perf_counter() - t0) + 0.3)
+                if not filler and not sp.cancelled and t.last_endpoint and not first:
+                    timing["answer_audio_ms"] = round(sent_ms)
+                    timing["endpoint_to_playback_done_ms"] = round((time.monotonic() - t.last_endpoint) * 1000)
             except asyncio.CancelledError:
                 sp.cancel.set()
                 raise
@@ -429,6 +489,10 @@ class VoiceSession:
                 if self._speech is sp:
                     self._speech = None
                 self._ev("playback_done", t.id, interrupted=sp.cancelled, audio_ms=round(sent_ms))
+                if not filler and "answer_audio_ms" in timing and not sp.cancelled:
+                    # the answer (not only a holding phrase) was spoken to the end: report the turn's latencies. Sent BEFORE audio_end, which stays the last message of a response.
+                    self._ev("turn_latency", t.id, **{k: v for k, v in timing.items() if k.startswith("endpoint_to_") or k in ("cold", "answer_audio_ms")})
+                    await self._send({"type": "metrics", "turn_id": t.id, "timing": dict(timing)})
                 await self._send({"type": "audio_end", "turn_id": t.id, "interrupted": sp.cancelled, "timing": dict(timing), **({"filler": True} if filler else {})})
 
     @staticmethod

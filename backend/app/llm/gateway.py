@@ -57,11 +57,19 @@ def get_chat_model(role: str = "default", settings: Settings | None = None) -> B
             from langchain_ollama import ChatOllama
         except ImportError as e:
             raise RuntimeError('Ollama provider needs: pip install -e "backend[ollama]"') from e
+        extra: dict = {}
+        if s.llm_num_thread:
+            extra["num_thread"] = s.llm_num_thread
+        if s.obs_ollama_metrics:
+            from app.observability.stages import OllamaMetricsHandler
+
+            extra["callbacks"] = [OllamaMetricsHandler(role)]
+        cap = s.triage_max_output_tokens if (role == "triage" and s.triage_max_output_tokens) else s.llm_max_output_tokens
         return ChatOllama(
             model=model, base_url=s.llm_base_url, temperature=s.llm_temperature, **_sampling(s, ollama=True),
-            num_ctx=s.llm_num_ctx, num_predict=s.llm_max_output_tokens, keep_alive=s.llm_keep_alive,
+            num_ctx=s.llm_num_ctx, num_predict=cap, keep_alive=s.llm_keep_alive,
             reasoning=s.llm_thinking,
-            client_kwargs={"timeout": s.llm_timeout_seconds},
+            client_kwargs={"timeout": s.llm_timeout_seconds}, **extra,
         )
 
     if s.llm_provider == "openai_compat":
@@ -155,7 +163,7 @@ def get_triager(settings: Settings | None = None):
         return RuleTriage()
     from app.agents.triage import LlmTriager
 
-    return LlmTriager(get_chat_model("triage", s))
+    return LlmTriager(get_chat_model("triage", s), cache_size=s.triage_cache_size, cache_ttl=s.triage_cache_ttl_seconds, prompt=s.triage_prompt)
 
 
 def get_rewriter(settings: Settings | None = None):

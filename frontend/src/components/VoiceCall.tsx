@@ -39,7 +39,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
   const [muted, setMuted] = useState(false);
   const [text, setText] = useState("");
   const [showLogin, setShowLogin] = useState(false);
-  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false), callNo = useRef(0);
+  const sock = useRef<Socket | null>(null), mic = useRef<Mic | null>(null), player = useRef<Player | null>(null), endRef = useRef<HTMLDivElement>(null), ending = useRef(false), callNo = useRef(0), fillerNow = useRef(false);
   // Turn ids restart at 1 on every call: line keys include the call number so call 2 can never overwrite call 1's transcript.
   const key = (turn?: number) => (turn === undefined ? undefined : `${callNo.current}:${turn}`);
   const live = phase !== "idle";
@@ -85,7 +85,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
         setStatus(m.status as ChatStatus);
         setLines((l) => [...l, { id: nextId++, turn: key(m.turn_id), role: "assistant", text: m.reply, citations: m.citations, status: m.status as ChatStatus, stale: m.stale }]);
         setPhase(m.stale ? "listening" : "speaking"); break;      // a stale answer (a newer question exists) is shown but never spoken
-      case "audio_start": if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
+      case "audio_start": fillerNow.current = !!m.filler; if (m.turn_id !== undefined) player.current?.begin(m.turn_id, m.sample_rate); break;
       case "audio_end":
         if (m.turn_id !== undefined) { if (m.interrupted) player.current?.stop(m.turn_id); else player.current?.end(m.turn_id); }
         if (!m.filler) setPhase((p) => (p === "speaking" || p === "thinking" ? "listening" : p));   // a holding phrase is not the end of the turn
@@ -109,6 +109,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       player.current = deps.player();
       player.current.onidle = () => setPhase((p) => (p === "speaking" ? "listening" : p));
       player.current.onplayed = (turn) => { try { sock.current?.send(JSON.stringify({ type: "playback", turn_id: turn, state: "ended" })); } catch { /* closed */ } };
+      player.current.onstarted = (turn) => { try { sock.current?.send(JSON.stringify({ type: "playback", turn_id: turn, state: "started", filler: fillerNow.current })); } catch { /* closed */ } };
       mic.current = await deps.mic((pcm) => sock.current?.send(pcm));
     } catch (e) {
       setPhase("idle"); player.current = null;
