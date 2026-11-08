@@ -49,6 +49,7 @@ Admin-only routes and tenant from the token on every query; strict request model
 - Backend, SQLite, whole suite (`pytest -n 4`): **1586 passed, 41 skipped**.
 - Backend with PostgreSQL 16 (`SG_TEST_DATABASE_URL=...`, whole suite, run serially): **1625 passed, 2 skipped**; includes `tests/db/test_postgres_m5.py` and the 0007/0008 up -> down -> up test.
 - Frontend: `vitest run` **190 passed** in 9 files; `tsc --noEmit` clean; production `next build` succeeded (routes /, /admin, /agent, /login, /voice).
+- Test-only fix found by your local run: the older `tests/voice/test_voice_ws.py` (real socket + REST from different threads) hit SQLite's "cannot commit transaction - SQL statements in progress" on the shared in-memory test database (about 1 run in 3 here). It now uses the file-backed SQLite fixture from `tests/calls/apidb.py`; 10 consecutive runs passed. Application code is unchanged by this.
 - `scripts/purge_trial_data.py` smoke-run on a scratch SQLite database (dry-run, exit 0).
 - Scenarios A-E (trial off; trial on without recording; consent granted and recorded; declined/withdrawn; failures, retention and purge) in `tests/calls/test_m5_scenarios.py`.
 

@@ -15,6 +15,7 @@ from app.voice.stt import FakeStt
 from app.voice.tts import FakeTts
 from app.voice.vad import EnergyVad
 from tests.api.conftest import T, api, auth, login  # noqa: F401
+from tests.calls.apidb import seeded_db  # noqa: F401  (file-backed SQLite: this module drives a real socket and REST from different threads, which the shared in-memory connection cannot do reliably)
 from tests.rag.conftest import embedder, ingested, settings  # noqa: F401
 from tests.voice.audio import chunks, utterance
 
