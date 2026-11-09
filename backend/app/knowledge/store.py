@@ -12,7 +12,7 @@ from sqlalchemy import String, and_, cast, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import KbDocument, KbProposal, KbVersion
+from app.db.models import KbDocPlacement, KbDocument, KbProposal, KbVersion
 from app.knowledge import audit
 from app.knowledge import validation as v
 from app.knowledge.errors import Conflict, NotFound, Invalid
@@ -79,7 +79,8 @@ def version_view(r: KbVersion, *, content: bool = False, proposal: KbProposal | 
 def doc_view(db: Session, d: KbDocument) -> dict:
     latest = db.get(KbVersion, (d.tenant_id, d.doc_id, d.latest_version)) if d.latest_version else None
     live = db.get(KbVersion, (d.tenant_id, d.doc_id, d.published_version)) if d.published_version else None
-    return {"doc_id": d.doc_id, "title": d.title, "category": d.category, "description": d.description, "tags": list(d.tags or []), "status": d.status,
+    place = db.get(KbDocPlacement, (d.tenant_id, d.doc_id))
+    return {"doc_id": d.doc_id, "folder_id": place.folder_id if place else None, "title": d.title, "category": d.category, "description": d.description, "tags": list(d.tags or []), "status": d.status,
             "origin": d.origin, "latest_version": d.latest_version, "published_version": d.published_version, "row_version": d.row_version,
             "latest_status": None if latest is None else LIFECYCLE[latest.status], "published_at": None if live is None else _iso(live.published_at),
             "published_by": None if live is None else live.published_by, "created_by": d.created_by, "created_at": _iso(d.created_at),
@@ -117,7 +118,7 @@ def create_document(db: Session, tenant_id: str, actor: str, s: Settings, *, doc
 
 
 def create_version(db: Session, tenant_id: str, actor: str, s: Settings, doc_id: str, *, content: str, change_note, title: str | None = None,
-                   source_filename=None, source_mime=None, expected_row_version: int | None = None, restored_from: int | None = None) -> KbVersion:
+                   source_filename=None, source_mime=None, expected_row_version: int | None = None, restored_from: int | None = None, author: str | None = None) -> KbVersion:
     """Append version N+1. Never touches an older version. Retries a few times when another writer got in first (unless the caller pinned a row_version)."""
     note = v.change_note(change_note, required=True)
     fname, mime = v.source(source_filename, source_mime)
@@ -140,7 +141,7 @@ def create_version(db: Session, tenant_id: str, actor: str, s: Settings, doc_id:
                 raise
             continue
         ver = KbVersion(tenant_id=tenant_id, doc_id=doc_id, version_no=n, title=new_title, content=body, checksum=chk, size_bytes=size, source_filename=fname,
-                        source_mime=mime, change_note=note, created_by=actor[:64], restored_from=restored_from, status="draft")
+                        source_mime=mime, change_note=note, created_by=(author or actor)[:64], restored_from=restored_from, status="draft")
         db.add(ver)
         db.flush()
         if restored_from is None:
@@ -187,8 +188,14 @@ def _like(q: str) -> str:
 
 
 def list_documents(db: Session, tenant_id: str, *, q: str | None = None, category: str | None = None, status: str | None = None, tag: str | None = None,
-                   page: int = 1, page_size: int = 25) -> dict:
+                   page: int = 1, page_size: int = 25, folder_ids: set[str] | None = None, unfiled: bool = False, published_only: bool = False) -> dict:
+    """`published_only` (staff) matches text only inside the PUBLISHED version, so a search can never reveal what an unpublished draft says.
+    `folder_ids` limits to documents placed in those folders; `unfiled` to documents at the root."""
     conds = [KbDocument.tenant_id == tenant_id]
+    if folder_ids is not None:
+        conds.append(exists().where(and_(KbDocPlacement.tenant_id == KbDocument.tenant_id, KbDocPlacement.doc_id == KbDocument.doc_id, KbDocPlacement.folder_id.in_(folder_ids))))
+    if unfiled:
+        conds.append(~exists().where(and_(KbDocPlacement.tenant_id == KbDocument.tenant_id, KbDocPlacement.doc_id == KbDocument.doc_id)))
     if category:
         conds.append(KbDocument.category == category)
     if status:
@@ -198,9 +205,14 @@ def list_documents(db: Session, tenant_id: str, *, q: str | None = None, categor
     if q and q.strip():
         pat = _like(q.strip())
         body = exists().where(and_(KbVersion.tenant_id == KbDocument.tenant_id, KbVersion.doc_id == KbDocument.doc_id,
-                                   or_(KbVersion.version_no == KbDocument.latest_version, KbVersion.version_no == KbDocument.published_version),
+                                   (KbVersion.version_no == KbDocument.published_version) if published_only else or_(KbVersion.version_no == KbDocument.latest_version, KbVersion.version_no == KbDocument.published_version),
                                    KbVersion.content.ilike(pat, escape="\\")))
-        conds.append(or_(KbDocument.title.ilike(pat, escape="\\"), KbDocument.doc_id.ilike(pat, escape="\\"), KbDocument.description.ilike(pat, escape="\\"), body))
+        if published_only:
+            ptitle = exists().where(and_(KbVersion.tenant_id == KbDocument.tenant_id, KbVersion.doc_id == KbDocument.doc_id, KbVersion.version_no == KbDocument.published_version,
+                                         KbVersion.title.ilike(pat, escape="\\")))
+            conds.append(or_(ptitle, KbDocument.doc_id.ilike(pat, escape="\\"), body))
+        else:
+            conds.append(or_(KbDocument.title.ilike(pat, escape="\\"), KbDocument.doc_id.ilike(pat, escape="\\"), KbDocument.description.ilike(pat, escape="\\"), body))
     total = db.execute(select(func.count()).select_from(KbDocument).where(*conds)).scalar_one()
     rows = db.execute(select(KbDocument).where(*conds).order_by(func.coalesce(KbDocument.updated_at, KbDocument.created_at).desc(), KbDocument.doc_id)
                       .limit(page_size).offset((page - 1) * page_size)).scalars().all()

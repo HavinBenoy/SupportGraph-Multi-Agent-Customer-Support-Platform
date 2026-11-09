@@ -98,3 +98,15 @@ Run: `make test-kb` (knowledge + migration tests on SQLite and the Knowledge fro
 - `tests/db/test_migrations_m6.py` (SQLite, from a schema at 0008; includes 0010) and `tests/db/test_postgres_m6.py` (PostgreSQL 16): 0009 up -> down -> up with existing documents, chunks and calls untouched, constraints enforced; on PostgreSQL also real concurrent versions, publishes, processing and proposals, vector staging, and a publish rollback.
 - `frontend/src/components/KnowledgeAdmin.test.tsx`: list and status, process/publish buttons appear only in the right lifecycle state and nothing publishes by itself, server refusals shown in words, new version sends the loaded `expected_row_version`, restore creates a new version, archived and published documents offer the right actions only, feedback -> draft -> approve without any publish call.
 - Not covered by any test: a real browser session on the Knowledge tab, real `nomic-embed-text` embeddings through the store (tests use the offline hashing embedder; the store calls the same embedder as retrieval, so real vectors take the same path), very large documents near the limits, and PostgreSQL behaviour with more than the six/five writers used in the race tests.
+
+
+## Part 1 (Knowledge Workspace)
+Run: `make test-kw` (backend knowledge + migration tests on SQLite, and the workspace frontend tests), `make test-kw-pg` (migration 0011 and concurrency on PostgreSQL 16), then `make test-fast`, `make test-pg`, `make frontend-test`, `make frontend-build`.
+
+| File | Covers |
+|---|---|
+| backend/tests/knowledge/test_diffing.py | the diff engine: equal+delete reproduces the original, equal+insert the proposal, unicode, CRLF, 4000-line document |
+| backend/tests/knowledge/test_workspace_folders.py | folders, hierarchy, depth, duplicates, rename CAS, moving documents (content/versions/live RAG untouched), listing filters, staff tree and search (no draft leak), published history, RBAC matrix, tenant isolation, concurrent folder creation, audit, disk-import compatibility |
+| backend/tests/knowledge/test_change_requests.py | start/resume, structured diff storage, draft persistence, multi-document requests, concurrent edit conflicts (token, parallel saves), submit rules, stale base, cancel, admin review, apply (draft versions only, all-or-nothing), audit without text leakage, isolation, M6 restore/unpublish compatibility |
+| backend/tests/db/test_postgres_workspace.py | 0011 up/down/up with data kept, DB constraints, racing folder creators/moves/saves/submits/applies on PostgreSQL |
+| frontend/src/components/workspace/KnowledgeWorkspace.test.tsx | browsing, breadcrumbs, read-only reader, search, history/compare, editor (review diff, save, 409, submit, cancel, resume), admin folders/move/review/apply, DiffView escaping |

@@ -9,10 +9,12 @@ from app.db.models import KbEvent
 ACTIONS = (
     "document_created", "metadata_updated", "version_created", "version_restored", "ingestion_started", "ingestion_completed", "ingestion_failed", "ingestion_superseded",
     "version_published", "version_unpublished", "document_archived", "document_unarchived", "proposal_created", "proposal_approved", "proposal_rejected",
-    "disk_import",
+    "disk_import", "folder_created", "folder_renamed", "document_moved", "change_request_created", "change_draft_saved", "change_request_submitted",
+    "change_request_cancelled", "change_request_approved", "change_request_rejected", "change_request_applied",
 )
 SAFE_KEYS = {"fields", "category", "status", "from_status", "to_status", "chunks", "model", "from_version", "to_version", "restored_from", "bytes", "checksum",
-             "call_id", "error", "decision", "unchanged", "origin", "count", "imported", "skipped", "failed", "tags", "stale_takeover", "attempt", "current_attempt"}
+             "call_id", "error", "decision", "unchanged", "origin", "count", "imported", "skipped", "failed", "tags", "stale_takeover", "attempt", "current_attempt",
+             "folder_id", "parent_id", "from_folder", "to_folder", "name", "request_id", "items", "added", "deleted", "base_version", "result_version"}
 MAX_STR = 200
 
 

@@ -29,7 +29,7 @@ def at_0006(tmp_path):
     Base.metadata.create_all(eng)
     with eng.begin() as c:
         c.execute(text("PRAGMA foreign_keys=OFF"))
-        for t in ("kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents",                 # M6 (0009) tables are not part of revision 0006
+        for t in ("kb_change_items", "kb_change_requests", "kb_doc_placement", "kb_folders", "kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents",              # M6 (0009) tables are not part of revision 0006
                   "feedback_reviews", "intervention_feedback", "call_recordings", "call_consents", "trial_events", "trial_settings"):
             c.execute(text(f"DROP TABLE {t}"))
         c.execute(text("ALTER TABLE documents DROP COLUMN kb_version"))

@@ -13,7 +13,7 @@ from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, false, func,
+    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, UniqueConstraint, false, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -738,6 +738,127 @@ class KbEvent(Base):
     version_no: Mapped[int | None] = mapped_column(Integer)
     summary: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Part 1 (knowledge workspace): folders, document placement, change requests. Everything is additive; the M6 tables keep their meaning.
+# Folders are the user-facing organisation of the knowledge. They never hold content and never affect retrieval; the database stays the single
+# source of truth. A document with no placement row sits at the root. A change request (draft -> submitted -> approved -> applied) carries the
+# proposed edit of one or more documents against the PUBLISHED version they were based on; nothing in it is live until an administrator applies it
+# (which creates ordinary draft versions) and publishes through the normal M6 pipeline.
+# ----------------------------------------------------------------------------------------------------------------------
+KB_REQUEST_STATUSES = ("draft", "submitted", "approved", "rejected", "cancelled", "applied")
+KB_REQUEST_SOURCES = ("manual", "ai_assisted")
+KB_ITEM_DECISIONS = ("accepted", "manual", "discarded")
+
+
+class KbFolder(Base):
+    """A folder. `parent_key` is '' for a top-level folder and the parent's id otherwise (a non-null stand-in so sibling-name uniqueness holds on every
+    database); `name_key` is the lower-cased name. Paths are computed from the parent chain, so renaming never rewrites descendants."""
+
+    __tablename__ = "kb_folders"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        ForeignKeyConstraint(["tenant_id", "parent_id"], ["kb_folders.tenant_id", "kb_folders.folder_id"]),
+        UniqueConstraint("tenant_id", "parent_key", "name_key", name="uq_kb_folders_sibling"),
+        CheckConstraint("parent_key = COALESCE(parent_id, '')", name="parent_key_matches"),
+        CheckConstraint("folder_id <> parent_id", name="not_own_parent"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    parent_id: Mapped[str | None] = mapped_column(String(32))
+    parent_key: Mapped[str] = mapped_column(String(32), default="")
+    name: Mapped[str] = mapped_column(String(80))
+    name_key: Mapped[str] = mapped_column(String(80))
+    row_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_by: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KbDocPlacement(Base):
+    """Which folder a document sits in. No row = the root. A separate table (not a column on kb_documents) keeps the migration purely additive and lets the
+    composite foreign keys be enforced on SQLite and PostgreSQL alike."""
+
+    __tablename__ = "kb_doc_placement"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "doc_id"], ["kb_documents.tenant_id", "kb_documents.doc_id"]),
+        ForeignKeyConstraint(["tenant_id", "folder_id"], ["kb_folders.tenant_id", "kb_folders.folder_id"]),
+        Index("ix_kb_doc_placement_folder", "tenant_id", "folder_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(String(32))
+    moved_by: Mapped[str] = mapped_column(String(64))
+    moved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KbChangeRequest(Base):
+    """A request to change one or more documents. `row_version` is its optimistic-concurrency token."""
+
+    __tablename__ = "kb_change_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("status IN ('draft','submitted','approved','rejected','cancelled','applied')", name="status_valid"),
+        CheckConstraint("source IN ('manual','ai_assisted')", name="source_valid"),
+        Index("ix_kb_change_requests_status", "tenant_id", "status"),
+        Index("ix_kb_change_requests_owner", "tenant_id", "created_by"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), default="draft")
+    source: Mapped[str] = mapped_column(String(12), default="manual")
+    description: Mapped[str | None] = mapped_column(String(1000))
+    row_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_by: Mapped[str | None] = mapped_column(String(64))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(String(500))
+    applied_by: Mapped[str | None] = mapped_column(String(64))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KbChangeItem(Base):
+    """The proposed edit of ONE document inside a request, against the published version it was based on (`base_version`, immutable, so the original text is
+    always recoverable). `diff` holds the STRUCTURED change ({"title": [...], "body": [...]} segments of equal/delete/insert), computed by the server from
+    base and proposed text, never taken from the client and never HTML. `origin`/`decision`/`rationale` are the hooks the AI-assisted workflow (Part 2) uses."""
+
+    __tablename__ = "kb_change_items"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "request_id"], ["kb_change_requests.tenant_id", "kb_change_requests.request_id"]),
+        ForeignKeyConstraint(["tenant_id", "doc_id"], ["kb_documents.tenant_id", "kb_documents.doc_id"]),
+        ForeignKeyConstraint(["tenant_id", "doc_id", "base_version"], ["kb_versions.tenant_id", "kb_versions.doc_id", "kb_versions.version_no"]),
+        CheckConstraint("origin IN ('manual','ai')", name="origin_valid"),
+        CheckConstraint("decision IS NULL OR decision IN ('accepted','manual','discarded')", name="decision_valid"),
+        Index("ix_kb_change_items_doc", "tenant_id", "doc_id"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    base_version: Mapped[int] = mapped_column(Integer)
+    base_checksum: Mapped[str] = mapped_column(String(64))
+    proposed_title: Mapped[str] = mapped_column(String(300))
+    proposed_content: Mapped[str] = mapped_column(Text)
+    proposed_checksum: Mapped[str] = mapped_column(String(64))
+    diff: Mapped[dict] = mapped_column(JSON, default=dict)
+    stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    origin: Mapped[str] = mapped_column(String(8), default="manual")
+    decision: Mapped[str | None] = mapped_column(String(10))
+    rationale: Mapped[str | None] = mapped_column(String(1000))
+    row_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(64))
+    result_version: Mapped[int | None] = mapped_column(Integer)
 
 
 def _guard_version_update(mapper, connection, target) -> None:

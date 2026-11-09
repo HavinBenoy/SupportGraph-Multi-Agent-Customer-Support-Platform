@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbDoc, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbDoc, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -89,6 +89,29 @@ export const api = {
   kbReview: (token: string, call_id: string, decision: "approve" | "reject", note?: string) =>
     call<KbProposalRow>(`/admin/knowledge/proposals/${encodeURIComponent(call_id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
   kbAudit: (token: string, docId?: string) => call<{ items: KbAuditRow[]; next_before_id: number | null }>(`/admin/knowledge/audit?${new URLSearchParams({ limit: "20", ...(docId ? { doc_id: docId } : {}) })}`, { token }),
+  // Knowledge workspace (Part 1). Staff routes also accept administrators; folder and review routes are administrators only.
+  kwTree: (token: string, scope: "admin" | "staff") => call<KwTree>(`/${scope}/knowledge/tree`, { token }),
+  kwRead: (token: string, id: string) => call<KwReadDoc>(`/staff/knowledge/documents/${encodeURIComponent(id)}`, { token }),
+  kwSearch: (token: string, q: string, scope: "admin" | "staff") => call<{ items: { doc_id: string; title: string; category: string }[]; total: number }>(`/${scope}/knowledge/documents?${new URLSearchParams({ q, page_size: "30" })}`, { token }),
+  kwHistory: (token: string, id: string) => call<{ items: KwHistoryRow[]; total: number }>(`/staff/knowledge/documents/${encodeURIComponent(id)}/versions`, { token }),
+  kwVersion: (token: string, id: string, n: number) => call<KwHistoryRow & { content: string }>(`/staff/knowledge/documents/${encodeURIComponent(id)}/versions/${n}`, { token }),
+  kwCreateFolder: (token: string, name: string, parent_id: string | null) => call<KwFolder>("/admin/knowledge/folders", { method: "POST", token, body: { name, ...(parent_id ? { parent_id } : {}) } }),
+  kwRenameFolder: (token: string, id: string, name: string, expected_row_version: number) => call<KwFolder>(`/admin/knowledge/folders/${encodeURIComponent(id)}`, { method: "PUT", token, body: { name, expected_row_version } }),
+  kwMove: (token: string, docId: string, folder_id: string | null, expected_row_version: number) =>
+    call<{ doc_id: string; folder_id: string | null; row_version: number }>(`/admin/knowledge/documents/${encodeURIComponent(docId)}/folder`, { method: "PUT", token, body: { folder_id, expected_row_version } }),
+  kwPreview: (token: string, docId: string, content: string, title?: string) => call<KwPreview>("/staff/knowledge/diff-preview", { method: "POST", token, body: { doc_id: docId, content, ...(title ? { title } : {}) } }),
+  kwStart: (token: string, docId: string) => call<{ request: KwRequest; existing: boolean }>("/staff/knowledge/changes", { method: "POST", token, body: { doc_id: docId } }),
+  kwMine: (token: string) => call<KwRequestList>("/staff/knowledge/changes?page_size=50", { token }),
+  kwMyRequest: (token: string, id: string) => call<KwRequest>(`/staff/knowledge/changes/${encodeURIComponent(id)}`, { token }),
+  kwSaveItem: (token: string, id: string, docId: string, content: string, expected_row_version: number) =>
+    call<KwItem>(`/staff/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}`, { method: "PUT", token, body: { content, expected_row_version } }),
+  kwSubmit: (token: string, id: string, description: string) => call<KwRequest>(`/staff/knowledge/changes/${encodeURIComponent(id)}/submit`, { method: "POST", token, body: { description } }),
+  kwCancel: (token: string, id: string) => call<KwRequest>(`/staff/knowledge/changes/${encodeURIComponent(id)}/cancel`, { method: "POST", token }),
+  kwRequests: (token: string, status?: string) => call<KwRequestList>(`/admin/knowledge/changes?${new URLSearchParams({ page_size: "50", ...(status ? { status } : {}) })}`, { token }),
+  kwRequest: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}`, { token }),
+  kwReview: (token: string, id: string, decision: "approve" | "reject", note?: string) =>
+    call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
+  kwApply: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/apply`, { method: "POST", token }),
   trialStatus: (token: string) => call<{ enabled: boolean; recording_offered: boolean }>("/staff/trial", { token }),
   trial: (token: string) => call<TrialView>("/admin/trial", { token }),
   saveTrial: (token: string, expectedVersion: number, patch: TrialPatch) => call<TrialView>("/admin/trial", { method: "PUT", token, body: { expected_version: expectedVersion, ...patch } }),

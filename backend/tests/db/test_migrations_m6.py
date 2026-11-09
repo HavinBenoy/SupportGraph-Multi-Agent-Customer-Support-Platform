@@ -20,7 +20,7 @@ def at_0008(tmp_path):
     Base.metadata.create_all(eng)
     with eng.begin() as c:
         c.execute(text("PRAGMA foreign_keys=OFF"))
-        for t in ("kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents"):
+        for t in ("kb_change_items", "kb_change_requests", "kb_doc_placement", "kb_folders", "kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents"):
             c.execute(text(f"DROP TABLE {t}"))
         c.execute(text("ALTER TABLE documents DROP COLUMN kb_version"))
         c.execute(text("INSERT INTO tenants (id, name, timezone, attendance_threshold_pct, is_sample) VALUES ('keep_me','keep','Asia/Kolkata',75,1)"))
@@ -61,10 +61,10 @@ def test_0009_upgrades_downgrades_and_re_upgrades_without_touching_existing_data
     assert KB <= set(inspect(eng).get_table_names()) and counts(eng) == (1, 1, 1, 1)
 
 
-def test_0010_is_the_head_and_follows_0009_which_follows_0008(at_0008):
+def test_0011_is_the_head_and_the_chain_is_unbroken(at_0008):
     from alembic.script import ScriptDirectory
     script = ScriptDirectory.from_config(at_0008[1])
-    assert script.get_current_head() == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
+    assert script.get_current_head() == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
 
 
 def test_the_knowledge_tables_enforce_their_rules(at_0008):

@@ -34,7 +34,7 @@ from app.api.deps import require_admin, require_staff
 from app.auth.tokens import Principal
 from app.db.models import KB_CATEGORIES, KB_DOC_STATUSES, KB_PROPOSAL_STATUSES, KbDocument, KbVersion
 from app.db.session import session_scope
-from app.knowledge import audit, importer, pipeline, proposals, store
+from app.knowledge import audit, importer, pipeline, proposals, store, workspace
 from app.knowledge.errors import KbError
 from app.llm.gateway import get_embedding_client
 
@@ -144,13 +144,22 @@ async def meta(request: Request, p: Principal = Depends(require_admin)) -> dict:
 @admin_router.get("/documents")
 async def list_documents(q: Annotated[str | None, Query(max_length=100)] = None, category: Annotated[str | None, Query(max_length=24)] = None,
                          status: Annotated[str | None, Query(max_length=12)] = None, tag: Annotated[str | None, Query(max_length=30, pattern=r"^[a-z0-9-]+$")] = None,
-                         page: Annotated[int, Query(ge=1, le=10000)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+                         folder_id: Annotated[str | None, Query(max_length=32, pattern=r"^f_[0-9a-f]+$")] = None, unfiled: bool = False,
+                         include_subfolders: bool = True, page: Annotated[int, Query(ge=1, le=10000)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 25,
                          p: Principal = Depends(require_admin)) -> dict:
     if category is not None and category not in KB_CATEGORIES:
         raise HTTPException(422, "unknown category")
     if status is not None and status not in KB_DOC_STATUSES:
         raise HTTPException(422, "unknown status")
-    return await asyncio.to_thread(_guard, lambda db: store.list_documents(db, p.tenant_id, q=q, category=category, status=status, tag=tag, page=page, page_size=page_size))
+    if folder_id is not None and unfiled:
+        raise HTTPException(422, "use either folder_id or unfiled")
+
+    def work(db):
+        ids = None
+        if folder_id is not None:
+            ids = workspace.doc_folder_ids(db, p.tenant_id, folder_id) if include_subfolders else {workspace.get_folder(db, p.tenant_id, folder_id).folder_id}
+        return store.list_documents(db, p.tenant_id, q=q, category=category, status=status, tag=tag, page=page, page_size=page_size, folder_ids=ids, unfiled=unfiled)
+    return await asyncio.to_thread(_guard, work)
 
 
 @admin_router.post("/documents", status_code=201)
@@ -328,17 +337,24 @@ def _published_view(db, d: KbDocument, *, content: bool) -> dict:
     out = {"doc_id": d.doc_id, "title": ver.title, "category": d.category, "tags": list(d.tags or []), "version": ver.version_no, "published_at": store._iso(ver.published_at)}
     if content:
         out["content"] = ver.content
+        out |= {"published_by": ver.published_by, "change_note": ver.change_note, "authored_by": ver.created_by, "checksum": ver.checksum[:16], "size_bytes": ver.size_bytes,
+                "row_version": d.row_version, **workspace.location(db, d.tenant_id, d.doc_id)}
     return out
 
 
 @staff_router.get("/documents")
 async def staff_list(q: Annotated[str | None, Query(max_length=100)] = None, category: Annotated[str | None, Query(max_length=24)] = None,
+                     folder_id: Annotated[str | None, Query(max_length=32, pattern=r"^f_[0-9a-f]+$")] = None, unfiled: bool = False,
                      page: Annotated[int, Query(ge=1, le=10000)] = 1, page_size: Annotated[int, Query(ge=1, le=100)] = 25, p: Principal = Depends(require_staff)) -> dict:
     if category is not None and category not in KB_CATEGORIES:
         raise HTTPException(422, "unknown category")
+    if folder_id is not None and unfiled:
+        raise HTTPException(422, "use either folder_id or unfiled")
 
     def work(db):
-        res = store.list_documents(db, p.tenant_id, q=q, category=category, status="published", page=page, page_size=page_size)
+        ids = workspace.doc_folder_ids(db, p.tenant_id, folder_id) if folder_id is not None else None
+        res = store.list_documents(db, p.tenant_id, q=q, category=category, status="published", page=page, page_size=page_size, folder_ids=ids, unfiled=unfiled,
+                                   published_only=True)
         items = [_published_view(db, store.get_doc(db, p.tenant_id, i["doc_id"]), content=False) for i in res["items"]]
         return {"items": items, "total": res["total"], "page": page, "page_size": page_size}
     return await asyncio.to_thread(_guard, work)

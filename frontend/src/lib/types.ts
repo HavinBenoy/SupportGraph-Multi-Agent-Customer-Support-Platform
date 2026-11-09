@@ -122,3 +122,30 @@ export interface KbNewDoc { doc_id: string; title: string; category: string; con
 export interface KbProposalRow { call_id: string; doc_id: string; version: number; status: "proposed" | "approved" | "rejected" | "published"; proposed_by: string; reviewed_by: string | null; published_by: string | null; review_note: string | null }
 export interface KbFeedbackRow { call_id: string; category: string; what_was_wrong: string; suggested_correction: string | null; written_by: string; proposal: KbProposalRow | null }
 export interface KbAuditRow { id: number; at: string | null; actor: string; action: string; resource_id: string; doc_id: string | null; version: number | null }
+
+// ---- Knowledge workspace (Part 1) ----------------------------------------------------------------------------------------------
+export interface KwFolder { folder_id: string; parent_id: string | null; name: string; path: string; row_version: number; document_count: number }
+export interface KwTreeDoc { doc_id: string; title: string; category: string; folder_id: string | null; status: string; published_version: number | null; latest_version: number; updated_at: string | null }
+export interface KwTree { folders: KwFolder[]; documents: KwTreeDoc[]; root_document_count: number }
+export interface KwCrumb { id: string; name: string }
+export interface KwReadDoc {
+  doc_id: string; title: string; category: string; tags: string[]; version: number; published_at: string | null; published_by: string | null; change_note: string; authored_by: string;
+  checksum: string; size_bytes: number; row_version: number; content: string; folder_id: string | null; breadcrumbs: KwCrumb[]; path: string;
+}
+export interface KwHistoryRow { version: number; title: string; change_note: string; authored_by: string; published_at: string | null; published_by: string | null; is_current: boolean; size_bytes: number }
+export type DiffOp = "equal" | "delete" | "insert";
+export interface DiffSeg { op: DiffOp; text: string }
+export interface KwDiff { title: DiffSeg[]; body: DiffSeg[] }
+export interface KwStats { added_chars: number; deleted_chars: number; changed_blocks: number; title_changed?: boolean }
+export interface KwPreview { doc_id: string; base_version: number; diff: KwDiff; stats: KwStats; unchanged: boolean }
+export type KwStatus = "draft" | "submitted" | "approved" | "rejected" | "applied" | "cancelled";
+export interface KwItem {
+  doc_id: string; doc_title: string; base_version: number; current_published_version: number | null; base_stale: boolean; proposed_title: string; stats: KwStats; origin: string;
+  decision: string | null; rationale: string | null; row_version: number; result_version: number | null; diff?: KwDiff; proposed_content?: string;
+}
+export interface KwRequest {
+  request_id: string; status: KwStatus; source: string; description: string | null; row_version: number; created_by: string; created_at: string | null; updated_at: string | null;
+  submitted_by: string | null; submitted_at: string | null; reviewed_by: string | null; reviewed_at: string | null; review_note: string | null; applied_by: string | null; applied_at: string | null;
+  document_count: number; documents: { doc_id: string; title: string }[]; added_chars: number; deleted_chars: number; items?: KwItem[];
+}
+export interface KwRequestList { items: KwRequest[]; total: number; page: number; page_size: number }

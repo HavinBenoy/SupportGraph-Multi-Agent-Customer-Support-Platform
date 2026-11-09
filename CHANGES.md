@@ -1,3 +1,21 @@
+# Part 1 - Knowledge Workspace (folders, read-only reader, manual change requests)
+
+Apply on top of M6.1 (this zip is complete): `unzip -o ../supportgraph-part1-knowledge-workspace.zip`, then `make db-migrate` (applies **0011**, additive: four tables). `.env`, data and volumes untouched. Full design: docs/PART1.md; results: PART1_IMPLEMENTATION_REPORT.md.
+
+| Area | Files |
+|---|---|
+| Migration | backend/app/db/migrations/versions/0011_knowledge_workspace.py (new): `kb_folders`, `kb_doc_placement`, `kb_change_requests`, `kb_change_items` |
+| Models | backend/app/db/models.py: four models + status constants |
+| Services | backend/app/knowledge/diffing.py, workspace.py, changes.py (new); store.py (`author`, folder filters, published-only search), audit.py (10 actions, 11 safe keys) |
+| API | backend/app/api/routes/knowledge_workspace.py (new, registered in api/main.py); routes/knowledge.py (folder filters, richer staff document view) |
+| Backend tests | tests/knowledge/{kwhelp,test_diffing,test_workspace_folders,test_change_requests}.py, tests/db/test_postgres_workspace.py (new); test_migrations_m4_1_m5.py and test_migrations_m6.py (drop lists, head = 0011) |
+| Frontend | src/components/workspace/{KnowledgeWorkspace,Editor,Requests,DiffView}.tsx + test (new); AdminConsole.tsx (Workspace / Change requests / Publishing), StaffConsole.tsx (Knowledge tab); lib/api.ts, lib/types.ts; app/layout.tsx (fonts), app/knowledge-workspace.css (new) |
+| Docs / tooling | docs/PART1.md (new), docs/ROADMAP.md, docs/TESTING.md, Makefile (`test-kw`, `test-kw-pg`), PART1_IMPLEMENTATION_REPORT.md |
+
+Behaviour changes to existing code (all additive or bug fixes): staff document search now matches **published** text only (it could previously match unpublished draft text); the staff document view gains version/author/location fields; `store.create_version` accepts an optional `author`. Everything else in M6 is unchanged.
+
+---
+
 # M6.1 - Processing ownership (fencing) fix for the knowledge store
 
 Apply on top of the first M6 delivery (or from scratch with this zip, which is complete): `unzip -o ../supportgraph-m6-complete.zip`, then `make db-migrate` (applies 0009 if not yet applied, and **0010**). Additive: one column. `.env` untouched, nothing deleted, no data reset.
