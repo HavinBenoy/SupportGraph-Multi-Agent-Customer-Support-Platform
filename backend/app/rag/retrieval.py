@@ -31,6 +31,7 @@ class RetrievedChunk:
     heading: str  # breadcrumb, e.g. "Returns and Refunds > Return window"
     text: str
     score: float  # cosine similarity: 1.0 identical direction, 0 unrelated, negative opposed
+    doc_version: int | None = None  # M6: the knowledge-store version this passage was published from (None for articles loaded from disk)
 
     @property
     def source_id(self) -> str:
@@ -39,13 +40,16 @@ class RetrievedChunk:
 
     def to_dict(self) -> dict:
         """Plain data for graph state and traces (dicts serialise anywhere; objects may not)."""
-        return {"source_id": self.source_id, "doc_id": self.doc_id, "chunk_index": self.chunk_index,
-                "title": self.doc_title, "heading": self.heading, "text": self.text, "score": round(self.score, 4)}
+        out = {"source_id": self.source_id, "doc_id": self.doc_id, "chunk_index": self.chunk_index,
+               "title": self.doc_title, "heading": self.heading, "text": self.text, "score": round(self.score, 4)}
+        if self.doc_version is not None:
+            out["version"] = self.doc_version
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "RetrievedChunk":
         return cls(doc_id=d["doc_id"], chunk_index=d["chunk_index"], doc_title=d["title"], heading=d["heading"],
-                   text=d["text"], score=d["score"])
+                   text=d["text"], score=d["score"], doc_version=d.get("version"))
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -78,21 +82,21 @@ def search(db: Session, *, tenant_id: str, query_vector: list[float], model_name
     if db.get_bind().dialect.name == "postgresql":
         distance = Chunk.embedding.cosine_distance(query_vector)
         stmt = (
-            select(Chunk, Document.title, (1 - distance).label("score"))
+            select(Chunk, Document.title, (1 - distance).label("score"), Document.kb_version)
             .join(Document, on_doc)
             .where(*scope)
             .order_by(distance, Chunk.doc_id, Chunk.chunk_index)  # ties broken deterministically
             .limit(top_k)
         )
-        rows = [(c, title, float(score)) for c, title, score in db.execute(stmt)]
+        rows = [(c, title, float(score), ver) for c, title, score, ver in db.execute(stmt)]
     else:
-        stmt = select(Chunk, Document.title).join(Document, on_doc).where(*scope)
-        scored = [(c, title, _cosine(query_vector, list(c.embedding))) for c, title in db.execute(stmt)]
+        stmt = select(Chunk, Document.title, Document.kb_version).join(Document, on_doc).where(*scope)
+        scored = [(c, title, _cosine(query_vector, list(c.embedding)), ver) for c, title, ver in db.execute(stmt)]
         scored.sort(key=lambda r: (-r[2], r[0].doc_id, r[0].chunk_index))
         rows = scored[:top_k]
 
     return [RetrievedChunk(doc_id=c.doc_id, chunk_index=c.chunk_index, doc_title=title, heading=c.heading,
-                           text=c.text, score=score) for c, title, score in rows]
+                           text=c.text, score=score, doc_version=ver) for c, title, score, ver in rows]
 
 
 def retrieve(db: Session, *, tenant_id: str, query_vector: list[float], model_name: str, top_k: int,

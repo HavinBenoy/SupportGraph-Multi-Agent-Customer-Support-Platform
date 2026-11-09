@@ -1,3 +1,75 @@
+# M6.1 - Processing ownership (fencing) fix for the knowledge store
+
+Apply on top of the first M6 delivery (or from scratch with this zip, which is complete): `unzip -o ../supportgraph-m6-complete.zip`, then `make db-migrate` (applies 0009 if not yet applied, and **0010**). Additive: one column. `.env` untouched, nothing deleted, no data reset.
+
+**Concern confirmed.** `process_version` guarded completion/failure with `status = 'processing'` only, so a stale worker could not be told apart from the worker that took its claim over. Reproduced with deterministic tests on the old code: a stale worker finishing first committed its result; a stale worker failing turned the new worker's live claim into `failed`; a stale worker failing after the new worker completed deleted the new worker's staged chunks and reported `failed`; archiving mid-processing stranded the version in `processing`.
+
+**Fix.** `kb_versions.processing_attempt` (fencing token, +1 per claim). Every completion/failure is a compare-and-set on `status='processing' AND processing_attempt=<mine>`, first in its transaction; staged-row changes and audit events happen only if it matched. A worker that lost ownership gets 409, writes nothing except one `ingestion_superseded` audit event. Audit events now carry `attempt`. Archive during processing ends the attempt cleanly as `failed`. Full reasoning and alternatives: docs/M6.md section 4a.
+
+| File | Change |
+|---|---|
+| backend/app/db/migrations/versions/0010_kb_processing_attempt.py (new) | adds `kb_versions.processing_attempt INTEGER NOT NULL DEFAULT 0`; downgrade drops it |
+| backend/app/db/models.py | `KbVersion.processing_attempt` |
+| backend/app/knowledge/pipeline.py | fenced `process_version` (claim increments, CAS on attempt for complete/fail, owner-only staged-row writes, superseded audit, archive-during-processing) |
+| backend/app/knowledge/audit.py | action `ingestion_superseded`; summary keys `attempt`, `current_attempt` |
+| backend/tests/knowledge/fencing.py, test_processing_fencing.py (new) | 9 deterministic ownership scenarios (SQLite) |
+| backend/tests/db/test_postgres_m6.py | the same 9 scenarios on PostgreSQL 16, plus the 0010 migration test |
+| backend/tests/db/test_migrations_m6.py | head is 0010; 0010 up/down/up test (SQLite) |
+| docs/M6.md, docs/TESTING.md, M6_IMPLEMENTATION_REPORT.md | fencing section, tests, results |
+
+Backward compatibility: API unchanged except that a superseded process request now returns 409 instead of (in some interleavings) a wrong success/failure; the audit gains one action and two summary keys. Nothing else changed.
+
+---
+
+# M6 - Knowledge store, document versioning and audit (one change set)
+
+Apply (from the project root): `unzip -o ../supportgraph-m6-complete.zip`, then `make db-migrate` (migration 0009, additive). No new dependency, no model/embedding/retrieval change, `.env` untouched, nothing deleted, no data reset. Full write-up: **docs/M6.md** and **M6_IMPLEMENTATION_REPORT.md**. The M4.1 + M5 section further down is kept as history.
+
+## Files created
+| File | Purpose |
+|---|---|
+| backend/app/db/migrations/versions/0009_knowledge_store.py | migration 0009: `documents.kb_version`; tables `kb_documents`, `kb_versions`, `kb_version_chunks`, `kb_proposals`, `kb_events` |
+| backend/app/knowledge/__init__.py, errors.py | package; `KbError` family mapped to HTTP statuses |
+| backend/app/knowledge/validation.py | ids, titles, categories, tags, change notes, safe file names/MIME, size and chunk limits, checksum |
+| backend/app/knowledge/store.py | documents and immutable versions: create, version, restore, metadata, list/search, compare, views, compare-and-set `bump` |
+| backend/app/knowledge/pipeline.py | process (three-phase, claim/stale take-over), atomic publish, unpublish, archive, unarchive |
+| backend/app/knowledge/proposals.py | approved feedback -> draft proposal -> review -> publish link |
+| backend/app/knowledge/importer.py | bring disk articles under the store (idempotent) |
+| backend/app/knowledge/audit.py | append-only audit with an allow-listed summary |
+| backend/app/api/routes/knowledge.py | admin and staff routers |
+| backend/tests/knowledge/*.py (6 files), backend/tests/db/test_migrations_m6.py, backend/tests/db/test_postgres_m6.py | tests (see docs/TESTING.md) |
+| frontend/src/components/KnowledgeAdmin.tsx, KnowledgeAdmin.test.tsx | minimal admin Knowledge tab and its tests |
+| docs/M6.md, M6_IMPLEMENTATION_REPORT.md | documentation |
+
+## Files modified
+| File | Change |
+|---|---|
+| backend/app/db/models.py | `Document.kb_version`; M6 models, constants, immutability guards |
+| backend/app/config.py | `kb_max_bytes`, `kb_max_chunks`, `kb_processing_stale_s`, `kb_require_separate_reviewer` |
+| backend/app/api/main.py | includes the two knowledge routers |
+| backend/app/rag/retrieval.py | `RetrievedChunk.doc_version` (optional; omitted for disk articles); both search paths select `documents.kb_version` |
+| backend/app/rag/ingest.py | disk ingest skips and never withdraws store-managed documents (`IngestReport.managed_skipped`) |
+| backend/tests/db/test_migrations_m4_1_m5.py | the 0006 fixture also drops the M6 tables/column it builds from current metadata (it models the 0006 schema; no assertion weakened) |
+| frontend/src/components/AdminConsole.tsx | third tab "Knowledge" |
+| frontend/src/lib/api.ts, types.ts | `kb*` client functions and `Kb*` types |
+| .env.example | four optional `SG_KB_*` settings (commented, defaults shown) |
+| Makefile | `test-kb`, `test-kb-pg` |
+| docs/ROADMAP.md, docs/TESTING.md | M6 row, M7-M9 re-numbered; M6 test section |
+
+## Migration 0009
+Revision `0009`, `down_revision = 0008`. Additive: one nullable column and five new tables with named constraints and indexes. Existing rows are not rewritten; disk-ingested documents keep `kb_version = NULL` and stay disk-managed until `POST /api/admin/knowledge/import-disk`. `downgrade` drops exactly what it adds. Tested up -> down -> up on SQLite (from a schema at 0008) and PostgreSQL 16 with existing documents, chunks and calls preserved. No destructive operation is needed or used.
+
+## Dependency / environment changes
+None to dependencies. Four optional settings (all defaulted): `SG_KB_MAX_BYTES`, `SG_KB_MAX_CHUNKS`, `SG_KB_PROCESSING_STALE_S`, `SG_KB_REQUIRE_SEPARATE_REVIEWER`.
+
+## Backward compatibility
+- No existing route, schema, response field or test changed meaning. Citations gain an optional `version` key only for store-managed documents.
+- Disk ingest (`make ingest`) behaves as before for every document the store does not manage.
+- Retrieval, chunking, embeddings and the answer cache are untouched; a published store document is an ordinary `documents` + `chunks` row.
+- Trial mode, calls, feedback review: unchanged; the feedback tables are only read.
+
+---
+
 # M4.1 + M5 - Safer human takeover and Trial Verification Mode (one change set)
 
 Apply (from the project root): `unzip -o ../supportgraph-m4.1-m5-complete.zip`, then `make db-migrate` (migrations 0007 and 0008, additive). No new dependency, no model/embedding/RAG change, `.env` untouched, nothing deleted. Full write-up: **docs/M5.md** (and the updated docs/M4.md). The M4 section further down is kept as history.

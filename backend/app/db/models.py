@@ -188,6 +188,8 @@ class Document(Base):
     content_hash: Mapped[str] = mapped_column(String(64))  # sha256 of the file: unchanged files are not re-embedded
     last_reviewed: Mapped[date | None] = mapped_column(Date)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # M6: the knowledge-store version this live article was published from (NULL for articles loaded from disk by `make ingest`).
+    kb_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class Chunk(Base):
@@ -576,3 +578,183 @@ class CallRecording(Base):
     purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purge_attempts: Mapped[int] = mapped_column(Integer, default=0)
     purge_error: Mapped[str | None] = mapped_column(String(80))
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# M6: knowledge store. A LOGICAL document (kb_documents) has immutable VERSIONS (kb_versions). A version is processed into STAGED chunks
+# (kb_version_chunks: embedded, never searched). Publishing copies one version's staged chunks into the existing `documents`/`chunks`
+# tables in ONE transaction: those tables remain the only thing retrieval reads, so there is still exactly one RAG index.
+# Every important action is appended to kb_events. kb_proposals ties an approved intervention feedback record to the draft version made from it.
+# ----------------------------------------------------------------------------------------------------------------------
+KB_CATEGORIES = ("courses", "fees", "schedules", "admissions", "placement", "attendance", "examinations", "certificates", "support", "faq", "policies", "other")
+KB_DOC_STATUSES = ("draft", "published", "archived")
+KB_VERSION_STATUSES = ("draft", "processing", "ready", "failed", "published", "superseded", "archived")
+KB_PROPOSAL_STATUSES = ("proposed", "approved", "rejected", "published")
+_KB_CAT_SQL = ",".join(f"'{c}'" for c in KB_CATEGORIES)
+
+
+class KbImmutableError(Exception):
+    """A historical version's content, or an audit event, was about to be changed."""
+
+
+class KbDocument(Base):
+    """The logical document: identity, metadata and which version is live. `row_version` is bumped by every state change and is the
+    compare-and-set token that makes concurrent publish/archive/restore safe."""
+
+    __tablename__ = "kb_documents"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        CheckConstraint("status IN ('draft','published','archived')", name="status_valid"),
+        CheckConstraint(f"category IN ({_KB_CAT_SQL})", name="category_valid"),
+        CheckConstraint("origin IN ('store','imported')", name="origin_valid"),
+        CheckConstraint("(status = 'published') = (published_version IS NOT NULL)", name="published_has_version"),
+        Index("ix_kb_documents_tenant_status", "tenant_id", "status"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))                       # title of the LATEST version (titles are versioned content)
+    category: Mapped[str] = mapped_column(String(24))
+    description: Mapped[str | None] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="draft")
+    origin: Mapped[str] = mapped_column(String(10), default="store")
+    latest_version: Mapped[int] = mapped_column(Integer, default=0)
+    published_version: Mapped[int | None] = mapped_column(Integer)
+    row_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_by: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_by: Mapped[str | None] = mapped_column(String(64))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KbVersion(Base):
+    """One immutable version. The content columns can never be updated (an ORM guard raises; there is no API for it); only the processing and
+    publication bookkeeping columns change. Invariant: staged chunks exist exactly while status = 'ready'."""
+
+    __tablename__ = "kb_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "doc_id"], ["kb_documents.tenant_id", "kb_documents.doc_id"]),
+        CheckConstraint("version_no >= 1", name="version_positive"),
+        CheckConstraint("status IN ('draft','processing','ready','failed','published','superseded','archived')", name="status_valid"),
+        CheckConstraint("size_bytes >= 0", name="size_non_negative"),
+        Index("ix_kb_versions_checksum", "tenant_id", "checksum"),
+    )
+    IMMUTABLE = ("tenant_id", "doc_id", "version_no", "title", "content", "checksum", "size_bytes", "source_filename", "source_mime",
+                 "change_note", "created_by", "created_at", "restored_from")
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))
+    content: Mapped[str] = mapped_column(Text)
+    checksum: Mapped[str] = mapped_column(String(64))                     # sha256 over title + body
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    source_filename: Mapped[str | None] = mapped_column(String(120))      # sanitised display name only; never a path, nothing is read from disk
+    source_mime: Mapped[str | None] = mapped_column(String(40))
+    change_note: Mapped[str] = mapped_column(String(500))
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    restored_from: Mapped[int | None] = mapped_column(Integer)
+    # --- mutable bookkeeping ---
+    status: Mapped[str] = mapped_column(String(12), default="draft")
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Fencing token: +1 at every claim. Completion and failure only take effect for the attempt that still holds the current number (see pipeline.process_version).
+    processing_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_error: Mapped[str | None] = mapped_column(String(200))
+    chunk_count: Mapped[int | None] = mapped_column(Integer)
+    embedding_model: Mapped[str | None] = mapped_column(String(100))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_by: Mapped[str | None] = mapped_column(String(64))
+
+
+class KbVersionChunk(Base):
+    """A processed (chunked + embedded) passage of a not-yet-published version. NEVER searched: retrieval reads only `chunks`."""
+
+    __tablename__ = "kb_version_chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "doc_id", "version_no"], ["kb_versions.tenant_id", "kb_versions.doc_id", "kb_versions.version_no"], ondelete="CASCADE"),
+        CheckConstraint("chunk_index >= 0", name="chunk_index_non_negative"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    version_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    heading: Mapped[str] = mapped_column(String(400))
+    text: Mapped[str] = mapped_column(Text)
+    token_count: Mapped[int] = mapped_column(Integer)
+    embedding_model: Mapped[str] = mapped_column(String(100))
+    embedding = mapped_column(EmbeddingColumn, nullable=False)
+
+
+class KbProposal(Base):
+    """An approved intervention-feedback record that an administrator turned into a DRAFT version. One proposal per feedback record (the primary key
+    is the duplicate guard). Approval to start an update is not approval to publish: the version must still be processed, the proposal reviewed, and
+    the version published by an administrator."""
+
+    __tablename__ = "kb_proposals"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "call_id"], ["intervention_feedback.tenant_id", "intervention_feedback.call_id"]),
+        ForeignKeyConstraint(["tenant_id", "doc_id", "version_no"], ["kb_versions.tenant_id", "kb_versions.doc_id", "kb_versions.version_no"]),
+        CheckConstraint("status IN ('proposed','approved','rejected','published')", name="status_valid"),
+        Index("ix_kb_proposals_version", "tenant_id", "doc_id", "version_no", unique=True),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(128))
+    version_no: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12), default="proposed")
+    proposed_by: Mapped[str] = mapped_column(String(64))
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(String(500))
+    published_by: Mapped[str | None] = mapped_column(String(64))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KbEvent(Base):
+    """Append-only audit trail of knowledge operations. Holds ids, counts, checksums and field NAMES: never document text, feedback text or customer data."""
+
+    __tablename__ = "kb_events"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+        Index("ix_kb_events_tenant", "tenant_id", "id"),
+        Index("ix_kb_events_doc", "tenant_id", "doc_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(40))
+    resource_type: Mapped[str] = mapped_column(String(20))
+    resource_id: Mapped[str] = mapped_column(String(160))
+    doc_id: Mapped[str | None] = mapped_column(String(128))
+    version_no: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def _guard_version_update(mapper, connection, target) -> None:
+    from sqlalchemy import inspect as _inspect
+    state = _inspect(target)
+    for col in KbVersion.IMMUTABLE:
+        if state.attrs[col].history.has_changes():
+            raise KbImmutableError(f"kb_versions.{col} is immutable: create a new version instead")
+
+
+def _forbid(mapper, connection, target) -> None:
+    raise KbImmutableError(f"{type(target).__name__} rows are append-only: they are never updated or deleted")
+
+
+from sqlalchemy import event as _event  # noqa: E402
+
+_event.listen(KbVersion, "before_update", _guard_version_update)
+_event.listen(KbVersion, "before_delete", _forbid)
+_event.listen(KbEvent, "before_update", _forbid)
+_event.listen(KbEvent, "before_delete", _forbid)

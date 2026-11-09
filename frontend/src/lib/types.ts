@@ -102,3 +102,23 @@ export interface RecordingRow {
   size_bytes: number; expires_at: string | null; legal_hold: boolean; hold_reason: string | null; purged_at: string | null; purge_attempts: number; purge_error: string | null;
   consent_policy_version: number; provider: string; tracks: string[];
 }
+
+// ---- M6: knowledge store (administrators) ----
+export type KbLifecycle = "draft" | "processing" | "ready_for_review" | "published" | "failed" | "superseded" | "archived";
+export interface KbDoc {
+  doc_id: string; title: string; category: string; description: string | null; tags: string[]; status: "draft" | "published" | "archived"; origin: "store" | "imported";
+  latest_version: number; published_version: number | null; row_version: number; latest_status: KbLifecycle | null; published_at: string | null; published_by: string | null;
+  created_by: string; created_at: string | null; updated_by: string | null; updated_at: string | null; archived_by: string | null; archived_at: string | null;
+}
+export interface KbVersionRow {
+  version: number; title: string; status: string; lifecycle: KbLifecycle; checksum: string; size_bytes: number; change_note: string; created_by: string; created_at: string | null;
+  restored_from: number | null; chunk_count: number | null; embedding_model: string | null; processed_at: string | null; processing_error: string | null;
+  published_at: string | null; published_by: string | null; proposal: { call_id: string; status: string } | null; content?: string;
+}
+export interface KbList { items: KbDoc[]; total: number; page: number; page_size: number }
+export interface KbVersions { items: KbVersionRow[]; total: number }
+export interface KbMeta { categories: string[]; limits: { max_bytes: number; max_chunks: number }; embedding_model: string; unmanaged_disk_documents: string[] }
+export interface KbNewDoc { doc_id: string; title: string; category: string; content: string; description?: string }
+export interface KbProposalRow { call_id: string; doc_id: string; version: number; status: "proposed" | "approved" | "rejected" | "published"; proposed_by: string; reviewed_by: string | null; published_by: string | null; review_note: string | null }
+export interface KbFeedbackRow { call_id: string; category: string; what_was_wrong: string; suggested_correction: string | null; written_by: string; proposal: KbProposalRow | null }
+export interface KbAuditRow { id: number; at: string | null; actor: string; action: string; resource_id: string; doc_id: string | null; version: number | null }

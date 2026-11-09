@@ -29,8 +29,10 @@ def at_0006(tmp_path):
     Base.metadata.create_all(eng)
     with eng.begin() as c:
         c.execute(text("PRAGMA foreign_keys=OFF"))
-        for t in ("feedback_reviews", "intervention_feedback", "call_recordings", "call_consents", "trial_events", "trial_settings"):
+        for t in ("kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents",                 # M6 (0009) tables are not part of revision 0006
+                  "feedback_reviews", "intervention_feedback", "call_recordings", "call_consents", "trial_events", "trial_settings"):
             c.execute(text(f"DROP TABLE {t}"))
+        c.execute(text("ALTER TABLE documents DROP COLUMN kb_version"))
         c.execute(text("ALTER TABLE calls DROP COLUMN intervention_owner"))
         c.execute(text("ALTER TABLE calls DROP COLUMN trial_mode"))
         c.execute(text("INSERT INTO tenants (id, name, timezone, attendance_threshold_pct, is_sample) VALUES ('keep_me','keep','Asia/Kolkata',75,1)"))

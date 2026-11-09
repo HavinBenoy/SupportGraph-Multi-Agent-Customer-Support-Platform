@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Chunk, Document, Tenant
+from app.db.models import Chunk, Document, KbDocument, Tenant
 from app.llm.embeddings import EmbeddingClient
 from app.rag.chunking import DEFAULT_MAX_CHARS, TextChunk, chunk_markdown
 from app.rag.documents import IngestError, SourceDoc, load_public_documents
@@ -37,6 +37,7 @@ class IngestReport:
     updated: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
+    managed_skipped: list[str] = field(default_factory=list)   # M6: articles owned by the knowledge store; disk ingest never touches them
     chunks_written: int = 0
 
     @property
@@ -74,6 +75,11 @@ def ingest_tenant(db: Session, tenant_id: str, embedder: EmbeddingClient, *, ten
 
     docs = load_public_documents(tenant_id, tenants_dir)  # raises on anything that is not public
     report = IngestReport(tenant_id=tenant_id, embedding_model=embedder.name)
+    # M6: a document that the knowledge store manages (drafts, versions, publication, archive) is changed ONLY through the store. Disk ingest neither
+    # overwrites it (that would bypass versioning and publication) nor withdraws it because it has no file.
+    managed = set(db.execute(select(KbDocument.doc_id).where(KbDocument.tenant_id == tenant_id)).scalars())
+    report.managed_skipped = sorted(d.doc_id for d in docs if d.doc_id in managed)
+    docs = [d for d in docs if d.doc_id not in managed]
     on_disk = {d.doc_id for d in docs}
 
     # 1. Work out what is stale and embed it, without touching the database yet.
@@ -102,7 +108,7 @@ def ingest_tenant(db: Session, tenant_id: str, embedder: EmbeddingClient, *, ten
 
     # 3. Withdraw documents that no longer exist on disk (this tenant only).
     for (doc_id,) in db.execute(select(Document.doc_id).where(Document.tenant_id == tenant_id)).all():
-        if doc_id not in on_disk:
+        if doc_id not in on_disk and doc_id not in managed:
             db.execute(delete(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.doc_id == doc_id))
             db.execute(delete(Document).where(Document.tenant_id == tenant_id, Document.doc_id == doc_id))
             report.removed.append(doc_id)

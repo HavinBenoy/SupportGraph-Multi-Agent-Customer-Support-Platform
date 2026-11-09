@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbDoc, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -71,6 +71,24 @@ export const api = {
   skipFeedback: (token: string, id: string) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback/skip`, { method: "POST", token }),
   interventions: (token: string) => call<Interventions>("/staff/interventions", { token }),
   // M5: Trial Verification Mode (administrators only, except the read-only flag)
+  kbMeta: (token: string) => call<KbMeta>("/admin/knowledge/meta", { token }),
+  kbDocs: (token: string, q?: string, status?: string) => call<KbList>(`/admin/knowledge/documents?${new URLSearchParams({ page_size: "50", ...(q ? { q } : {}), ...(status ? { status } : {}) })}`, { token }),
+  kbCreate: (token: string, d: KbNewDoc) => call<{ document: KbDoc; version: KbVersionRow }>("/admin/knowledge/documents", { method: "POST", token, body: d }),
+  kbDoc: (token: string, id: string) => call<KbDoc>(`/admin/knowledge/documents/${encodeURIComponent(id)}`, { token }),
+  kbVersions: (token: string, id: string) => call<KbVersions>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions`, { token }),
+  kbVersion: (token: string, id: string, n: number) => call<KbVersionRow>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions/${n}`, { token }),
+  kbAddVersion: (token: string, id: string, content: string, change_note: string, expected_row_version: number) =>
+    call<{ document: KbDoc; version: KbVersionRow }>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions`, { method: "POST", token, body: { content, change_note, expected_row_version } }),
+  kbRestore: (token: string, id: string, n: number) => call<{ document: KbDoc; version: KbVersionRow }>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions/${n}/restore`, { method: "POST", token, body: {} }),
+  kbProcess: (token: string, id: string, n: number) => call<{ status: string; chunks: number; error?: string }>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions/${n}/process`, { method: "POST", token }),
+  kbPublish: (token: string, id: string, n: number) => call<{ version: number; previous_version: number | null }>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions/${n}/publish`, { method: "POST", token }),
+  kbDocAction: (token: string, id: string, action: "unpublish" | "archive" | "unarchive") => call<Record<string, unknown>>(`/admin/knowledge/documents/${encodeURIComponent(id)}/${action}`, { method: "POST", token }),
+  kbFeedback: (token: string) => call<{ items: KbFeedbackRow[]; total: number }>("/admin/knowledge/feedback", { token }),
+  kbPropose: (token: string, call_id: string, content: string, target: { doc_id: string } | { new_document: { doc_id: string; title: string; category: string } }) =>
+    call<{ proposal: KbProposalRow; version: KbVersionRow }>("/admin/knowledge/proposals", { method: "POST", token, body: { call_id, content, ...target } }),
+  kbReview: (token: string, call_id: string, decision: "approve" | "reject", note?: string) =>
+    call<KbProposalRow>(`/admin/knowledge/proposals/${encodeURIComponent(call_id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
+  kbAudit: (token: string, docId?: string) => call<{ items: KbAuditRow[]; next_before_id: number | null }>(`/admin/knowledge/audit?${new URLSearchParams({ limit: "20", ...(docId ? { doc_id: docId } : {}) })}`, { token }),
   trialStatus: (token: string) => call<{ enabled: boolean; recording_offered: boolean }>("/staff/trial", { token }),
   trial: (token: string) => call<TrialView>("/admin/trial", { token }),
   saveTrial: (token: string, expectedVersion: number, patch: TrialPatch) => call<TrialView>("/admin/trial", { method: "PUT", token, body: { expected_version: expectedVersion, ...patch } }),

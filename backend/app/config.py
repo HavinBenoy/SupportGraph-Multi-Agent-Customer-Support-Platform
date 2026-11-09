@@ -189,6 +189,12 @@ class Settings(BaseSettings):
     trial_metrics_max_rows: int = Field(default=5000, ge=100, le=100000)
     trial_recording_max_mb: int = Field(default=200, ge=1, le=2000)    # a recording that reaches this size is stopped (reason `size_limit`)
 
+    # --- M6: knowledge store ---
+    kb_max_bytes: int = Field(default=200_000, ge=1_000, le=2_000_000)         # largest document body accepted (UTF-8 bytes)
+    kb_max_chunks: int = Field(default=300, ge=1, le=2000)                     # a document that would need more passages is refused (nothing is embedded)
+    kb_processing_stale_s: int = Field(default=300, ge=10, le=86400)           # a version stuck in `processing` this long (crash) may be processed again
+    kb_require_separate_reviewer: bool = False                                 # true: the administrator who proposed a feedback-based change cannot review it
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False

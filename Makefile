@@ -141,6 +141,13 @@ test-full:  ## everything except real models and browser e2e: backend (parallel)
 purge-trial:  ## delete trial data past its retention period (legal holds respected): make purge-trial TENANT=qspiders_sample [PREVIEW=1]
 	cd backend && ../.venv/bin/python scripts/purge_trial_data.py --tenant $(or $(TENANT),qspiders_sample) $(if $(PREVIEW),--dry-run,)
 
+test-kb:  ## the M6 knowledge-store backend tests (SQLite) and the Knowledge admin frontend tests
+	cd backend && ../.venv/bin/python -m pytest -q tests/knowledge tests/db/test_migrations_m6.py
+	cd frontend && npx vitest run src/components/KnowledgeAdmin.test.tsx
+
+test-kb-pg:  ## the M6 migration + concurrency tests on real PostgreSQL 16 (needs the dev database container)
+	cd backend && SG_TEST_DATABASE_URL=postgresql+psycopg://supportgraph:supportgraph@localhost:5432/postgres ../.venv/bin/python -m pytest -q tests/db/test_postgres_m6.py
+
 test-trial:  ## the M4.1 + M5 backend tests (SQLite) and the trial frontend tests
 	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/db/test_migrations_m4_1_m5.py
 	cd frontend && npx vitest run src/components/TrialAdmin.test.tsx src/components/LiveCalls.test.tsx src/components/VoiceCall.test.tsx src/lib

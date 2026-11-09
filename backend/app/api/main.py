@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from app.api.ratelimit import SlidingWindow
 from app.calls.hub import CallHub
 from app.trial.recording import get_provider
-from app.api.routes import admin, auth, calls, chat, staff, trial, voice
+from app.api.routes import admin, auth, calls, chat, knowledge, staff, trial, voice
 from app.config import Settings, get_settings
 from app.graph.checkpointer import get_checkpointer
 from app.graph.support import build_support_graph
@@ -102,7 +102,7 @@ def create_app(settings: Settings | None = None, graph=None) -> FastAPI:
     origins = [o.strip() for o in s.cors_origins.split(",") if o.strip()]
     if origins:
         app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT"], allow_headers=["Authorization", "Content-Type"])
-    for r in (auth.router, chat.router, staff.router, admin.router, voice.router, calls.router, calls.interventions_router, trial.admin_router, trial.staff_router):
+    for r in (auth.router, chat.router, staff.router, admin.router, voice.router, calls.router, calls.interventions_router, trial.admin_router, trial.staff_router, knowledge.admin_router, knowledge.staff_router):
         app.include_router(r)
 
     @app.get("/api/health")
