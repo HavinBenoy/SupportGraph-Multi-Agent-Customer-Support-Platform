@@ -1,0 +1,185 @@
+"""The structured form of a described change (what changed, from what, to what, for which entities), plus a deterministic parser.
+
+`ChangeSpec` is the schema a model must fill (validated by pydantic); `parse_rules` is the offline parser used by the rule model and as the safety net for the real
+model: if the model's answer does not validate, or has no old/new value, the rules get a try before staff are asked to rephrase."""
+
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.knowledge.impact.values import _MONEY, _TIME, kind_of
+
+MAX_FACTS = 5
+
+_STOP = set("""a an the of in on at to for from and or is are was were be been being has have had will would shall should can could now then with by as it its this that these
+those wherever where when whenever applicable relevant update updated updating change changed changes changing institutional institute knowledge base please new old
+starting start starts effective beginning begin onwards onward also all any every each other others related documents document files file information info details
+detail replace replaced replacing replacement swap swapped instead across mention mentions mentioned reflect reflects reflected make sure ensure need needs needed from about into over under per such so than""".split())
+ATTRIBUTES = set("""fee fees price prices pricing cost costs charge charges tuition amount timing timings time times schedule schedules duration durations faculty trainer trainers
+instructor instructors teacher teachers mentor mentors batch batches course courses class classes session sessions policy policies syllabus curriculum discount discounts
+installment installments instalment instalments rupees rupee rs inr program programme programs programmes""".split())
+_MONTHS = set("january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec".split())
+_DATE = (r"(?:[A-Z][a-z]+\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2}|"
+         r"\d{1,2}/\d{1,2}/\d{2,4})")
+_EFFECTIVE = re.compile(rf"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|with effect from|onwards? from)\s+(?:on\s+)?(?P<d>{_DATE})")
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.\-]*|\d+")
+
+
+class Fact(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    attribute: str = Field(default="", max_length=60)
+    old_value: str | None = Field(default=None, max_length=200)
+    new_value: str | None = Field(default=None, max_length=200)
+    effective: str | None = Field(default=None, max_length=60)
+    conditions: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("old_value", "new_value", "effective", mode="before")
+    @classmethod
+    def _clean(cls, v):
+        if v is None:
+            return None
+        t = " ".join(str(v).split()).strip(" .,;:\"'")
+        return t or None
+
+
+class Question(BaseModel):
+    id: str = Field(max_length=24)
+    doc_id: str | None = Field(default=None, max_length=120)
+    text: str = Field(max_length=300)
+    options: list[str] = Field(default_factory=list, max_length=12)
+
+
+class ChangeSpec(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    summary: str = Field(default="", max_length=300)
+    facts: list[Fact] = Field(default_factory=list, max_length=MAX_FACTS)
+    entity_terms: list[str] = Field(default_factory=list, max_length=12)
+    key_terms: list[str] = Field(default_factory=list, max_length=12)      # the entity terms that tell this subject apart from its neighbours (set by discovery, never by a model)
+    wants_all: bool = False                                  # the description says "all" / "every" / "both": no need to ask which one
+
+    @field_validator("entity_terms", mode="before")
+    @classmethod
+    def _terms(cls, v):
+        return [t for t in dict.fromkeys(str(x).strip().lower() for x in (v or [])) if t][:12]
+
+    def actionable(self) -> list[Fact]:
+        return [f for f in self.facts if f.old_value and f.new_value]
+
+
+def words(text: str) -> list[str]:
+    return [w.lower().strip(".-") for w in _WORD.findall(text or "") if w.strip(".-")]
+
+
+def entity_terms_from(text: str) -> list[str]:
+    """The words that NAME what the change is about (course, batch type, person), with generic words and attribute words (fee, timing ...) removed."""
+    out = []
+    for w in words(text):
+        if w in _STOP or w in ATTRIBUTES or w in _MONTHS or w.isdigit() or len(w) < 2 or (len(w) == 2 and w not in {"ai", "ml", "bi", "qa", "ui", "ux", "hr"}):
+            continue
+        out.append(w)
+    return list(dict.fromkeys(out))[:12]
+
+
+_GENERIC = set("course courses batch batches class classes session sessions program programme programs programmes".split())
+
+
+def attribute_terms_from(text: str) -> list[str]:
+    """Attribute words (fee, timing, faculty ...), the specific ones first."""
+    found = list(dict.fromkeys(w for w in words(text) if w in ATTRIBUTES))
+    return sorted(found, key=lambda w: w in _GENERIC)
+
+
+def _tail_effective(text: str) -> tuple[str | None, str]:
+    m = _EFFECTIVE.search(text)
+    return (m.group("d").strip(), text[:m.start()] + " " + text[m.end():]) if m else (None, text)
+
+
+def _pair_values(text: str) -> tuple[str, str] | None:
+    """Two values of the same kind in the text (two amounts, or two time ranges): the first is the old one, the second the new one."""
+    for rx, ok in ((_MONEY, lambda m: m.group("cur") or m.group("k") or len(m.group("num").replace(",", "")) >= 4), (_TIME, lambda m: True)):
+        found = [m.group(0).strip() for m in rx.finditer(text) if ok(m)]
+        found = [f for f in found if kind_of(f) != "text"]
+        if len(found) >= 2 and found[0] != found[1]:
+            return found[0], found[1]
+    return None
+
+
+_FROM_TO = re.compile(r"\bfrom\s+(?P<old>.+?)\s+to\s+(?P<new>.+?)(?=\s+(?:starting|effective|beginning|w\.?e\.?f|for|as|across)\b|[.;\n]|$)", re.I)
+_REPLACE = re.compile(r"\b(?:replace[sd]?|replacing|swap(?:ped)?)\s+(?P<old>.+?)\s+(?:with|by)\s+(?P<new>.+?)(?=\s+(?:starting|effective|beginning|for|as|across)\b|[.;\n]|$)", re.I)
+_TITLES = re.compile(r"\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St)\.")
+_NAME = r"(?:(?:Dr|Mr|Mrs|Ms|Prof)\u2024?\s+)?[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*){0,2}"
+_REPLACED_BY = re.compile(rf"(?P<old>{_NAME})\s+(?:is\s+|was\s+|has\s+been\s+|will\s+be\s+|being\s+)?replaced\s+by\s+(?P<new>{_NAME})")
+_CHANGED_TO = re.compile(r"\b(?P<old>[^.;\n]+?)\s+(?:→|->)\s+(?P<new>[^.;\n]+?)(?=[.;\n]|$)")
+
+
+def parse_rules(description: str) -> ChangeSpec:
+    """Deterministic parse of "X changed from A to B (starting D)". Finds no facts (and the caller asks staff to rephrase) when it cannot tell old from new."""
+    text = " ".join((description or "").split())
+    protected = _TITLES.sub(lambda m: m.group(1) + "\u2024", text)                     # "Dr. Mehta": that dot does not end the sentence
+    eff, rest = _tail_effective(protected)
+    pair = _pair_values(rest)
+    old = new = None
+    if pair:
+        old, new = pair
+    else:
+        for rx in (_FROM_TO, _REPLACE, _REPLACED_BY, _CHANGED_TO):
+            m = rx.search(rest)
+            if m:
+                old, new = m.group("old").strip(" ,"), m.group("new").strip(" ,")
+                break
+    old, new = (x.replace("\u2024", ".") if x else x for x in (old, new))
+    facts: list[Fact] = []
+    if old and new and old.lower() != new.lower():
+        facts.append(Fact(attribute=(attribute_terms_from(rest) or [""])[0], old_value=old, new_value=new, effective=eff))
+    scoped = rest
+    scoped = scoped.replace("\u2024", ".")
+    for v in (old, new):
+        if v:
+            scoped = scoped.replace(v, " ")
+    return ChangeSpec(summary=text[:300], facts=facts, entity_terms=entity_terms_from(scoped), wants_all=bool(re.search(r"\b(all|every|both|each|everywhere)\b", text, re.I)))
+
+
+def spec_from_edit(title: str, path: str, diff_body: list[dict], description: str | None = None) -> ChangeSpec:
+    """Workflow A: derive the change from the staff member's own manual edit (the delete/insert pairs of the structured diff), with the document's title and
+    folder as the entities it is about. A description, if given, adds to it."""
+    facts: list[Fact] = []
+    segs = [s for s in diff_body if s["op"] != "equal" or s["text"].strip()]
+    i = 0
+    while i < len(segs) and len(facts) < MAX_FACTS:
+        s = segs[i]
+        nxt = segs[i + 1] if i + 1 < len(segs) else None
+        if s["op"] == "delete" and nxt and nxt["op"] == "insert":
+            o, n = " ".join(s["text"].split()), " ".join(nxt["text"].split())
+            if o and n and len(o) <= 200 and len(n) <= 200 and o.lower() != n.lower() and not any(f.old_value == o and f.new_value == n for f in facts):
+                facts.append(Fact(attribute=(attribute_terms_from(title) or [""])[0], old_value=o, new_value=n))
+            i += 2
+        else:
+            i += 1
+    base = parse_rules(description) if description else ChangeSpec()
+    if not facts:
+        facts = base.facts
+    terms = list(dict.fromkeys(entity_terms_from(f"{title} {path}") + base.entity_terms))[:12]
+    return ChangeSpec(summary=(description or f"Change to {title}")[:300], facts=facts, entity_terms=terms, wants_all=base.wants_all)
+
+
+# Alternatives of ONE thing that a description often fails to tell apart (several weekend batches, morning vs evening, online vs classroom ...). Two passages or documents
+# that carry different members of the same set are SIBLINGS; the analysis asks which one rather than guessing. The list is deliberate, small and deterministic.
+SIBLING_SETS = (
+    {"weekend", "weekday"}, {"morning", "afternoon", "evening", "night"}, {"online", "offline", "classroom", "hybrid"}, {"regular", "fasttrack", "crash"},
+    {"beginner", "intermediate", "advanced"}, {"fulltime", "parttime"},
+)
+_SERIAL = re.compile(r"\b(batch|section|group|cohort|campus|branch|slot|shift)\s+([a-z]|\d{1,2})\b", re.I)
+
+
+def sibling_marks(text: str) -> set[tuple[str, str]]:
+    t = (text or "").lower()
+    ws = set(words(t.replace("fast-track", "fasttrack").replace("fast track", "fasttrack").replace("full-time", "fulltime").replace("part-time", "parttime")
+                   .replace("full time", "fulltime").replace("part time", "parttime")))
+    out: set[tuple[str, str]] = {(f"set{i}", w) for i, grp in enumerate(SIBLING_SETS) for w in ws if w in grp}
+    out |= {(f"serial:{m.group(1).lower()}", m.group(2).lower()) for m in _SERIAL.finditer(t)}
+    return out
+
+
+def are_siblings(a: str, b: str) -> bool:
+    ma, mb = sibling_marks(a), sibling_marks(b)
+    return any(ka == kb and va != vb for ka, va in ma for kb, vb in mb)

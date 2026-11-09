@@ -9,7 +9,7 @@ const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went
 
 /** The editing workspace: the published text stays untouched on the server; this edits a private copy inside a change request.
  *  Edit tab = plain text area. Review tab = the server's structured diff of the copy against the published original. */
-export function Editor({ doc, onClose, onSubmitted }: { doc: KwReadDoc; onClose: (note?: string) => void; onSubmitted: (note: string) => void }) {
+export function Editor({ doc, onClose, onSubmitted, onFindRelated }: { doc: KwReadDoc; onClose: (note?: string) => void; onSubmitted: (note: string) => void; onFindRelated?: (r: { requestId: string; description: string; docId: string; title: string }) => void }) {
   const { withToken } = useAuth();
   const [req, setReq] = useState<KwRequest | null>(null);
   const [item, setItem] = useState<KwItem | null>(null);
@@ -21,6 +21,7 @@ export function Editor({ doc, onClose, onSubmitted }: { doc: KwReadDoc; onClose:
   const [stats, setStats] = useState({ added: 0, deleted: 0 });
   const [desc, setDesc] = useState("");
   const [asking, setAsking] = useState(false);
+  const [aiAsking, setAiAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -90,6 +91,13 @@ export function Editor({ doc, onClose, onSubmitted }: { doc: KwReadDoc; onClose:
     catch (e) { setError(msg(e)); } finally { setBusy(false); }
   };
 
+  const findRelated = async () => {
+    if (!req) return;
+    if (desc.trim().length < 8) { setError("Say what changed, in a sentence, so the assistant knows what to look for."); return; }
+    if (dirty && !(await save())) return;
+    onFindRelated?.({ requestId: req.request_id, description: desc.trim(), docId: doc.doc_id, title: doc.title });
+  };
+
   const cancel = async () => {
     if (dirty || (item && (item.stats.added_chars || item.stats.deleted_chars))) { if (!window.confirm("Discard your changes? The published document is not affected.")) return; }
     if (req) { try { await withToken((t) => api.kwCancel(t, req.request_id)); } catch (e) { setError(msg(e)); return; } }
@@ -133,9 +141,18 @@ export function Editor({ doc, onClose, onSubmitted }: { doc: KwReadDoc; onClose:
           </div>
         </div>
       )}
+      {aiAsking && (
+        <div className="kw-ask">
+          <label>Describe the change in a sentence
+            <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={3} maxLength={1000} placeholder="e.g. Python Full Stack fee is now ₹48,000 (was ₹45,000)" />
+          </label>
+          <p className="kw-muted tiny">The assistant will look for other documents that may need the same change. It only suggests: you decide on each one.</p>
+          <div className="kw-actions"><button className="kw-btn primary" onClick={findRelated} disabled={busy || !ready}>Find related documents</button><button className="kw-btn" onClick={() => setAiAsking(false)}>Back</button></div>
+        </div>)}
       <footer className="kw-actions kw-editor-foot">
         <button className="kw-btn" onClick={save} disabled={busy || !ready || !dirty}>Save draft</button>
         <button className="kw-btn primary" onClick={() => { setAsking(true); setView("review"); }} disabled={busy || !ready}>Submit change request…</button>
+        {onFindRelated && <button className="kw-btn" onClick={() => setAiAsking(true)} disabled={busy || !ready}>Find related documents with AI</button>}
         <button className="kw-btn ghost" onClick={cancel} disabled={busy}>Cancel changes</button>
         {dirty && <span className="kw-muted tiny">Unsaved changes</span>}
       </footer>

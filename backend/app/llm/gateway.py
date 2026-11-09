@@ -65,6 +65,8 @@ def get_chat_model(role: str = "default", settings: Settings | None = None) -> B
 
             extra["callbacks"] = [OllamaMetricsHandler(role)]
         cap = s.triage_max_output_tokens if (role == "triage" and s.triage_max_output_tokens) else s.llm_max_output_tokens
+        if role == "impact":
+            cap = s.impact_max_output_tokens
         return ChatOllama(
             model=model, base_url=s.llm_base_url, temperature=s.llm_temperature, **_sampling(s, ollama=True),
             num_ctx=s.llm_num_ctx, num_predict=cap, keep_alive=s.llm_keep_alive,
@@ -233,3 +235,14 @@ def get_judge(settings: Settings | None = None):
     from app.evals.judge import get_judge as _get
 
     return _get(settings)
+
+
+def get_impact_model(settings: Settings | None = None):
+    """The knowledge impact-analysis model (Part 2). "rules" mode and the fake provider use the deterministic rule engine (no model call, fully offline); otherwise the
+    chat model of role "impact" (SG_LLM_MODEL_IMPACT, falling back to SG_LLM_MODEL) fills validated schemas. The rule engine's checks run after EVERY model."""
+    s = settings or get_settings()
+    from app.knowledge.impact.evaluate import LlmImpactModel, RuleImpactModel
+
+    if s.kb_ai_mode == "rules" or (s.kb_ai_mode == "auto" and s.llm_provider == "fake"):
+        return RuleImpactModel()
+    return LlmImpactModel(get_chat_model("impact", s), name=f"{s.llm_provider}:{_role_model('impact', s)}")

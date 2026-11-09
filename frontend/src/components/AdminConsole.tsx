@@ -4,7 +4,7 @@ import { AdminDashboard } from "./AdminDashboard";
 import { KnowledgeAdmin } from "./KnowledgeAdmin";
 import { TrialAdmin } from "./TrialAdmin";
 import { KnowledgeWorkspace } from "./workspace/KnowledgeWorkspace";
-import { ChangeRequests } from "./workspace/Requests";
+import { ChangeRequests } from "./workspace/AdminRequests";
 
 type Tab = "analytics" | "knowledge" | "trial";
 type KbView = "workspace" | "requests" | "publishing";
@@ -28,7 +28,7 @@ export function AdminConsole() {
             <button role="tab" aria-selected={kb === "requests"} onClick={() => setKb("requests")}>Change requests</button>
             <button role="tab" aria-selected={kb === "publishing"} onClick={() => setKb("publishing")}>Publishing</button>
           </div>
-          {kb === "workspace" ? <KnowledgeWorkspace scope="admin" /> : kb === "requests" ? <ChangeRequests onOpenPublishing={() => setKb("publishing")} /> : <KnowledgeAdmin />}
+          {kb === "workspace" ? <KnowledgeWorkspace scope="admin" /> : kb === "requests" ? <ChangeRequests /> : <KnowledgeAdmin />}
         </div>
       )}
     </div>

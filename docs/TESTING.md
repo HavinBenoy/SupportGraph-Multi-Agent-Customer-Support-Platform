@@ -110,3 +110,6 @@ Run: `make test-kw` (backend knowledge + migration tests on SQLite, and the work
 | backend/tests/knowledge/test_change_requests.py | start/resume, structured diff storage, draft persistence, multi-document requests, concurrent edit conflicts (token, parallel saves), submit rules, stale base, cancel, admin review, apply (draft versions only, all-or-nothing), audit without text leakage, isolation, M6 restore/unpublish compatibility |
 | backend/tests/db/test_postgres_workspace.py | 0011 up/down/up with data kept, DB constraints, racing folder creators/moves/saves/submits/applies on PostgreSQL |
 | frontend/src/components/workspace/KnowledgeWorkspace.test.tsx | browsing, breadcrumbs, read-only reader, search, history/compare, editor (review diff, save, 409, submit, cancel, resume), admin folders/move/review/apply, DiffView escaping |
+
+## Part 2 (AI knowledge intelligence)
+Run: `make test-ai` (backend knowledge + migration tests on SQLite, and the workspace frontend tests), `make test-ai-pg` (migration 0012, atomic publication and retry on PostgreSQL 16), `make eval-impact` (15 scenarios with metrics; `REAL=1` adds the optional real-model check, needs Ollama), then `make test-fast`, `make test-pg`, `make frontend-test`, `make frontend-build`. The knowledge tests seed documents per test and are slow (about 10 minutes serially); use `-n 4`.

@@ -11,10 +11,15 @@ ACTIONS = (
     "version_published", "version_unpublished", "document_archived", "document_unarchived", "proposal_created", "proposal_approved", "proposal_rejected",
     "disk_import", "folder_created", "folder_renamed", "document_moved", "change_request_created", "change_draft_saved", "change_request_submitted",
     "change_request_cancelled", "change_request_approved", "change_request_rejected", "change_request_applied",
+    "change_analysis_started", "change_analysis_completed", "change_analysis_failed", "change_clarification_requested", "change_clarification_answered",
+    "change_suggestions_generated", "change_decision_recorded", "change_request_review_started", "change_request_returned", "change_item_edited", "change_item_reviewed",
+    "change_release_started", "change_item_processed", "change_release_failed", "change_release_published", "change_release_retried",
 )
 SAFE_KEYS = {"fields", "category", "status", "from_status", "to_status", "chunks", "model", "from_version", "to_version", "restored_from", "bytes", "checksum",
              "call_id", "error", "decision", "unchanged", "origin", "count", "imported", "skipped", "failed", "tags", "stale_takeover", "attempt", "current_attempt",
-             "folder_id", "parent_id", "from_folder", "to_folder", "name", "request_id", "items", "added", "deleted", "base_version", "result_version"}
+             "folder_id", "parent_id", "from_folder", "to_folder", "name", "request_id", "items", "added", "deleted", "base_version", "result_version",
+             "classification", "confidence", "candidates", "definite", "potential", "related", "unsupported", "historical", "questions", "documents", "retry", "stage",
+             "workflow", "admin_edited"}
 MAX_STR = 200
 
 

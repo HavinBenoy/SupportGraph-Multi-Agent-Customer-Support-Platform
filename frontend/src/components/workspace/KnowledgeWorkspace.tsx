@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import type { KwFolder, KwHistoryRow, KwReadDoc, KwTree, KwTreeDoc } from "@/lib/types";
 import { DiffView, DiffLegend } from "./DiffView";
 import { Editor } from "./Editor";
+import { AiChange } from "./AiChange";
 import { MyRequests } from "./Requests";
 
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
@@ -25,6 +26,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   const [editing, setEditing] = useState<KwReadDoc | null>(null);
   const [mine, setMine] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [ai, setAi] = useState<{ requestId?: string; draftRequestId?: string; autoStart?: boolean; referenceDocId?: string; referenceTitle?: string; description?: string } | null>(null);
 
   const load = useCallback(() => {
     withToken((t) => api.kwTree(t, scope)).then((r) => { setTree(r); setError(null); }).catch((e) => setError(msg(e)));
@@ -48,8 +50,8 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   const docsHere = (tree?.documents ?? []).filter((d) => d.folder_id === cwd);
   const crumbs = useMemo(() => { const out: KwFolder[] = []; let c = cwd; while (c && folderMap.has(c)) { out.unshift(folderMap.get(c)!); c = folderMap.get(c)!.parent_id; } return out; }, [cwd, folderMap]);
 
-  const goFolder = (id: string | null) => { setCwd(id); setOpen(null); setEditing(null); setMine(false); setNavOpen(false); };
-  const goDoc = (d: { doc_id: string }, folder?: string | null) => { if (folder !== undefined) setCwd(folder); setOpen(d.doc_id); setEditing(null); setMine(false); setQ(""); setNavOpen(false); };
+  const goFolder = (id: string | null) => { setCwd(id); setOpen(null); setEditing(null); setMine(false); setAi(null); setNavOpen(false); };
+  const goDoc = (d: { doc_id: string }, folder?: string | null) => { if (folder !== undefined) setCwd(folder); setOpen(d.doc_id); setEditing(null); setMine(false); setAi(null); setQ(""); setNavOpen(false); };
 
   const renderFolders = (parent: string | null, depth: number): React.ReactNode =>
     (byParent.get(parent) ?? []).map((f) => (
@@ -80,7 +82,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
               </ul>
             </nav>
           )}
-          <div className="kw-side-foot"><button className={`kw-node${mine ? " sel" : ""}`} onClick={() => { setMine(true); setOpen(null); setEditing(null); setNavOpen(false); }}>{isAdmin ? "My drafts & requests" : "My change requests"}</button></div>
+          <div className="kw-side-foot"><button className={`kw-node${ai ? " sel" : ""}`} onClick={() => { setAi({}); setMine(false); setOpen(null); setEditing(null); setNavOpen(false); }}><span aria-hidden="true">✦</span> Create AI-assisted change</button><button className={`kw-node${mine ? " sel" : ""}`} onClick={() => { setMine(true); setAi(null); setOpen(null); setEditing(null); setNavOpen(false); }}>{isAdmin ? "My drafts & requests" : "My change requests"}</button></div>
         </aside>
 
         <main className="kw-main">
@@ -89,10 +91,13 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
           {notice && <p role="status" className="kw-banner ok">{notice}</p>}
           {!tree && !error && <p className="kw-muted" aria-busy="true">Loading…</p>}
 
-          {tree && editing ? (
-            <Editor doc={editing} onClose={(n) => { setEditing(null); if (n) setNotice(n); }} onSubmitted={(n) => { setEditing(null); setNotice(n); setMine(true); setOpen(null); }} />
+          {tree && ai ? (
+            <AiChange key={ai.requestId ?? ai.draftRequestId ?? "new"} initial={ai} onClose={() => setAi(null)} onSubmitted={(n) => { setAi(null); setNotice(n); setMine(true); setOpen(null); }} />
+          ) : tree && editing ? (
+            <Editor doc={editing} onClose={(n) => { setEditing(null); if (n) setNotice(n); }} onSubmitted={(n) => { setEditing(null); setNotice(n); setMine(true); setOpen(null); }}
+              onFindRelated={(r) => { setEditing(null); setAi({ draftRequestId: r.requestId, autoStart: true, description: r.description, referenceDocId: r.docId, referenceTitle: r.title }); }} />
           ) : tree && mine ? (
-            <MyRequests onResume={(docId) => { setMine(false); setOpen(docId); }} />
+            <MyRequests onResume={(docId) => { setMine(false); setOpen(docId); }} onResumeAi={(id) => { setMine(false); setAi({ requestId: id }); }} />
           ) : tree && open ? (
             <Reader key={open} docId={open} tree={tree} isAdmin={isAdmin} onCrumb={goFolder} onEdit={setEditing} onChanged={() => load()} setNotice={setNotice} />
           ) : tree && (

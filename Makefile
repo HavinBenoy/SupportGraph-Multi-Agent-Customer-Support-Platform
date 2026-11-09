@@ -1,4 +1,4 @@
-.PHONY: test-kw test-kw-pg venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice test-calls
+.PHONY: test-ai test-ai-pg eval-impact test-kw test-kw-pg venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice test-calls
 
 venv:
 	python3 -m venv .venv
@@ -154,6 +154,17 @@ test-kw:  ## Part 1 Knowledge Workspace: backend tests (SQLite) and workspace fr
 
 test-kw-pg:  ## Part 1 migration 0011 + concurrency tests on real PostgreSQL 16 (needs the dev database container)
 	cd backend && SG_TEST_DATABASE_URL=postgresql+psycopg://supportgraph:supportgraph@localhost:5432/postgres ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/db/test_postgres_workspace.py
+
+test-ai:  ## Part 2 AI knowledge intelligence: backend tests (SQLite) and workspace frontend tests
+	cd backend && ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/knowledge tests/db/test_migrations_m6.py
+	cd frontend && npx vitest run src/components/workspace
+
+test-ai-pg:  ## Part 2 migration 0012 + atomic multi-document publication on real PostgreSQL 16 (needs the dev database container)
+	cd backend && SG_TEST_DATABASE_URL=postgresql+psycopg://supportgraph:supportgraph@localhost:5432/postgres ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/db/test_postgres_ai_release.py
+
+eval-impact:  ## deterministic impact-analysis scenarios with metrics (OUT=dir); REAL=1 also runs the optional real-model check (needs Ollama)
+	cd backend && SG_EVAL_OUT=$(or $(OUT),/tmp/sg-impact-eval) ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/knowledge/test_ai_eval.py && ../.venv/bin/python scripts/eval_impact_summary.py $(or $(OUT),/tmp/sg-impact-eval)
+	$(if $(REAL),cd backend && SG_REAL_IMPACT=1 ../.venv/bin/python -m pytest -q -s -p no:cacheprovider tests/knowledge/test_ai_real_model.py,@true)
 
 test-trial:  ## the M4.1 + M5 backend tests (SQLite) and the trial frontend tests
 	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/db/test_migrations_m4_1_m5.py

@@ -1,3 +1,22 @@
+# Part 2 - AI knowledge change intelligence and the integrated admin workflow
+
+Apply on top of Part 1 (this zip contains only new and changed files): `unzip -o ../supportgraph-part2-ai-knowledge-intelligence.zip`, then `make db-migrate` (applies **0012**, additive and reversible). `.env`, data and volumes untouched. Design: docs/PART2.md; results: PART2_IMPLEMENTATION_REPORT.md.
+
+| Area | Files |
+|---|---|
+| Migration | backend/app/db/migrations/versions/0012_ai_change_workflow.py (new): 15 request states, AI/decision/admin/release columns on `kb_change_requests` and `kb_change_items` |
+| Models, config, gateway | backend/app/db/models.py; app/config.py (`kb_ai_*`, `llm_model_impact`, `impact_max_output_tokens`, `kb_release_stale_s`); app/llm/gateway.py (`get_impact_model`) |
+| Impact analysis | backend/app/knowledge/impact/{values,spec,passages,discover,evaluate,analyse}.py (new) |
+| Workflow services | backend/app/knowledge/changes.py (state machine, decisions, review, admin edit, audit view), release.py (new: process and publish as one unit), audit.py (new actions and safe keys) |
+| API | backend/app/api/routes/knowledge_workspace.py (AI start/analyse/decision, start-review, admin edit/review, publish, reopen, cancel, audit) |
+| Backend tests | tests/knowledge/{institute,aihelp,test_impact_units,test_ai_flow,test_ai_release,test_ai_eval,test_ai_real_model}.py, tests/db/test_postgres_ai_release.py (new); tests/db/test_migrations_m6.py (head = 0012) |
+| Frontend | src/components/workspace/{AiChange,Decisions,PatchView,ui,AdminRequests}.tsx and AiKnowledge.test.tsx (new); KnowledgeWorkspace, Editor, Requests, AdminConsole; lib/api.ts, lib/types.ts; app/knowledge-workspace.css |
+| Tooling / docs | Makefile (`test-ai`, `test-ai-pg`, `eval-impact`), backend/scripts/eval_impact_summary.py, docs/PART2.md, docs/ROADMAP.md, docs/TESTING.md, PART2_IMPLEMENTATION_REPORT.md |
+
+Behaviour changes to existing code: the admin **Change requests** tab is now the full review -> approve -> process -> publish screen (it no longer sends you to the Publishing tab; Publishing remains for standalone documents). The Part 1 `apply` route still works. The two Part 1 frontend tests that exercised the old approve-then-apply screen were replaced by tests of the new screen. Everything else in M6 and Part 1 is unchanged.
+
+---
+
 # Part 1 - Knowledge Workspace (folders, read-only reader, manual change requests)
 
 Apply on top of M6.1 (this zip is complete): `unzip -o ../supportgraph-part1-knowledge-workspace.zip`, then `make db-migrate` (applies **0011**, additive: four tables). `.env`, data and volumes untouched. Full design: docs/PART1.md; results: PART1_IMPLEMENTATION_REPORT.md.

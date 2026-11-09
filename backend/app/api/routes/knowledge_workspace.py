@@ -8,8 +8,14 @@ Administrators (/api/admin/knowledge, tenant from the token):
   POST /diff-preview                           structured diff of proposed text against the PUBLISHED version (writes nothing)
   GET  /changes ?status                        submitted/approved/rejected/applied/cancelled requests (drafts are private to their author)
   GET  /changes/{id}                           a request with every item's structured diff and proposed text
-  POST /changes/{id}/review                    approve | reject
-  POST /changes/{id}/apply                     approved -> ordinary DRAFT versions (all or nothing); publishing stays the M6 process + publish
+  POST /changes/{id}/review                    approve | reject | return   (approve publishes NOTHING)
+  POST /changes/{id}/apply                     Part 1 legacy: approved -> ordinary DRAFT versions only (the Change Requests screen uses /publish instead)
+  Part 2 (AI-assisted changes, completed inside the Change Requests screen):
+  POST /changes/{id}/start-review              submitted -> under_review (idempotent)
+  PUT  /changes/{id}/items/{doc_id}/edit       the administrator's final manual edit of one document
+  POST /changes/{id}/items/{doc_id}/review     confirm | exclude one document
+  POST /changes/{id}/publish                   process and publish every approved document as ONE unit (202; poll GET /changes/{id}); retry after failure is safe
+  POST /changes/{id}/reopen                    failed -> under_review      POST /changes/{id}/cancel     GET /changes/{id}/audit
 Staff (/api/staff/knowledge): read-only knowledge plus their OWN change requests.
   GET  /tree                                   published documents and the folders that lead to them
   GET  /documents/{id}/versions | /versions/{n} | /compare ?from&to      the published history of one document
@@ -19,6 +25,9 @@ Staff (/api/staff/knowledge): read-only knowledge plus their OWN change requests
   PUT  /changes/{id}/items/{doc_id}            save my edit of one document (expected_row_version = the item's token)
   POST /changes/{id}/items/{doc_id}/remove     drop a document from my draft
   POST /changes/{id}/submit | /cancel
+  Part 2: POST /ai-changes {description, reference_doc_id?, request_id?}   start an AI-assisted request (or turn my draft into one)
+          POST /changes/{id}/analyse {answers?}  202: run (or re-run) the impact analysis in the background; poll GET /changes/{id}
+          POST /changes/{id}/items/{doc_id}/decision {decision: accepted|manual|discarded, replacements?, content?, reason?}     GET /changes/{id}/audit
 Nothing here writes a published version, `documents` or `chunks`."""
 
 import asyncio
@@ -28,10 +37,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from app.api.deps import require_admin, require_staff
-from app.api.routes.knowledge import DOC, _guard
+from app.api.routes.knowledge import DOC, _guard, embedder_of
 from app.auth.tokens import Principal
 from app.db.models import KB_REQUEST_STATUSES, KbDocument, KbVersion
-from app.knowledge import changes, diffing, store, workspace
+from app.knowledge import changes, diffing, release, store, workspace
+from app.knowledge.impact import analyse as impact_analyse
+from app.llm.gateway import get_impact_model
 from app.knowledge.errors import NotFound
 from sqlalchemy import select
 
@@ -94,13 +105,57 @@ class SubmitIn(BaseModel):
 
 class ReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    decision: str = Field(pattern=r"^(approve|reject)$")
+    decision: str = Field(pattern=r"^(approve|reject|return)$")
     note: str | None = Field(default=None, max_length=500)
     expected_row_version: StrictInt | None = Field(default=None, ge=0)
 
 
 class ApplyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+class AiStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    description: str = Field(min_length=1, max_length=1000)
+    reference_doc_id: str | None = Field(default=None, max_length=128, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    request_id: str | None = Field(default=None, max_length=32, pattern=r"^cr_[0-9a-f]+$")
+
+
+class AnalyseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answers: dict[str, str] | None = Field(default=None, max_length=12)
+    description: str | None = Field(default=None, max_length=1000)
+    expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+class Replacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    index: StrictInt = Field(ge=0, le=100)
+    replacement: str = Field(max_length=4000)
+
+
+class DecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: str = Field(pattern=r"^(accepted|manual|discarded)$")
+    replacements: list[Replacement] | None = Field(default=None, max_length=20)
+    content: str | None = Field(default=None, max_length=2_100_000)
+    reason: str | None = Field(default=None, max_length=500)
+    expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+class AdminEditIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    replacements: list[Replacement] | None = Field(default=None, max_length=20)
+    content: str | None = Field(default=None, max_length=2_100_000)
+    note: str | None = Field(default=None, max_length=500)
+    expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+class ItemReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: str = Field(pattern=r"^(confirmed|excluded)$")
+    note: str | None = Field(default=None, max_length=500)
     expected_row_version: StrictInt | None = Field(default=None, ge=0)
 
 
@@ -146,7 +201,7 @@ async def staff_preview(body: PreviewIn, request: Request, p: Principal = Depend
 
 # ------------------------------------------------------------------------------------------------------------------------ admin: requests
 @admin_router.get("/changes")
-async def admin_list_changes(status: Annotated[str | None, Query(max_length=12)] = None, page: Annotated[int, Query(ge=1, le=10000)] = 1,
+async def admin_list_changes(status: Annotated[str | None, Query(max_length=24)] = None, page: Annotated[int, Query(ge=1, le=10000)] = 1,
                              page_size: Annotated[int, Query(ge=1, le=100)] = 25, p: Principal = Depends(require_admin)) -> dict:
     _status(status)
     if status == "draft":
@@ -170,6 +225,54 @@ async def admin_apply(request_id: REQ, request: Request, body: ApplyIn | None = 
     s = request.app.state.settings
     rv = body.expected_row_version if body else None
     return await asyncio.to_thread(_guard, lambda db: changes.apply(db, p.tenant_id, p.subject, s, request_id, expected_row_version=rv))
+
+
+@admin_router.post("/changes/{request_id}/start-review")
+async def admin_start_review(request_id: REQ, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.start_review(db, p.tenant_id, p.subject, request_id))
+
+
+@admin_router.put("/changes/{request_id}/items/{doc_id}/edit")
+async def admin_edit_item(request_id: REQ, doc_id: DOC, body: AdminEditIn, request: Request, p: Principal = Depends(require_admin)) -> dict:
+    s = request.app.state.settings
+    reps = [r.model_dump() for r in body.replacements] if body.replacements else None
+    return await asyncio.to_thread(_guard, lambda db: changes.admin_edit_item(db, p.tenant_id, p.subject, s, request_id, doc_id, replacements=reps, content=body.content,
+                                                                              note=body.note, expected_row_version=body.expected_row_version))
+
+
+@admin_router.post("/changes/{request_id}/items/{doc_id}/review")
+async def admin_item_review(request_id: REQ, doc_id: DOC, body: ItemReviewIn, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.admin_item_decision(db, p.tenant_id, p.subject, request_id, doc_id, body.decision, body.note,
+                                                                                  expected_row_version=body.expected_row_version))
+
+
+@admin_router.post("/changes/{request_id}/publish", status_code=202)
+async def admin_publish(request_id: REQ, request: Request, body: ApplyIn | None = None, p: Principal = Depends(require_admin)) -> dict:
+    """Process and publish every approved document of the request as one unit. Returns at once; the work continues in the background and the screen polls
+    GET /changes/{id}. A repeated call is safe: a running release answers 409, a finished one answers with the published request."""
+    s = request.app.state.settings
+    emb = embedder_of(request)
+    rv = body.expected_row_version if body else None
+    out = await asyncio.to_thread(_guard, lambda db: release.begin(db, p.tenant_id, p.subject, s, request_id, expected_row_version=rv))
+    if out["outcome"] == "started":
+        await asyncio.to_thread(release.launch, p.tenant_id, p.subject, request_id, out["attempt"], s, emb)
+    view = await asyncio.to_thread(_guard, lambda db: changes.admin_get(db, p.tenant_id, request_id))
+    return {"outcome": out["outcome"], "attempt": out["attempt"], "request": view}
+
+
+@admin_router.post("/changes/{request_id}/reopen")
+async def admin_reopen(request_id: REQ, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.reopen(db, p.tenant_id, p.subject, request_id))
+
+
+@admin_router.post("/changes/{request_id}/cancel")
+async def admin_cancel(request_id: REQ, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.cancel(db, p.tenant_id, p.subject, request_id, admin=True))
+
+
+@admin_router.get("/changes/{request_id}/audit")
+async def admin_request_audit(request_id: REQ, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.request_audit(db, p.tenant_id, request_id, admin=True))
 
 
 # ------------------------------------------------------------------------------------------------------------------------------- staff: read
@@ -237,7 +340,7 @@ async def staff_start(body: StartIn, request: Request, p: Principal = Depends(re
 
 
 @staff_router.get("/changes")
-async def staff_list_changes(status: Annotated[str | None, Query(max_length=12)] = None, page: Annotated[int, Query(ge=1, le=10000)] = 1,
+async def staff_list_changes(status: Annotated[str | None, Query(max_length=24)] = None, page: Annotated[int, Query(ge=1, le=10000)] = 1,
                              page_size: Annotated[int, Query(ge=1, le=100)] = 25, p: Principal = Depends(require_staff)) -> dict:
     _status(status)
     return await asyncio.to_thread(_guard, lambda db: changes.list_requests(db, p.tenant_id, owner=p.subject, status=status, page=page, page_size=page_size))
@@ -274,3 +377,35 @@ async def staff_submit(request_id: REQ, body: SubmitIn | None = None, p: Princip
 @staff_router.post("/changes/{request_id}/cancel")
 async def staff_cancel(request_id: REQ, p: Principal = Depends(require_staff)) -> dict:
     return await asyncio.to_thread(_guard, lambda db: changes.cancel(db, p.tenant_id, p.subject, request_id))
+
+
+@staff_router.get("/changes/{request_id}/audit")
+async def staff_request_audit(request_id: REQ, p: Principal = Depends(require_staff)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: changes.request_audit(db, p.tenant_id, request_id, admin=False, owner=p.subject))
+
+
+@staff_router.post("/ai-changes", status_code=201)
+async def staff_start_ai(body: AiStartIn, request: Request, p: Principal = Depends(require_staff)) -> dict:
+    s = request.app.state.settings
+    return await asyncio.to_thread(_guard, lambda db: changes.start_ai(db, p.tenant_id, p.subject, s, description=body.description, reference_doc_id=body.reference_doc_id,
+                                                                       request_id=body.request_id))
+
+
+@staff_router.post("/changes/{request_id}/analyse", status_code=202)
+async def staff_analyse(request_id: REQ, request: Request, body: AnalyseIn | None = None, p: Principal = Depends(require_staff)) -> dict:
+    """Start (or re-run) the impact analysis. It runs in the background under a fenced attempt number; poll GET /changes/{id} for progress, questions and results."""
+    s = request.app.state.settings
+    b = body or AnalyseIn()
+    view, attempt = await asyncio.to_thread(_guard, lambda db: changes.begin_analysis(db, p.tenant_id, p.subject, s, request_id, answers=b.answers, description=b.description,
+                                                                                      expected_row_version=b.expected_row_version))
+    model = get_impact_model(s)
+    await asyncio.to_thread(impact_analyse.launch, p.tenant_id, request_id, attempt, s, model, embedder_of(request))
+    return {"attempt": attempt, "request": view}
+
+
+@staff_router.post("/changes/{request_id}/items/{doc_id}/decision")
+async def staff_decide(request_id: REQ, doc_id: DOC, body: DecisionIn, request: Request, p: Principal = Depends(require_staff)) -> dict:
+    s = request.app.state.settings
+    reps = [r.model_dump() for r in body.replacements] if body.replacements else None
+    return await asyncio.to_thread(_guard, lambda db: changes.decide_item(db, p.tenant_id, p.subject, s, request_id, doc_id, body.decision, replacements=reps, content=body.content,
+                                                                          reason=body.reason, expected_row_version=body.expected_row_version))

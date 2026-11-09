@@ -61,10 +61,10 @@ def test_0009_upgrades_downgrades_and_re_upgrades_without_touching_existing_data
     assert KB <= set(inspect(eng).get_table_names()) and counts(eng) == (1, 1, 1, 1)
 
 
-def test_0011_is_the_head_and_the_chain_is_unbroken(at_0008):
+def test_0012_is_the_head_and_the_chain_is_unbroken(at_0008):
     from alembic.script import ScriptDirectory
     script = ScriptDirectory.from_config(at_0008[1])
-    assert script.get_current_head() == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
+    assert script.get_current_head() == "0012" and script.get_revision("0012").down_revision == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
 
 
 def test_the_knowledge_tables_enforce_their_rules(at_0008):
@@ -122,3 +122,48 @@ def test_0010_adds_the_processing_attempt_column_keeps_existing_versions_and_rev
         assert c.execute(text("SELECT status, content FROM kb_versions")).one() == ("ready", "body")
     command.upgrade(cfg, "head")
     assert counts(eng) == (1, 1, 1, 1)
+
+
+def test_0012_widens_the_request_state_machine_keeps_part1_rows_and_reverses_by_mapping_states_back(at_0008):
+    url, cfg, eng = at_0008
+    command.upgrade(cfg, "0011")
+    with eng.begin() as c:
+        c.execute(text("INSERT INTO kb_documents (tenant_id, doc_id, title, category, tags, status, origin, latest_version, published_version, row_version, created_by, created_at, updated_at) "
+                       "VALUES ('keep_me','a','A','faq','[]','published','store',1,1,1,'x','2026-11-01','2026-11-01')"))
+        c.execute(text("INSERT INTO kb_versions (tenant_id, doc_id, version_no, title, content, checksum, size_bytes, change_note, created_by, created_at, status) "
+                       "VALUES ('keep_me','a',1,'A','body','" + "0" * 64 + "',4,'n','x','2026-11-01','published')"))
+        for rid, st in (("cr_1", "submitted"), ("cr_2", "applied")):
+            c.execute(text(f"INSERT INTO kb_change_requests (tenant_id, request_id, status, source, row_version, created_by, created_at) VALUES ('keep_me','{rid}','{st}','manual',0,'staff1','2026-11-01')"))
+        c.execute(text("INSERT INTO kb_change_items (tenant_id, request_id, doc_id, base_version, base_checksum, proposed_title, proposed_content, proposed_checksum, diff, stats, origin, row_version, created_at) "
+                       "VALUES ('keep_me','cr_1','a',1,'" + "0" * 64 + "','A','body2','" + "1" * 64 + "','{}','{}','manual',0,'2026-11-01')"))
+    cols = lambda t: {c["name"] for c in inspect(eng).get_columns(t)}                       # noqa: E731
+    assert "analysis" not in cols("kb_change_requests")
+    command.upgrade(cfg, "0012")
+    assert {"analysis", "release", "release_attempt", "analysis_attempt", "return_note"} <= cols("kb_change_requests")
+    assert {"ai_suggestion", "final_edits", "admin_decision", "process_status", "publish_status", "classification"} <= cols("kb_change_items")
+    with eng.connect() as c:
+        assert c.execute(text("SELECT request_id, status, release_attempt FROM kb_change_requests ORDER BY request_id")).all() == [("cr_1", "submitted", 0), ("cr_2", "applied", 0)]
+        row = c.execute(text("SELECT proposed_content, admin_edited, ai_suggestion FROM kb_change_items")).one()
+        assert row[0] == "body2" and not row[1] and row[2] is None
+    def run(sql):
+        with eng.begin() as c:
+            c.execute(text("PRAGMA foreign_keys=ON"))
+            c.execute(text(sql))
+    ins = "INSERT INTO kb_change_requests (tenant_id, request_id, status, source, row_version, created_by, created_at) VALUES ('keep_me','%s','%s','ai_assisted',0,'staff1','2026-11-01')"
+    for i, st in enumerate(("draft", "analysing", "awaiting_clarification", "awaiting_decisions", "under_review", "needs_revision", "processing", "publishing", "published", "failed")):
+        run(ins % (f"new{i}", st))
+    with pytest.raises(IntegrityError):
+        run(ins % ("bad", "bogus"))
+    with pytest.raises(IntegrityError):                                                                        # the new item checks hold too
+        run("UPDATE kb_change_items SET admin_decision='maybe'")
+    with pytest.raises(IntegrityError):
+        run("UPDATE kb_change_items SET publish_status='half'")
+    command.downgrade(cfg, "0011")
+    assert "analysis" not in cols("kb_change_requests") and "ai_suggestion" not in cols("kb_change_items")
+    with eng.connect() as c:
+        got = dict(c.execute(text("SELECT request_id, status FROM kb_change_requests")).all())
+        assert got["cr_1"] == "submitted" and got["cr_2"] == "applied" and got["new1"] == "draft" and got["new4"] == "submitted" and got["new6"] == "approved" and got["new8"] == "applied"
+        assert c.execute(text("SELECT proposed_content FROM kb_change_items")).scalar() == "body2"
+        assert c.execute(text("SELECT content FROM kb_versions")).scalar() == "body"
+    command.upgrade(cfg, "head")
+    assert "analysis" in cols("kb_change_requests")

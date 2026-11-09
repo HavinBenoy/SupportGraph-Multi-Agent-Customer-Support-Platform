@@ -138,14 +138,44 @@ export interface DiffSeg { op: DiffOp; text: string }
 export interface KwDiff { title: DiffSeg[]; body: DiffSeg[] }
 export interface KwStats { added_chars: number; deleted_chars: number; changed_blocks: number; title_changed?: boolean }
 export interface KwPreview { doc_id: string; base_version: number; diff: KwDiff; stats: KwStats; unchanged: boolean }
-export type KwStatus = "draft" | "submitted" | "approved" | "rejected" | "applied" | "cancelled";
+export type KwStatus = "draft" | "analysing" | "awaiting_clarification" | "awaiting_decisions" | "submitted" | "under_review" | "needs_revision" | "rejected" | "approved" | "processing"
+  | "publishing" | "published" | "failed" | "cancelled" | "applied";
+export type KwClass = "definite" | "potential" | "related_no_change";
+export type KwDecision = "accepted" | "manual" | "discarded";
+/** One proposed edit of a whole line of the BASE (published) text: [start, end) offsets into it. */
+export interface KwPatch { start: number; end: number; original: string; replacement: string }
+export interface KwAiEdit extends KwPatch { heading: string; verdict: string; confidence: number; reason: string }
+export interface KwAiPassage { n: number; start: number; end: number; text: string; heading: string; verdict: string; confidence: number; reason: string; replacement: string | null }
+export interface KwAi {
+  reason: string | null; signals: Record<string, unknown> | null; uncertainty: string[] | null; flags: Record<string, number> | null; path: string | null;
+  passages: KwAiPassage[] | null; edits: KwAiEdit[] | null;
+}
 export interface KwItem {
   doc_id: string; doc_title: string; base_version: number; current_published_version: number | null; base_stale: boolean; proposed_title: string; stats: KwStats; origin: string;
   decision: string | null; rationale: string | null; row_version: number; result_version: number | null; diff?: KwDiff; proposed_content?: string;
+  base_checksum?: string; proposed_checksum?: string; classification?: KwClass | null; confidence?: number | null; decided_by?: string | null; decided_at?: string | null;
+  admin_decision?: "confirmed" | "excluded" | null; admin_note?: string | null; admin_by?: string | null; admin_at?: string | null; admin_edited?: boolean;
+  included?: boolean; staff_included?: boolean; actionable?: boolean; process_status?: "pending" | "processing" | "ready" | "failed" | null;
+  publish_status?: "pending" | "published" | "not_published" | "failed" | null; process_error?: string | null; ai?: KwAi | null; final_edits?: KwPatch[] | null;
+  overlapping_requests?: { request_id: string; status: KwStatus; created_by: string }[];
 }
+export interface KwQuestion { id: string; doc_id?: string | null; text: string; options: string[] }
+export interface KwAnalysis {
+  stage: string | null; done: number | null; total: number | null; error: string | null; model: string | null; attempt: number; started_at: string | null; completed_at: string | null;
+  questions: KwQuestion[]; answers: Record<string, string>;
+  summary: { discovered: number; definite: number; potential: number; related_no_change: number; not_relevant: { doc_id: string; title: string; reason: string }[];
+    flags: { unsupported: number; historical: number; scope: number } } | null;
+  spec: { summary: string; facts: { attribute: string; old_value: string | null; new_value: string | null; effective: string | null }[]; entity_terms: string[] } | null;
+}
+export interface KwCounts { accepted: number; edited: number; discarded: number; pending: number; manual_items: number; related: number; included: number; excluded_by_admin: number }
+export interface KwRelease { versions: Record<string, number>; previous: Record<string, number>; attempts: number; model: string; published_at: string }
+export interface KwFailure { stage: string; message: string; documents: string[] }
 export interface KwRequest {
   request_id: string; status: KwStatus; source: string; description: string | null; row_version: number; created_by: string; created_at: string | null; updated_at: string | null;
   submitted_by: string | null; submitted_at: string | null; reviewed_by: string | null; reviewed_at: string | null; review_note: string | null; applied_by: string | null; applied_at: string | null;
   document_count: number; documents: { doc_id: string; title: string }[]; added_chars: number; deleted_chars: number; items?: KwItem[];
+  return_note?: string | null; reference_doc_id?: string | null; failure?: KwFailure | null; published_by?: string | null; published_at?: string | null; release_attempt?: number;
+  release?: KwRelease | null; phase_started_at?: string | null; counts?: KwCounts; analysis?: KwAnalysis | null;
 }
+export interface KwAuditEvent { id: number; at: string | null; actor: string; action: string; doc_id: string | null; version: number | null; summary: Record<string, string | number | boolean> }
 export interface KwRequestList { items: KwRequest[]; total: number; page: number; page_size: number }

@@ -193,6 +193,19 @@ class Settings(BaseSettings):
     kb_max_bytes: int = Field(default=200_000, ge=1_000, le=2_000_000)         # largest document body accepted (UTF-8 bytes)
     kb_max_chunks: int = Field(default=300, ge=1, le=2000)                     # a document that would need more passages is refused (nothing is embedded)
     kb_processing_stale_s: int = Field(default=300, ge=10, le=86400)           # a version stuck in `processing` this long (crash) may be processed again
+    # Part 2: AI impact analysis. kb_ai_mode: "auto" = the rule engine with the fake provider, the configured chat model (role "impact") otherwise; "rules" = never call a
+    # model (offline, deterministic); "llm" = require the model. The model role is SG_LLM_MODEL_IMPACT (empty = SG_LLM_MODEL). Nothing leaves the machine: the endpoint
+    # guard (SG_ALLOW_EXTERNAL_LLM) applies exactly as for every other role.
+    kb_ai_mode: Literal["auto", "rules", "llm"] = "auto"
+    kb_ai_max_candidates: int = Field(default=12, ge=1, le=40)                 # documents evaluated per analysis
+    kb_ai_max_passages: int = Field(default=6, ge=1, le=20)                    # passages shown to the model per document
+    kb_ai_semantic_floor: float = Field(default=0.3, ge=0, le=1)               # semantic similarity that can nominate a document that lacks the old value
+    kb_ai_definite_confidence: float = Field(default=0.75, ge=0, le=1)         # below this a "definite" verdict is shown as "potential"
+    kb_ai_analysis_stale_s: int = Field(default=900, ge=30, le=86400)          # an analysis stuck in `analysing` this long (crash) may be started again
+    kb_ai_background: bool = True                                              # run analysis and release in a background thread (False = inline; tests)
+    llm_model_impact: str = ""
+    impact_max_output_tokens: int = Field(default=900, ge=64, le=4096)         # the impact role writes replacement text, so it gets a larger output cap than 400
+    kb_release_stale_s: int = Field(default=900, ge=30, le=86400)              # a request stuck in processing/publishing this long (crash) may be retried
     kb_require_separate_reviewer: bool = False                                 # true: the administrator who proposed a feedback-based change cannot review it
 
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---

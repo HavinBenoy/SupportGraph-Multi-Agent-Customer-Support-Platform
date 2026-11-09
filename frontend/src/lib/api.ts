@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbDoc, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbDoc, KwAuditEvent, KwDecision, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -109,8 +109,26 @@ export const api = {
   kwCancel: (token: string, id: string) => call<KwRequest>(`/staff/knowledge/changes/${encodeURIComponent(id)}/cancel`, { method: "POST", token }),
   kwRequests: (token: string, status?: string) => call<KwRequestList>(`/admin/knowledge/changes?${new URLSearchParams({ page_size: "50", ...(status ? { status } : {}) })}`, { token }),
   kwRequest: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}`, { token }),
-  kwReview: (token: string, id: string, decision: "approve" | "reject", note?: string) =>
+  kwReview: (token: string, id: string, decision: "approve" | "reject" | "return", note?: string) =>
     call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
+  // ---- Part 2: AI-assisted changes (staff) ----
+  kwAiStart: (token: string, description: string, opts: { reference_doc_id?: string; request_id?: string } = {}) =>
+    call<KwRequest>("/staff/knowledge/ai-changes", { method: "POST", token, body: { description, ...opts } }),
+  kwAnalyse: (token: string, id: string, body: { answers?: Record<string, string>; description?: string } = {}) =>
+    call<{ attempt: number; request: KwRequest }>(`/staff/knowledge/changes/${encodeURIComponent(id)}/analyse`, { method: "POST", token, body }),
+  kwDecide: (token: string, id: string, docId: string, body: { decision: KwDecision; replacements?: { index: number; replacement: string }[]; content?: string; reason?: string; expected_row_version?: number }) =>
+    call<KwItem>(`/staff/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}/decision`, { method: "POST", token, body }),
+  kwMyAudit: (token: string, id: string) => call<{ items: KwAuditEvent[] }>(`/staff/knowledge/changes/${encodeURIComponent(id)}/audit`, { token }),
+  // ---- Part 2: the integrated administrator workflow ----
+  kwStartReview: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/start-review`, { method: "POST", token }),
+  kwAdminEdit: (token: string, id: string, docId: string, body: { replacements?: { index: number; replacement: string }[]; content?: string; note?: string; expected_row_version?: number }) =>
+    call<KwItem>(`/admin/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}/edit`, { method: "PUT", token, body }),
+  kwItemReview: (token: string, id: string, docId: string, decision: "confirmed" | "excluded", note?: string, expected_row_version?: number) =>
+    call<KwItem>(`/admin/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}), ...(expected_row_version !== undefined ? { expected_row_version } : {}) } }),
+  kwPublish: (token: string, id: string) => call<{ outcome: string; attempt: number; request: KwRequest }>(`/admin/knowledge/changes/${encodeURIComponent(id)}/publish`, { method: "POST", token }),
+  kwReopen: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/reopen`, { method: "POST", token }),
+  kwAdminCancel: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/cancel`, { method: "POST", token }),
+  kwAudit: (token: string, id: string) => call<{ items: KwAuditEvent[] }>(`/admin/knowledge/changes/${encodeURIComponent(id)}/audit`, { token }),
   kwApply: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/apply`, { method: "POST", token }),
   trialStatus: (token: string) => call<{ enabled: boolean; recording_offered: boolean }>("/staff/trial", { token }),
   trial: (token: string) => call<TrialView>("/admin/trial", { token }),

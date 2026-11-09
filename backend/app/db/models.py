@@ -13,7 +13,7 @@ from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, UniqueConstraint, false, func,
+    JSON, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, UniqueConstraint, false, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -747,7 +747,8 @@ class KbEvent(Base):
 # proposed edit of one or more documents against the PUBLISHED version they were based on; nothing in it is live until an administrator applies it
 # (which creates ordinary draft versions) and publishes through the normal M6 pipeline.
 # ----------------------------------------------------------------------------------------------------------------------
-KB_REQUEST_STATUSES = ("draft", "submitted", "approved", "rejected", "cancelled", "applied")
+KB_REQUEST_STATUSES = ("draft", "analysing", "awaiting_clarification", "awaiting_decisions", "submitted", "under_review", "needs_revision", "rejected", "approved",
+                       "processing", "publishing", "published", "failed", "cancelled", "applied")           # `applied` = Part 1's "draft versions created" (kept for existing rows and the apply endpoint)
 KB_REQUEST_SOURCES = ("manual", "ai_assisted")
 KB_ITEM_DECISIONS = ("accepted", "manual", "discarded")
 
@@ -802,7 +803,8 @@ class KbChangeRequest(Base):
     __tablename__ = "kb_change_requests"
     __table_args__ = (
         ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
-        CheckConstraint("status IN ('draft','submitted','approved','rejected','cancelled','applied')", name="status_valid"),
+        CheckConstraint("status IN ('draft','analysing','awaiting_clarification','awaiting_decisions','submitted','under_review','needs_revision','rejected','approved',"
+                        "'processing','publishing','published','failed','cancelled','applied')", name="status_valid"),
         CheckConstraint("source IN ('manual','ai_assisted')", name="source_valid"),
         Index("ix_kb_change_requests_status", "tenant_id", "status"),
         Index("ix_kb_change_requests_owner", "tenant_id", "created_by"),
@@ -810,7 +812,7 @@ class KbChangeRequest(Base):
 
     tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     request_id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    status: Mapped[str] = mapped_column(String(12), default="draft")
+    status: Mapped[str] = mapped_column(String(24), default="draft")
     source: Mapped[str] = mapped_column(String(12), default="manual")
     description: Mapped[str | None] = mapped_column(String(1000))
     row_version: Mapped[int] = mapped_column(Integer, default=0)
@@ -824,6 +826,19 @@ class KbChangeRequest(Base):
     review_note: Mapped[str | None] = mapped_column(String(500))
     applied_by: Mapped[str | None] = mapped_column(String(64))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ---- Part 2 (migration 0012) ----
+    reference_doc_id: Mapped[str | None] = mapped_column(String(128))            # workflow A: the document the staff member started from
+    analysis: Mapped[dict | None] = mapped_column(JSON)                          # parsed change, clarification questions/answers, progress, summary, model name
+    analysis_attempt: Mapped[int] = mapped_column(Integer, default=0)            # fencing token of the background analysis run
+    analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    return_note: Mapped[str | None] = mapped_column(String(500))                 # why an administrator sent the request back to the staff member
+    release_attempt: Mapped[int] = mapped_column(Integer, default=0)             # fencing token of the process-and-publish run
+    phase_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release: Mapped[dict | None] = mapped_column(JSON)                           # the publication unit: {versions: {doc: n}, previous: {doc: n}, attempts, model}
+    failure: Mapped[dict | None] = mapped_column(JSON)                           # {stage, message, documents[]} of the last failed release
+    published_by: Mapped[str | None] = mapped_column(String(64))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class KbChangeItem(Base):
@@ -838,6 +853,10 @@ class KbChangeItem(Base):
         ForeignKeyConstraint(["tenant_id", "doc_id", "base_version"], ["kb_versions.tenant_id", "kb_versions.doc_id", "kb_versions.version_no"]),
         CheckConstraint("origin IN ('manual','ai')", name="origin_valid"),
         CheckConstraint("decision IS NULL OR decision IN ('accepted','manual','discarded')", name="decision_valid"),
+        CheckConstraint("classification IS NULL OR classification IN ('definite','potential','related_no_change')", name="classification_valid"),
+        CheckConstraint("admin_decision IS NULL OR admin_decision IN ('confirmed','excluded')", name="admin_decision_valid"),
+        CheckConstraint("process_status IS NULL OR process_status IN ('pending','processing','ready','failed')", name="process_status_valid"),
+        CheckConstraint("publish_status IS NULL OR publish_status IN ('pending','published','not_published','failed')", name="publish_status_valid"),
         Index("ix_kb_change_items_doc", "tenant_id", "doc_id"),
     )
 
@@ -859,6 +878,21 @@ class KbChangeItem(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(64))
     result_version: Mapped[int | None] = mapped_column(Integer)
+    # ---- Part 2 (migration 0012) ----
+    classification: Mapped[str | None] = mapped_column(String(20))               # AI items: definite | potential | related_no_change
+    confidence: Mapped[float | None] = mapped_column(Float)
+    ai_suggestion: Mapped[dict | None] = mapped_column(JSON)                     # the AI's own record, never edited afterwards: edits, reason, signals, uncertainty
+    final_edits: Mapped[list | None] = mapped_column(JSON)                       # the CURRENT patch [{start,end,original,replacement}] after staff/admin decisions
+    decided_by: Mapped[str | None] = mapped_column(String(64))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    admin_decision: Mapped[str | None] = mapped_column(String(10))               # confirmed | excluded (NULL = not reviewed yet)
+    admin_note: Mapped[str | None] = mapped_column(String(500))
+    admin_by: Mapped[str | None] = mapped_column(String(64))
+    admin_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    admin_edited: Mapped[bool] = mapped_column(Boolean, default=False)
+    process_status: Mapped[str | None] = mapped_column(String(12))
+    publish_status: Mapped[str | None] = mapped_column(String(14))
+    process_error: Mapped[str | None] = mapped_column(String(200))
 
 
 def _guard_version_update(mapper, connection, target) -> None:

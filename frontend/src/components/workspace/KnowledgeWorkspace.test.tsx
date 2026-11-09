@@ -1,7 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace";
-import { ChangeRequests } from "./Requests";
 import { DiffView } from "./DiffView";
 import { mockApi, renderWithAuth, signedIn } from "@/test/helpers";
 import type { KwDiff, KwItem, KwReadDoc, KwRequest, KwTree } from "@/lib/types";
@@ -236,40 +235,6 @@ describe("Knowledge workspace — administrators", () => {
     await userEvent.selectOptions(await screen.findByLabelText("Move to folder"), "f_2");
     await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/documents/fee-rules/folder")).toHaveLength(1));
     expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/documents/fee-rules/folder")[0][1] as RequestInit).body))).toEqual({ folder_id: "f_2", expected_row_version: 5 });
-  });
-
-  it("reviews a request: shows the diff, approves, then applies to create draft versions without publishing", async () => {
-    const submitted = req({ status: "submitted", description: "Three instalments", submitted_at: "2026-11-03T09:00:00Z", added_chars: 5, deleted_chars: 3, items: [item({ diff: DIFF, stats: { added_chars: 5, deleted_chars: 3, changed_blocks: 2 } })] });
-    const f = mockApi({
-      "GET /api/admin/knowledge/changes": () => ({ json: { items: [submitted], total: 1, page: 1, page_size: 50 } }),
-      "GET /api/admin/knowledge/changes/cr_1": () => ({ json: submitted }),
-      "POST /api/admin/knowledge/changes/cr_1/review": (b: { decision: string }) => ({ json: { ...submitted, status: "approved", reviewed_by: "admin1" } }),
-      "POST /api/admin/knowledge/changes/cr_1/apply": () => ({ json: { ...submitted, status: "applied", items: [item({ result_version: 3, diff: DIFF })] } }),
-    });
-    signedIn("admin", "admin1");
-    const onPub = vi.fn();
-    renderWithAuth(<ChangeRequests onOpenPublishing={onPub} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Review Three instalments" }));
-    const region = await screen.findByRole("region", { name: "Changes to Fee rules" });
-    expect(within(region).getByText("two").closest("del")).not.toBeNull();
-    await userEvent.type(screen.getByLabelText("Note (optional)"), "ok");
-    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(JSON.parse(String((calls(f, "POST", "/api/admin/knowledge/changes/cr_1/review")[0][1] as RequestInit).body))).toEqual({ decision: "approve", note: "ok" });
-    await userEvent.click(await screen.findByRole("button", { name: "Apply — create draft versions" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("not live until you process and publish");
-    expect(screen.getByText("Created draft v3.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Open Publishing" }));
-    expect(onPub).toHaveBeenCalled();
-    expect(calls(f, "POST", "/api/admin/knowledge/documents/fee-rules/versions/3/publish")).toHaveLength(0);
-  });
-
-  it("warns when the live text moved on since the request was written", async () => {
-    const stale = req({ status: "submitted", description: "Old", items: [item({ base_stale: true, current_published_version: 3, diff: DIFF })] });
-    mockApi({ "GET /api/admin/knowledge/changes": () => ({ json: { items: [stale], total: 1, page: 1, page_size: 50 } }), "GET /api/admin/knowledge/changes/cr_1": () => ({ json: stale }) });
-    signedIn("admin", "admin1");
-    renderWithAuth(<ChangeRequests />);
-    await userEvent.click(await screen.findByRole("button", { name: "Review Old" }));
-    expect(await screen.findByText(/live text has changed/)).toBeInTheDocument();
   });
 });
 
