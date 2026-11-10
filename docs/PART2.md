@@ -40,9 +40,30 @@ Both create the same `kb_change_requests` row with `source='ai_assisted'`. B can
 6. **Validate** (`evaluate.validate`): historical/dated records never change; scope and sibling guard; the replacement must contain the new value and not the old one; one line; length cap.
 7. **Persist** (`analyse.py`): classification (`definite`, `potential`, `related_no_change`; not-relevant documents are summarised, not stored), confidence, explanation, uncertainty notes, signals and the **patch** `[{start,end,original,replacement}]` over whole lines of the immutable base version. `apply_edits` refuses if the base no longer matches. No HTML is stored.
 
+### 4a. Changes that name no old value (Part 2 final fix)
+"The machine learning faculty is changed to santhosh sir from today" states the NEW value only; the old one is whatever the document says today. Such a *slot change* has an
+attribute (faculty, trainer, fee, timing ...), a subject (the entity words) and a new value, and `old_value = null`.
+* `spec.parse_rules` reads "X is/was changed|updated|replaced ... to Y", "change X to Y", "X is now Y", "new X is Y". `from today / now / immediately` mean the current fact (no date is
+  written); `from tomorrow` becomes the calendar date; other dates are written as "(effective <date>)".
+* `passages.slot_passages` finds lines of the form "<subject> <attribute> is|are|:|=|- <value>" and returns each with a copy of the fact whose old value is that line's current value, so
+  the rest of the pipeline treats it as an ordinary old -> new change. A value must be the right kind (a name for a person attribute, an amount for a fee, a time for a timing).
+* Slot facts are only accepted with a known attribute word and at least one subject word. Otherwise the analysis still asks staff to restate.
+* A line that already holds the new value is "no change: already says ...".
+* Not covered: slot values in sentences with no "is/are/:" before the value ("meets on Saturday, 10 AM - 1 PM"); those need the old value in the description.
+
+### 4b. How a model's answer is checked (`evaluate.ground_spec`, `LlmImpactModel`)
+1. The rule parser reads the sentence first; the model is asked only when the rules cannot.
+2. Every value a model extracts must occur in the description (any spelling); an old value that does not is dropped, a new value that does not discards the fact.
+3. Entity terms are single words: phrases are split, generic/attribute words and the words of the new value are removed (`ChangeSpec` validators).
+4. The rule engine judges every passage too. If the evidence says "affected" and the model says "no change", the result is **potential** with the rule engine's grounded replacement and
+   a reduced confidence, never silent "no change". If the model's rewrite is unusable the rule engine's is used. A model that fails or answers invalidly gives **potential** from the
+   rule engine, never "definite".
+5. When a guard (historical, scope, already-new) overrides a model verdict, the guard's explanation replaces the model's; the model's text is kept as `model_note` for the reviewer.
+6. A "no change" verdict whose own explanation says the passage "must be updated" and for which no evidence exists becomes **potential, no replacement** ("verdict and explanation disagreed").
+
 ## 5. Model strategy
 * `kb_ai_mode`: `auto` (default) = rule engine when the fake provider is configured, otherwise the chat model for role `impact`; `rules` = never call a model; `llm` = always the model.
-* Role model: `llm_model_impact` (empty = the default chat model, currently the Ollama Qwen setup). `impact_max_output_tokens` caps output. Prompt version `impact-v1` is recorded.
+* Role model: `llm_model_impact` (empty = the default chat model, currently the Ollama Qwen setup). `impact_max_output_tokens` caps output. Prompt version `impact-v2` is recorded (v1 before the final fix).
 * Output is validated against a Pydantic schema; invalid output fails the analysis cleanly (request back to `draft`, short error, retry).
 * No paid external model, no fine-tuning, no document text leaves the machine.
 

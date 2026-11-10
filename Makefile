@@ -162,9 +162,9 @@ test-ai:  ## Part 2 AI knowledge intelligence: backend tests (SQLite) and worksp
 test-ai-pg:  ## Part 2 migration 0012 + atomic multi-document publication on real PostgreSQL 16 (needs the dev database container)
 	cd backend && SG_TEST_DATABASE_URL=postgresql+psycopg://supportgraph:supportgraph@localhost:5432/postgres ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/db/test_postgres_ai_release.py
 
-eval-impact:  ## deterministic impact-analysis scenarios with metrics (OUT=dir); REAL=1 also runs the optional real-model check (needs Ollama)
+eval-impact:  ## deterministic impact-analysis scenarios with metrics (OUT=dir); REAL=1 also runs the optional real-model checks (needs Ollama; MODELS="qwen3:1.7b,qwen3:4b-instruct-2507-q4_K_M" compares models)
 	cd backend && SG_EVAL_OUT=$(or $(OUT),/tmp/sg-impact-eval) ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/knowledge/test_ai_eval.py && ../.venv/bin/python scripts/eval_impact_summary.py $(or $(OUT),/tmp/sg-impact-eval)
-	$(if $(REAL),cd backend && SG_REAL_IMPACT=1 ../.venv/bin/python -m pytest -q -s -p no:cacheprovider tests/knowledge/test_ai_real_model.py,@true)
+	$(if $(REAL),cd backend && SG_REAL_IMPACT=1 SG_REAL_IMPACT_MODELS="$(MODELS)" ../.venv/bin/python -m pytest -q -s -p no:cacheprovider tests/knowledge/test_ai_real_model.py,@true)
 
 test-trial:  ## the M4.1 + M5 backend tests (SQLite) and the trial frontend tests
 	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/db/test_migrations_m4_1_m5.py

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import KbDocument, KbVersion
 from app.knowledge import workspace
-from app.knowledge.impact.passages import with_headings
+from app.knowledge.impact.passages import slot_passages, with_headings
 from app.knowledge.impact.spec import ChangeSpec, words
 from app.knowledge.impact.values import find_value
 from app.rag import retrieval
@@ -87,6 +87,19 @@ def key_terms(entity_terms: list[str], corpus: list[Candidate]) -> list[str]:
     return [t for t, n in df.items() if n == low]
 
 
+def occurrences(c: Candidate, spec: ChangeSpec, facts) -> int:
+    """How many places in the document hold what the change is about: the old value, or (a change that names none) the attribute's current value on a line that is about the
+    change's subject."""
+    n = 0
+    for f in facts:
+        if f.old_value:
+            n += len(find_value(c.content, f.old_value))
+        else:
+            ctx = structure_text(c)
+            n += sum(1 for p, _ in slot_passages(c.content, f) if scope_fraction(spec.entity_terms, f"{ctx} {p.text}") >= 0.99)
+    return n
+
+
 def discover(db: Session, tenant_id: str, s: Settings, spec: ChangeSpec, *, embedder=None, exclude: set[str] = frozenset(), include: set[str] = frozenset()) -> list[Candidate]:
     """Ranked candidates (best first), at most `kb_ai_max_candidates`. `include` forces documents in (workflow A keeps the reference document's own manual item out of
     this list via `exclude`)."""
@@ -97,12 +110,12 @@ def discover(db: Session, tenant_id: str, s: Settings, spec: ChangeSpec, *, embe
         spec.entity_terms = pruned
     spec.key_terms = key_terms(spec.entity_terms, corpus)
     sem = _semantic(db, tenant_id, spec, embedder)
-    old_values = [f.old_value for f in spec.actionable()]
+    facts = spec.actionable()
     query_terms = [w for w in words(spec.summary) if w in set(spec.entity_terms)] or spec.entity_terms
     out: list[Candidate] = []
     for c in corpus:
-        occ = sum(len(find_value(c.content, ov)) for ov in old_values)
         scope = scope_fraction(spec.entity_terms, structure_text(c))
+        occ = occurrences(c, spec, facts)
         doc_words = set(words(c.title + " " + c.content))
         lex = (sum(1 for t in query_terms if t in doc_words) / len(query_terms)) if query_terms else 0.0
         sm = max(0.0, sem.get(c.doc_id, 0.0))

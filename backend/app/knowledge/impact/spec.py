@@ -4,8 +4,9 @@
 model: if the model's answer does not validate, or has no old/new value, the rules get a try before staff are asked to rephrase."""
 
 import re
+from datetime import date, timedelta
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.knowledge.impact.values import _MONEY, _TIME, kind_of
 
@@ -21,6 +22,7 @@ installment installments instalment instalments rupees rupee rs inr program prog
 _MONTHS = set("january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec".split())
 _DATE = (r"(?:[A-Z][a-z]+\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2}|"
          r"\d{1,2}/\d{1,2}/\d{2,4})")
+_RELATIVE = re.compile(r"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|as of|with effect from|onwards? from)\s+(?P<r>today|tomorrow|now|immediately)\b|\b(?P<r2>immediately)\b", re.I)
 _EFFECTIVE = re.compile(rf"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|with effect from|onwards? from)\s+(?:on\s+)?(?P<d>{_DATE})")
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.\-]*|\d+")
 
@@ -42,6 +44,21 @@ class Fact(BaseModel):
         return t or None
 
 
+# Attributes whose value is a person: a slot value must look like a name.
+PERSON_ATTRS = {"faculty", "trainer", "trainers", "instructor", "instructors", "teacher", "teachers", "mentor", "mentors"}
+ATTRIBUTE_GROUPS = (PERSON_ATTRS, {"fee", "fees", "price", "prices", "pricing", "cost", "costs", "charge", "charges", "tuition", "amount"},
+                    {"timing", "timings", "time", "times", "schedule", "schedules"}, {"duration", "durations"})
+
+
+def attribute_words(attribute: str) -> set[str]:
+    """The attribute and its synonyms (faculty = trainer = instructor ...)."""
+    a = (attribute or "").lower().strip()
+    for g in ATTRIBUTE_GROUPS:
+        if a in g:
+            return set(g)
+    return {a} if a else set()
+
+
 class Question(BaseModel):
     id: str = Field(max_length=24)
     doc_id: str | None = Field(default=None, max_length=120)
@@ -60,10 +77,22 @@ class ChangeSpec(BaseModel):
     @field_validator("entity_terms", mode="before")
     @classmethod
     def _terms(cls, v):
-        return [t for t in dict.fromkeys(str(x).strip().lower() for x in (v or [])) if t][:12]
+        """Entity terms are SINGLE words. A model often answers with phrases ("machine learning faculty"); a phrase can never equal a word of a document, so the scope
+        check would reject every passage. Split phrases into words and drop the generic and attribute words."""
+        return entity_terms_from(" ".join(str(x) for x in (v or [])))
+
+    @model_validator(mode="after")
+    def _subject_not_value(self):
+        """The words of the NEW (or old) value name the answer, not the subject: "santhosh sir" is not part of what the change is about."""
+        value_words = {w for f in self.facts for v in (f.new_value, f.old_value) if v for w in words(v)}
+        if value_words and any(not f.old_value for f in self.facts) or any(f.old_value and kind_of(f.old_value) == "text" for f in self.facts):
+            self.entity_terms = [t for t in self.entity_terms if t not in value_words]
+        return self
 
     def actionable(self) -> list[Fact]:
-        return [f for f in self.facts if f.old_value and f.new_value]
+        """Facts the analysis can act on: old and new value known, OR (a slot change) only the new value known together with the attribute and the subject
+        ("the machine learning faculty is now X": the old value is whatever the document says today)."""
+        return [f for f in self.facts if f.new_value and (f.old_value or ((f.attribute or "").lower() in ATTRIBUTES and self.entity_terms))]
 
 
 def words(text: str) -> list[str]:
@@ -89,7 +118,17 @@ def attribute_terms_from(text: str) -> list[str]:
     return sorted(found, key=lambda w: w in _GENERIC)
 
 
-def _tail_effective(text: str) -> tuple[str | None, str]:
+def _tail_effective(text: str, today: date | None = None) -> tuple[str | None, str]:
+    """The effective date and the text without it. "from today"/"now"/"immediately" mean "the current fact": no date is written into the document. "tomorrow" is turned
+    into the calendar date, because a relative word stops being true the day after it is written."""
+    m = _RELATIVE.search(text)
+    if m:
+        word = (m.group("r") or m.group("r2") or "").lower()
+        rest = text[:m.start()] + " " + text[m.end():]
+        if word == "tomorrow":
+            d = (today or date.today()) + timedelta(days=1)
+            return f"{d.day} {d.strftime('%B %Y')}", rest
+        return None, rest
     m = _EFFECTIVE.search(text)
     return (m.group("d").strip(), text[:m.start()] + " " + text[m.end():]) if m else (None, text)
 
@@ -112,11 +151,36 @@ _REPLACED_BY = re.compile(rf"(?P<old>{_NAME})\s+(?:is\s+|was\s+|has\s+been\s+|wi
 _CHANGED_TO = re.compile(r"\b(?P<old>[^.;\n]+?)\s+(?:→|->)\s+(?P<new>[^.;\n]+?)(?=[.;\n]|$)")
 
 
-def parse_rules(description: str) -> ChangeSpec:
+_VERB = r"(?:changed|updated|revised|replaced|moved|switched|set|modified|shifted|reassigned|assigned)"
+_SLOT_PATTERNS = [re.compile(p, re.I) for p in (
+    rf"^(?P<subj>.+?)\s+(?:is|are|was|will be|has been|have been|should be|to be|got)\s+(?:now\s+)?{_VERB}\s+(?:to|as|with|by)\s+(?P<new>.+?)\s*$",
+    rf"^(?P<subj>.+?)\s+{_VERB}\s+(?:to|as)\s+(?P<new>.+?)\s*$",
+    rf"^(?:please\s+)?(?:change|update|set|revise|modify|reassign)\s+(?:the\s+)?(?P<subj>.+?)\s+(?:to|as)\s+(?P<new>.+?)\s*$",
+    r"^(?P<subj>.+?)\s+(?:is|are|will be)\s+now\s+(?P<new>.+?)\s*$",
+    r"^(?:the\s+)?new\s+(?P<subj>.+?)\s+(?:is|will be)\s+(?P<new>.+?)\s*$",
+)]
+
+
+def _slot_change(rest: str) -> tuple[str, str, str] | None:
+    """"The machine learning faculty is changed to santhosh sir": the subject, its attribute and the NEW value. There is no old value in such a sentence: it is whatever
+    the document currently says. Needs a known attribute word in the subject, otherwise the analysis would have nothing to look for."""
+    text = rest.strip(" .;,")
+    for rx in _SLOT_PATTERNS:
+        m = rx.match(text)
+        if not m:
+            continue
+        subj, new = m.group("subj").strip(" ,"), m.group("new").strip(" .,;\"'")
+        attrs = attribute_terms_from(subj)
+        if subj and new and attrs:
+            return subj, attrs[0], new
+    return None
+
+
+def parse_rules(description: str, today: date | None = None) -> ChangeSpec:
     """Deterministic parse of "X changed from A to B (starting D)". Finds no facts (and the caller asks staff to rephrase) when it cannot tell old from new."""
     text = " ".join((description or "").split())
     protected = _TITLES.sub(lambda m: m.group(1) + "\u2024", text)                     # "Dr. Mehta": that dot does not end the sentence
-    eff, rest = _tail_effective(protected)
+    eff, rest = _tail_effective(protected, today)
     pair = _pair_values(rest)
     old = new = None
     if pair:
@@ -129,8 +193,15 @@ def parse_rules(description: str) -> ChangeSpec:
                 break
     old, new = (x.replace("\u2024", ".") if x else x for x in (old, new))
     facts: list[Fact] = []
+    slot = None
     if old and new and old.lower() != new.lower():
         facts.append(Fact(attribute=(attribute_terms_from(rest) or [""])[0], old_value=old, new_value=new, effective=eff))
+    elif not (old and new):
+        slot = _slot_change(rest.replace("\u2024", "."))
+        if slot:
+            subj, attr, new_v = slot
+            facts.append(Fact(attribute=attr, old_value=None, new_value=new_v.replace("\u2024", "."), effective=eff))
+            return ChangeSpec(summary=text[:300], facts=facts, entity_terms=entity_terms_from(subj.replace("\u2024", ".")), wants_all=bool(re.search(r"\b(all|every|both|each|everywhere)\b", text, re.I)))
     scoped = rest
     scoped = scoped.replace("\u2024", ".")
     for v in (old, new):

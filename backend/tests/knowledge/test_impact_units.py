@@ -250,20 +250,31 @@ def test_llm_adapter_uses_a_valid_structured_answer():
 
 
 @pytest.mark.parametrize("bad", [ValidationError.from_exception_data("X", []), ValueError("bad json"), RuntimeError("ollama down"), TimeoutError()])
-def test_llm_failure_or_invalid_output_means_potential_review_manually_never_a_silent_edit(bad):
+def test_llm_failure_or_invalid_output_means_potential_for_staff_to_confirm_never_definite(bad):
+    """A model outage no longer hides an affected passage: the grounded rule-engine proposal is offered as POTENTIAL (low confidence, says where it came from) for staff to
+    accept, edit or discard. It is never 'definite' and never applied without the human decision."""
     c = cand(DOC)
     ctx = gather(SPEC, c, S, None)
     out = LlmImpactModel(StubChat(ev=bad), name="stub").evaluate(SPEC, c, ctx)
     res = validate(SPEC, c, ctx, out, S, TODAY)
-    assert res.edits == [] and res.classification == "potential"
+    assert res.classification == "potential" and res.confidence <= 0.5
+    assert all(e.verdict == "potential" and "rule engine" in e.reason and "48,000" in e.replacement for e in res.edits) and len(res.edits) == 1
 
 
 def test_llm_parse_falls_back_to_the_rule_parser():
     desc = "The Python Full Stack course fee changed from ₹45,000 to ₹48,000."
     assert LlmImpactModel(StubChat(spec=RuntimeError("down")), name="stub").parse(desc).actionable()[0].new_value == "₹48,000"
     assert LlmImpactModel(StubChat(spec=ChangeSpec()), name="stub").parse(desc).actionable()                      # an empty model answer also falls back
+    # a value the model made up (it is not in the description) is rejected, and the rule parser's reading of the plain sentence wins
     got = LlmImpactModel(StubChat(spec=ChangeSpec(facts=[Fact(old_value="₹45,000", new_value="₹49,000")])), name="stub").parse(desc)
-    assert got.actionable()[0].new_value == "₹49,000" and "python" in got.entity_terms       # a good model answer wins; entity terms are completed from the rules
+    assert got.actionable()[0].new_value == "₹48,000" and "python" in got.entity_terms
+    # a sentence the rules cannot read: the model's answer is used when every value in it occurs in the description
+    odd = "Priya mam takes over as the Python Full Stack lead trainer from Dr. Mehta."
+    good = ChangeSpec(facts=[Fact(attribute="trainer", old_value="Dr. Mehta", new_value="Priya mam")], entity_terms=["python full stack"])
+    got = LlmImpactModel(StubChat(spec=good), name="stub").parse(odd)
+    assert (got.actionable()[0].old_value, got.actionable()[0].new_value) == ("Dr. Mehta", "Priya mam") and got.entity_terms == ["python", "full", "stack"]
+    bad = ChangeSpec(facts=[Fact(attribute="trainer", old_value="Dr. Mehta", new_value="Someone Else")], entity_terms=["python"])
+    assert not LlmImpactModel(StubChat(spec=bad), name="stub").parse(odd).actionable()
 
 
 # ---- gateway ---------------------------------------------------------------------------------------------------------------------------

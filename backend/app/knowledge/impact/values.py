@@ -187,4 +187,6 @@ def render_new(matched: str, old_value: str, new_value: str) -> str | None:
                          dots="." in mm.group("p"), meridiem=True)
     if matched.isupper() and len(matched) > 3:
         return new.upper()
+    if matched[:1].isupper() and new[:1].islower():                       # "Jyothi sir" -> "Santhosh sir": a name written in lower case still starts with a capital here
+        return new[:1].upper() + new[1:]
     return new

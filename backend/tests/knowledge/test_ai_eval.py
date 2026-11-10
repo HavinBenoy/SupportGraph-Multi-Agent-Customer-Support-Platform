@@ -320,3 +320,31 @@ def test_s15_two_requests_overlap_on_the_same_documents(api):  # noqa: F811
     assert second["status"] == "failed" and second["failure"]["stage"] == "validation"
     assert "48,000" in live_joined("python-fees") and "49,000" not in live_joined("python-fees") and "49000" not in live_joined("admissions-faq")
     record("s15_overlap", lost_updates=0, second_request_blocked=True)
+
+
+# 16-17: added after the real-world failure ("the machine learning faculty is changed to X from today") ---------------------------------------------
+FACULTY_CHANGE = "The Python Full Stack lead trainer is changed to Dr. Rao from today"
+
+
+def test_s16_change_that_names_no_old_value(api):  # noqa: F811
+    seed(api)
+    req = A.analysed(api, FACULTY_CHANGE)
+    expected = {"python-faculty": original("python-faculty").replace("Dr. Mehta", "Dr. Rao")}
+    m = score("s16_slot_change_no_old_value", req, {"python-faculty"}, expected)
+    assert m["precision"] == 1.0 and m["recall"] == 1.0 and m["replacement_exact"] == 1 and m["wrong_edits"] == 0
+    assert A.item(req, "java-faculty")["final_edits"] == [] if any(i["doc_id"] == "java-faculty" for i in req["items"]) else True
+
+
+def test_s17_a_model_that_contradicts_itself_cannot_hide_an_affected_document(api, monkeypatch):  # noqa: F811
+    from tests.knowledge import faculty as F
+    seed(api)
+    s = A.inline(api)
+    s.kb_ai_mode = "llm"
+    F.use_model(monkeypatch, F.WeakChat(None, lambda n, t: PassageVerdict(passage=n, verdict="no_change", confidence=0.7, reason="This passage must be updated to the new trainer.")))
+    rid = A.start_ai(api, FACULTY_CHANGE)["request_id"]
+    A.analyse(api, rid)
+    req = A.get(api, rid)
+    it = A.item(req, "python-faculty")
+    ok = it["classification"] == "potential" and it["final_edits"] and "Dr. Rao" in it["proposed_content"] and "must be updated" not in it["ai"]["reason"]
+    record("s17_model_contradiction_not_hidden", affected_document_hidden=not ok, classification=it["classification"], confidence=it["confidence"])
+    assert ok
