@@ -17,6 +17,7 @@ class Passage:
     text: str
     heading: str               # "Parent > Child" chain of the markdown headings above it ('' if none)
     matches: tuple[Span, ...] = ()     # absolute offsets of the value occurrences inside this line
+    lead: str = ""                      # the line this one continues ("He has ..." after "... is Santhosh sir") or the question above an answer; context, never edited
 
 
 def lines(content: str) -> list[tuple[int, int, str]]:

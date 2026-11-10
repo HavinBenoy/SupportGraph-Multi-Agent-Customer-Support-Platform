@@ -1,6 +1,39 @@
-# Part 2 recall, precision and verification (document-centric knowledge, no architecture change)
+# Part 2 closure - fix: documents found as relevant were not reaching the model / its result was invisible
 
-Apply on top of the previous Part 2 zips: `unzip -o ../supportgraph-part2-recall-and-verification.zip`. **No migration** (alembic stays at 0012). No new dependency. Report: PART2_RECALL_REPORT.md; design: docs/PART2.md §4c.
+Reported case: "Remove the education details of santhosh sir" listed the Data-Science document as "related, no change" with the rules' message "can only be drafted by the language model". Three generic causes, all fixed (no example-specific rule):
+
+1. **The validator confused wording with relevance.** A revision was only accepted if the words that differ occurred in the request; "education details" shares no word with "He completed his B.Tech ...", so a perfectly good removal was dropped as "unrelated". Now (`edit.check_op`): if NO run of the revision matches the request's words, runs next to the candidate lines (<= 3 rows, or under the same small heading) are accepted **by meaning**, flagged "related to the request only by meaning: please confirm", and the second check runs because of the flag. If some run clearly matches, extra unrelated runs are still dropped; runs far from the candidates are still dropped; figures, headings, tables, history and duplicates are checked as before.
+2. **Focus lines were chosen by subject words only.** A line that continues the person ("He completed ...") or sits under a heading that names the topic ("## Education") was never a focus line, and a document whose lines did not name the subject was dropped as "nothing concerns the change" before the model saw it. `_general_passages` now (a) lets a pronoun line inherit the line above, (b) counts the heading chain, (c) ignores action words ("remove", "add") as subject words, (d) falls back to the lines sharing the most request words.
+3. **Model outcomes were invisible.** When the model was asked but its answer was cut off / unreachable / rejected, the reviewer saw the rules' generic text. Now the reason says so ("The language model was asked ... but its answer could not be used: <why>"), and when it returned the section unchanged ("... judged that the requested change does not apply to it").
+
+Tests: 5 new in tests/knowledge/test_judge.py. Real Qwen was not run here (no Ollama in the sandbox): if a document is still "related, no change" after this, its reason now tells you which of the three cases it was.
+
+---
+
+# Part 2 CLOSURE: generalized AI knowledge editing + adaptive context (M6 Part 2, final)
+
+Apply on top of the previous Part 2 delivery: `unzip -o ../supportgraph-part2-closure.zip`. **No migration** (alembic stays at 0012), **no new dependency**, no new infrastructure. `.env`, secrets and database content are not in the zip and are never touched. Full report, configuration reference and exact verification commands: **docs/PART2_FINAL.md**.
+
+| Area | Files |
+|---|---|
+| Adaptive context | backend/app/knowledge/impact/context.py (new): budget (input / output / Ollama window kept apart), whole document -> sub-tree -> section -> blocks, merge/non-overlap |
+| Free-form editor + validator | backend/app/knowledge/impact/edit.py (new): generalized prompt, extraction (truncation / malformed / empty), line-diff hunks, per-hunk and per-section checks; judge.py (rewritten: ask, semantic second check, cache); `minimal_edit` is gone |
+| Integration | evaluate.py (`judge`, `_compose`, hunks -> `Edit(kind, flags)`, general passages, non-overlap), analyse.py (general changes instead of the "restate" gate, `vague`, `generalize`), spec.py (`general`), discover.py (admission, `Candidate.hunks`), verify.py (`compute_statements`), llm/gateway.py (`get_judge_chat` num_ctx/num_predict, `get_check_chat`), config.py |
+| Frontend | src/lib/types.ts, src/components/workspace/{Decisions,PatchView,AdminRequests,ui}.tsx (Added / Removed / Rewritten, validator flags, statements-mode verification) |
+| Tests | tests/knowledge/{test_judge,test_generalized_flow}.py (new/rewritten), frontend AiKnowledge.test.tsx |
+| Tools / docs | backend/scripts/judge_probe.py (ten-scenario suite for real Qwen), .env.example, docs/PART2_FINAL.md, CHANGES.md |
+
+Behaviour changes: (1) the model is asked the general instruction ("make the corresponding modification wherever it is applicable, otherwise return the section unchanged, preserve everything unrelated") and may add, change, rewrite or remove; (2) it receives the complete logical section within a token budget instead of +-3 lines / 1600 characters; (3) a revision is validated structurally (headings, tables, lists), semantically (optional second check) and deterministically (history, invented figures, duplicates, unrelated edits, deletions, truncation) before it can become a proposal; a model-only change is always `potential`; a disagreement with the rules is a question for a person; invalid output creates no edit; (4) changes that are not value replacements ("add ...", "remove ...", "now also ...") are analysed instead of being sent back; only a description that names no action is still answered with one question; (5) after publication a non-value change gets a statements check that says plainly that it cannot be proven complete.
+
+New environment variables (all optional, see .env.example): `SG_KB_AI_CONTEXT_TOKENS`, `SG_KB_AI_JUDGE_NUM_CTX`, `SG_KB_AI_THINKING_RESERVE_TOKENS`, `SG_KB_AI_CONTEXT_MODE`, `SG_KB_AI_MAX_SECTIONS`, `SG_KB_AI_SEMANTIC_CHECK`, `SG_KB_AI_MAX_CHANGED_FRACTION`, `SG_KB_AI_MAX_REMOVED_FRACTION`. Changed default: `SG_KB_AI_JUDGE_MAX_TOKENS` 2500 -> 4096 (the answer is now the whole section).
+
+Verification status: backend knowledge+rag 661 passed (after the relevance fix; remaining backend 1362 and PostgreSQL 81 were run before it, and the change touches only impact/edit.py and evaluate.py); remaining backend 1362 passed; PostgreSQL 81 passed; frontend 233 passed, tsc and next build clean. Real Qwen3 1.7B/4B was NOT run (no Ollama in the build sandbox): run `scripts/judge_probe.py --suite` (docs/PART2_FINAL.md section 9).
+
+---
+
+# Part 2 FINAL: recall, precision, section judge and verification (document-centric knowledge, no architecture change)
+
+Apply on top of the previous Part 2 zips (the earlier "recall-and-verification" zip is NOT needed: this one contains everything): `unzip -o ../supportgraph-part2-final.zip`. **No migration** (alembic stays at 0012). No new dependency. Report: PART2_RECALL_REPORT.md; design: docs/PART2.md §4c.
 
 | Area | Files |
 |---|---|
@@ -10,10 +43,11 @@ Apply on top of the previous Part 2 zips: `unzip -o ../supportgraph-part2-recall
 | Config | backend/app/config.py, app/tenants/schema.py, tenants/qspiders_sample/config.yaml (`entity_aliases`) |
 | Tests | tests/knowledge/{qs_corpus,test_recall_v2,test_ai_recall_flow}.py, tests/rag/test_hybrid_and_tables.py (new); frontend AiKnowledge.test.tsx |
 | Frontend | src/components/workspace/{Decisions,AdminRequests,ui}.tsx, src/lib/{types,api}.ts |
-| Docs | docs/PART2.md §4c, PART2_RECALL_REPORT.md |
+| Section judge (final) | backend/app/knowledge/impact/judge.py (new), evaluate.py (`LlmImpactModel.judge/_compose`), analyse.py (calls it), llm/gateway.py (`get_judge_chat`), config.py, scripts/judge_probe.py, tests/knowledge/test_judge.py |
+| Docs | docs/PART2.md §4c, docs/PART2_MODEL_METHOD_ANALYSIS.md (why the terminal test worked and the app did not; decision), PART2_RECALL_REPORT.md |
 
-New environment variables (all optional): `SG_KB_AI_DISCOVERY=v2|v1` (v1 = previous discovery, kept for comparison/fallback), `SG_KB_AI_VERIFY=true|false`, `SG_RAG_RETRIEVAL_MODE=hybrid|vector`, `SG_KB_AI_MAX_CANDIDATES` (20), `SG_KB_AI_MAX_PASSAGES` (12).
-Behaviour changes: analysis now inspects units (lines, list items, table rows with header, answers with question) instead of whole documents; passages carry a class and evidence; a contradicting or shared
+New environment variables (all optional): `SG_KB_AI_JUDGE=uncertain|all|off` (the section judge; `off` = the previous per-passage structured call), `SG_KB_AI_JUDGE_THINKING=true`, `SG_KB_AI_JUDGE_TIMEOUT_S=300`, `SG_KB_AI_JUDGE_MAX_TOKENS=2500`, `SG_KB_AI_JUDGE_MAX_CALLS=16`, `SG_KB_AI_JUDGE_WINDOW_CHARS=1600`; `SG_KB_AI_DISCOVERY=v2|v1` (v1 = previous discovery, kept for comparison/fallback), `SG_KB_AI_VERIFY=true|false`, `SG_RAG_RETRIEVAL_MODE=hybrid|vector`, `SG_KB_AI_MAX_CANDIDATES` (20), `SG_KB_AI_MAX_PASSAGES` (12).
+Behaviour changes: with a real model the analysis now asks it the way you tested it in the terminal (section text, "make the change only where applicable", thinking on) and verifies its answer line by line; also fixed after your first run: pronoun lines ("He has 3 years") and "Previously …" in the same line; analysis now inspects units (lines, list items, table rows with header, answers with question) instead of whole documents; passages carry a class and evidence; a contradicting or shared
 line is never "definite"; after publication a follow-up check of the live base is stored on the release (advisory); chat retrieval is hybrid by default (set `SG_RAG_RETRIEVAL_MODE=vector` to restore the old behaviour).
 
 ---

@@ -6,7 +6,7 @@ import type { KwItem, KwQuestion, KwRequest } from "@/lib/types";
 import { Decisions } from "./Decisions";
 import { Badge, msg } from "./ui";
 
-const STAGES: Record<string, string> = { parsing: "Understanding the change", discovering: "Looking for related documents", retrieving: "Reading the relevant sections", evaluating: "Judging each document", finishing: "Preparing suggestions" };
+const STAGES: Record<string, string> = { parsing: "Understanding the change", discovering: "Looking for related documents", retrieving: "Reading the relevant sections", evaluating: "Judging each document", reading: "Reading the sections with the language model", finishing: "Preparing suggestions" };
 const POLL_MS = 1500;
 
 /** The AI-assisted change page (workflow B, and workflow A after "Find related documents with AI"). Staff describe the change, optionally name a reference document and

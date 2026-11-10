@@ -1,4 +1,4 @@
-# Part 2 — recall, precision and verification: implementation and testing report
+# Part 2 FINAL — recall, precision, section judge and verification: implementation and testing report
 
 Scope: the document-centric knowledge base stays. No structured fact store, graph, new service or migration (alembic stays at 0012). Everything below is additive and switchable.
 
@@ -55,15 +55,29 @@ tenant/uniqueness, alias rewrite, table header chunks), Vitest (follow-up check 
   analysis (admin job, a few seconds per document on CPU); switch with `SG_LLM_MODEL_IMPACT=<model>`. I have not benchmarked either in this sandbox, so this is a design recommendation, not a measurement.
 * External GPT APIs: not integrated and not needed for correctness. If wanted later they would be optional, admin-side only, on public knowledge text (never student or staff data), enabled only by your explicit decision.
 
-## 6. Test totals (sandbox, final code)
+## 6. Test totals (sandbox, final code; SQLite + deterministic rule engine + scripted model stubs + fake embedder; **no real Ollama model was run**)
 | Suite | Result |
 |---|---|
-| backend/tests/knowledge (full, includes the pre-existing M6/Part 2 tests) | 354 passed, 3 skipped (the skips are the gated real-model tests) — run before the last two small edits; the three files touched afterwards were rerun |
-| New Part 2 tests (test_recall_v2, test_ai_recall_flow, test_hybrid_and_tables) | 25 passed after the last edit |
-| backend/tests/rag + graph + unit | 981 passed, 2 skipped |
-| backend/tests/db on a real PostgreSQL 16 (started locally in the sandbox, throwaway databases) | 81 passed |
-| backend/tests/api, security, step4, calls, voice, eval regression | 510 passed, 1 failed on the first run: the offline evaluation gate (handled-correctly 87.7% -> 86.0%). Cause found by A/B: the query alias expansion added words to chat questions in BOTH directions. Fixed (abbreviation -> long name only); the gate then passes with the stored reference unchanged (87.7%, no gate loosened, no reference refreshed) |
-| frontend: vitest | 230 passed; `tsc --noEmit` clean; `next build` succeeds |
+| backend/tests/knowledge + tests/rag + offline evaluation gate (first full run) | 637 passed, 3 skipped (gated real-model checks), 1 failed: a window-size test of the new judge, fixed afterwards |
+| Judge, recall, flow, impact-unit tests and tests/unit rerun after the fix | 651 passed |
+| backend/tests/api, security, step4, calls, voice, graph | 704 passed, 2 skipped |
+| backend/tests/db on PostgreSQL 16 (local throwaway cluster) | 81 passed |
+| frontend vitest / `tsc --noEmit` / `next build` | 231 passed / clean / compiled |
+| Real Qwen (1.7B, 4B), real nomic embeddings, browser look | **not run — needs your machine** (use `scripts/judge_probe.py`, `make eval-impact REAL=1`) |
+
+The offline evaluation gate (87.7%, stored reference) passes unchanged; no gate was loosened and no reference was refreshed.
+
+## 6a. Fix after your first demo run (screenshots of "change the work experience of santhosh sir from 3 years to 5 years")
+The document held "Machine Learning faculty is Santhosh sir" / "He has a work experience of 3 years. Previously he worked in IT." and the analysis said "historical, left alone". Causes: (1) no pronoun
+continuation, so the "He" line had no subject; (2) "Previously" anywhere in the line made the whole line historical. Both fixed (see docs/PART2.md §4c), plus the title "sir" no longer counts as a subject word.
+Tests added: `test_recall_v2.py` (pronoun line edited with only the number changed; pronoun after a different person untouched; history only matters in the sentence holding the value).
+
+## 6b. The section judge (after your terminal test)
+Your `ollama run qwen3:1.7b` test showed the model reads a short section well when asked in plain language with thinking on, while the application forced a JSON schema, switched thinking off, showed one
+line at a time and let rule guards decide first. Analysis and decision: **docs/PART2_MODEL_METHOD_ANALYSIS.md**. Implemented: `impact/judge.py` (windows, your prompt, answer extraction, line-by-line
+verification), `LlmImpactModel.judge/_compose` (combination with the rules), settings `SG_KB_AI_JUDGE*`, `scripts/judge_probe.py` (run it on your machine). 27 new backend tests with scripted models (agreement,
+disagreement, rescue of a rule-rejected line, rewrites rejected, no/invalid answer, historical guard, model-only lines, call cap and cache, whole-flow over HTTP) and 1 frontend test.
+**Not measured:** how well qwen3:1.7b / 4b actually judge on your documents, and their latency. Only your machine can answer that; use the probe script and `SG_KB_AI_JUDGE=all`.
 
 ## 7. Honest notes
 * The offline evaluation uses the fake hash embedder, so it cannot show whether hybrid retrieval helps real questions: in that evaluation hybrid and vector gave identical numbers. Hybrid is on by default because it is a recall
@@ -82,5 +96,5 @@ Then restart the API. Try it in the app: Knowledge -> AI change -> "From today o
 publish, and read the "Follow-up check" panel on the published request.
 
 ## 9. Known limits
-Two rounds; no pronoun continuation across lines; English name heuristics; heuristic ambiguity rules; replacement is whole-line (cell rows replace the row line); the corpus is synthetic and small — real documents will
+Two rounds; pronoun continuation looks one block back only; English name heuristics; heuristic ambiguity rules; replacement is whole-line (cell rows replace the row line); the corpus is synthetic and small — real documents will
 find cases it does not, which is why uncertain cases go to a person.

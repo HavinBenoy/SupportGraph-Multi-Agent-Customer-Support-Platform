@@ -3,7 +3,8 @@ import type { DiffSeg, KwPatch } from "@/lib/types";
 /** The original (published) text of a document, rebuilt from the server's structured diff: everything that is not an insertion. */
 export const baseText = (segs: DiffSeg[] | undefined) => (segs ?? []).filter((s) => s.op !== "insert").map((s) => s.text).join("");
 
-export interface PatchEdit { start: number; end: number; original: string; replacement: string | null; heading?: string }
+export interface PatchEdit { start: number; end: number; original: string; replacement: string | null; heading?: string; kind?: "replace" | "add" | "remove" | "modify" }
+const KIND_TAG: Record<string, string> = { add: "Added", remove: "Removed", modify: "Rewritten" };
 
 /** Renders a structured patch over the ORIGINAL text:
  *   orange, tagged "Existing"  = the passage the AI says needs to change
@@ -23,6 +24,7 @@ export function PatchView({ base, edits, label, full = false, context = 90 }: { 
   sorted.forEach((e, i) => {
     if (e.start > pos) gap(pos, e.start, i === 0, false, `g${i}`);
     if (e.heading) parts.push(<span key={`h${i}`} className="kw-where">{e.heading}</span>);
+    if (e.kind && KIND_TAG[e.kind]) parts.push(<span key={`k${i}`} className="kw-chip kw-kind" title="What kind of change the AI proposes here">{KIND_TAG[e.kind]}</span>);
     parts.push(<mark key={`o${i}`} className="kw-old"><span className="kw-tag" aria-hidden="true">Existing</span><span className="sr-only">Existing passage the AI says needs to change: </span>{e.original}</mark>);
     if (e.replacement !== null) parts.push(<mark key={`n${i}`} className="kw-new"><span className="kw-tag" aria-hidden="true">New</span><span className="sr-only">AI replacement: </span>{e.replacement === "" ? "(removed)" : e.replacement}</mark>);
     pos = e.end;

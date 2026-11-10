@@ -106,3 +106,36 @@ def test_a_failing_follow_up_check_never_undoes_a_published_release(api, monkeyp
     A.publish(api, rid)
     done = A.a_get(api, rid)
     assert done["status"] == "published" and "Santhosh sir" in A.live_text("ml-module")
+
+
+def test_the_section_judge_runs_inside_the_real_analysis_flow_and_its_verdict_is_shown(api, monkeypatch):  # noqa: F811
+    """The reported demo case through HTTP: the document the staff screenshot showed. The rules hold back a line (the person is named in another block); the scripted model, asked the way
+    a person would ask it in a terminal, says it applies; the reviewer sees a potential edit with the model's opinion, nothing is applied."""
+    from langchain_core.messages import AIMessage
+
+    from app.knowledge.impact import judge as J
+    from app.knowledge.impact.evaluate import LlmImpactModel
+
+    J._CACHE.clear()
+
+    class Chat:
+        def __init__(self):
+            self.n = 0
+
+        def with_structured_output(self, _):
+            return self
+
+        def invoke(self, msgs):
+            self.n += 1
+            return AIMessage("```text\nSanthosh sir is our Machine Learning faculty.\n\nHis total work experience is 5 years.\n```")
+
+    chat = Chat()
+    monkeypatch.setattr("app.api.routes.knowledge_workspace.get_impact_model", lambda s: LlmImpactModel(chat, name="stub", judge_chat=chat))
+    go_live(api, doc_id="ds", content="# Data-Science\n\nSanthosh sir is our Machine Learning faculty.\n\nHis total work experience is 3 years.\n", title="Data-Science", category="courses")
+    req = analysed(api, "change the work experience of santhosh sir from 3 years to 5 years")
+    it = A.item(req, "ds")
+    assert chat.n == 1 and it["classification"] == "potential"
+    passage = it["ai"]["passages"][0]
+    assert passage["judge"] == "agrees" and passage["replacement"] == "His total work experience is 5 years."
+    assert it["ai"]["edits"][0]["original"] == "His total work experience is 3 years."
+    assert A.live_text("ds").count("3 years") == 1                       # analysis never edits the published text

@@ -68,12 +68,13 @@ class Question(BaseModel):
 
 class ChangeSpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    summary: str = Field(default="", max_length=300)
+    summary: str = Field(default="", max_length=600)
     facts: list[Fact] = Field(default_factory=list, max_length=MAX_FACTS)
     entity_terms: list[str] = Field(default_factory=list, max_length=12)
     key_terms: list[str] = Field(default_factory=list, max_length=12)      # the entity terms that tell this subject apart from its neighbours (set by discovery, never by a model)
     alias_pairs: list[tuple[str, list[str]]] = Field(default_factory=list, max_length=24)   # (surface form, subject words it stands for): "ml" -> machine learning (set by discovery, never by a model)
     wants_all: bool = False                                  # the description says "all" / "every" / "both": no need to ask which one
+    general: bool = False                                    # a change that is not a value replacement (add / remove / rewrite ...): the model reads the sections and drafts the revision
 
     @field_validator("entity_terms", mode="before")
     @classmethod
@@ -100,11 +101,14 @@ def words(text: str) -> list[str]:
     return [w.lower().strip(".-") for w in _WORD.findall(text or "") if w.strip(".-")]
 
 
+_TITLE_WORDS = {"sir", "madam", "mam", "garu", "ji", "mrs", "miss", "prof", "professor", "shri", "smt"}      # a title names no one: "Ramesh sir" must not match "Santhosh sir"
+
+
 def entity_terms_from(text: str) -> list[str]:
     """The words that NAME what the change is about (course, batch type, person), with generic words and attribute words (fee, timing ...) removed."""
     out = []
     for w in words(text):
-        if w in _STOP or w in ATTRIBUTES or w in _MONTHS or w.isdigit() or len(w) < 2 or (len(w) == 2 and w not in {"ai", "ml", "bi", "qa", "ui", "ux", "hr"}):
+        if w in _STOP or w in _TITLE_WORDS or w in ATTRIBUTES or w in _MONTHS or w.isdigit() or len(w) < 2 or (len(w) == 2 and w not in {"ai", "ml", "bi", "qa", "ui", "ux", "hr"}):
             continue
         out.append(w)
     return list(dict.fromkeys(out))[:12]

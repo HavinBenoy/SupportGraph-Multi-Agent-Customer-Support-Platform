@@ -242,6 +242,10 @@ function Verification({ req, onRun, busy }: { req: KwRequest; onRun: () => void;
   return (
     <section aria-label="Check of the live knowledge" className="kw-verify">
       {!v ? <p className="kw-muted tiny">No follow-up check has been recorded for this release.</p>
+        : v.mode === "statements" ? (
+          <><p role="status"><b>Follow-up check (not a value replacement): {v.remaining_total === 0 && !v.edits_missing ? "the new text is live and no removed statement was found elsewhere" : `${v.remaining_total} removed or rewritten statement${v.remaining_total === 1 ? "" : "s"} still appear${v.remaining_total === 1 ? "s" : ""} elsewhere${v.edits_missing ? `; ${v.edits_missing} edit(s) are not in the live text` : ""}`}</b> ({v.documents_scanned} live documents, {when(v.checked_at)}).</p>
+            <p className="kw-muted tiny">{v.note ?? "This kind of change cannot be fully verified automatically: please read the updated documents."}</p>
+            {v.remaining.length > 0 && <ul>{v.remaining.map((r, i) => <li key={i}><b>{r.title}</b> — “{r.text.length > 160 ? `${r.text.slice(0, 160)}…` : r.text}” <span className="kw-muted tiny">{r.evidence}</span></li>)}</ul>}</>)
         : v.clean ? <p role="status"><b>Follow-up check: nothing outdated found</b> in {v.documents_scanned} live documents ({when(v.checked_at)}).</p>
         : (<><p role="status"><b>Follow-up check: {v.remaining_total} passage{v.remaining_total === 1 ? "" : "s"} may still be out of date</b>{v.unreviewed === 0 ? " — all were left unchanged by a reviewer" : ""} ({when(v.checked_at)}). Nothing was changed automatically.</p>
           <ul>{v.remaining.map((r, i) => (

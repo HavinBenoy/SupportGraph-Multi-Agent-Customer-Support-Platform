@@ -29,7 +29,7 @@ from app.knowledge.impact.passages import Passage, best_lines, find_passages, sl
 from app.knowledge.impact.spec import ATTRIBUTES, ChangeSpec, Fact, attribute_terms_from, entity_terms_from, parse_rules, sibling_marks, words
 
 log = logging.getLogger("supportgraph.knowledge.impact")
-PROMPT_VERSION = "impact-v3"
+PROMPT_VERSION = "impact-v5"
 @dataclass(frozen=True)
 class PassageCtx:
     index: int
@@ -38,6 +38,7 @@ class PassageCtx:
     has_value: bool
     fact: Fact | None = None          # a change that names no old value: the fact with THIS passage's current value filled in
     hit: object | None = None         # scan.Hit: the evidence that nominated this passage (None for passages found the older way)
+    judgement: object | None = None   # judge.Judgement: what the section judge (language model) said about this line, when it was asked
 
 
 class PassageVerdict(BaseModel):
@@ -46,6 +47,8 @@ class PassageVerdict(BaseModel):
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(default="", max_length=400)
     replacement: str | None = Field(default=None, max_length=2000)
+    judged: bool = False              # set only by the section judge's own composition (never read from a model's answer): the line was read by the model in its section
+    hunk: int | None = None           # set only by the composition: index into Candidate.hunks (a validated section revision that covers this line); the edit is the hunk's patch
 
 
 class Evaluation(BaseModel):
@@ -71,6 +74,10 @@ class RuleImpactModel:
         facts = spec.actionable()
         out = []
         for pc in passages:
+            if not facts and pc.fact is None:                       # a general change (no old/new value): only the language model can rewrite text; the rules just record the relation
+                out.append(PassageVerdict(passage=pc.index, verdict="no_change", confidence=0.4,
+                                          reason="Related to the change, but a change that is not a value replacement can only be drafted by the language model."))
+                continue
             fact = pc.fact or facts[pc.fact_index]
             hit = pc.hit
             how = getattr(hit, "how", None)
@@ -118,6 +125,13 @@ class RuleImpactModel:
                     verdict, conf, why = "potential", 0.3, "The value was found but could not be rewritten safely; please edit it manually."
             out.append(PassageVerdict(passage=pc.index, verdict=verdict, confidence=conf, reason=why, replacement=rep))
         return Evaluation(verdicts=out)
+
+
+def _clean(pc: PassageCtx, v: "PassageVerdict | None") -> bool:
+    """The rules are completely sure about this line: a definite verdict from the old (or current) value written on a line that names the subject itself, with no contradiction."""
+    h = pc.hit
+    return bool(v is not None and v.verdict == "definite" and h is not None and getattr(h, "how", None) in ("old", "slot", "old_core")
+                and not getattr(h, "conflict", ()) and not getattr(h, "shared", "") and getattr(h, "subject", "") == "line")
 
 
 def already_new(fact: Fact) -> bool:
@@ -228,11 +242,154 @@ class LlmImpactModel:
 
     prompt_version = PROMPT_VERSION
 
-    def __init__(self, chat, *, name: str) -> None:
+    def __init__(self, chat, *, name: str, judge_chat=None, check_chat=None) -> None:
         self.name = name
         self._spec_chain = chat.with_structured_output(ChangeSpec)
         self._eval_chain = chat.with_structured_output(Evaluation)
         self._rules = RuleImpactModel()
+        self._judge_chat = judge_chat                                           # None = the older per-passage structured call only
+        self._check_chat = check_chat                                           # a short, non-thinking chat for the second opinion on a revision (None = no second check)
+        self._judge_calls = 0
+
+    # ------------------------------------------------------------------------------------------------------------------------ section editor
+    def judge(self, spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], s: Settings) -> list[PassageCtx]:
+        """Give the model the COMPLETE logical sections around this document's candidate lines (adaptive context, see context.py), let it revise them freely, validate the revision
+        (edit.py) and attach what it decided to each line; revisions in lines the rules never nominated are appended as model-only passages. Sections whose every candidate line the
+        rules are completely sure about are not sent (`kb_ai_judge = "uncertain"`); a general change has no rule evidence, so every section is sent. Never raises."""
+        if self._judge_chat is None or s.kb_ai_judge == "off" or not ctx:
+            return ctx
+        from dataclasses import replace
+
+        from app.knowledge.impact import judge as J
+        from app.knowledge.impact.context import split_notes
+
+        ref = {v.passage: v for v in self._rules.evaluate(spec, doc, ctx).verdicts}
+        secs, budget = J.plan(doc.content, [pc.passage.start for pc in ctx], s)
+        unsure = {pc.passage.start for pc in ctx if not _clean(pc, ref.get(pc.index))}
+        todo = [x for x in secs if s.kb_ai_judge == "all" or spec.general or (x.focus & unsure)]
+        if not todo:
+            return ctx
+        rules = J.rules_for(spec, doc.title, s, [pc.fact.old_value for pc in ctx if pc.fact is not None and pc.fact.old_value])
+        judged: dict[int, J.Judgement] = {}
+        notes: list[str] = split_notes(todo, budget)
+        doc.hunks = []
+        extra_hunks: list[int] = []
+        if len(todo) > s.kb_ai_max_sections:
+            notes.append(f"{len(todo) - s.kb_ai_max_sections} more section(s) of this document were not read (limit of sections per document)")
+            todo = todo[: s.kb_ai_max_sections]
+        have = {pc.passage.start for pc in ctx}
+        for sec in todo:
+            if self._judge_calls >= s.kb_ai_judge_max_calls:
+                notes.append("the language model was not asked about every section (limit of model calls per analysis)")
+                break
+            rd = J.read_section(self._judge_chat, self._check_chat, sec, spec.summary, doc.title, rules, s, self.name, expect_change=bool(sec.focus & unsure))
+            if not rd.cached:
+                self._judge_calls += 1
+            if rd.state in ("unavailable", "invalid"):
+                state = "unavailable" if rd.state == "unavailable" else "unusable"
+                for st in sec.focus:
+                    judged[st] = J.Judgement(state, note=rd.why or "the language model gave no usable answer for this section")
+                if rd.state == "invalid" and rd.why:
+                    notes.append(f"a revision of “{sec.heading or 'the top of the document'}” was rejected: {rd.why[:200]}")
+                continue
+            if rd.state == "unchanged":
+                for st in sec.focus:
+                    judged[st] = J.Judgement("disagrees", note="the model returned the section unchanged: it judged that the change does not apply here")
+                continue
+            out = rd.outcome
+            idx: dict[int, int] = {}
+            for h in out.hunks:
+                doc.hunks.append(h)
+                idx[id(h)] = len(doc.hunks) - 1
+            for st in sec.focus:
+                h = next((h for h in out.hunks if st in h.touch or st in h.near), None)
+                if h is None:
+                    judged[st] = J.Judgement("disagrees", note="the model left this line unchanged")
+                else:
+                    line = h.added[0] if (h.kind == "modify" and len(h.added) == 1 and len(h.removed) == 1) else None
+                    judged[st] = J.Judgement("agrees", hunk=idx[id(h)], line=line, flags=list(h.flags))
+            for h in out.hunks:
+                if not ({*h.touch, *h.near} & sec.focus) and not ((h.touch | h.near) & have):
+                    extra_hunks.append(idx[id(h)])
+            for r in out.rejected[:3]:
+                notes.append(f"part of the model's revision of “{sec.heading or 'the top of the document'}” was dropped: {r[:200]}")
+        out_ctx = [replace(pc, judgement=judged.get(pc.passage.start)) for pc in ctx]
+        for k in extra_hunks[: J.MAX_EXTRA]:
+            h = doc.hunks[k]
+            st = min(h.touch or h.near)
+            out_ctx.append(PassageCtx(len(out_ctx), 0, Passage(h.start, h.end, h.original, _heading_at(doc, st), (), ""), True, None, None,
+                                      J.Judgement("only", hunk=k, extra=True, flags=list(h.flags))))
+        if len(extra_hunks) > J.MAX_EXTRA:
+            notes.append(f"{len(extra_hunks) - J.MAX_EXTRA} more change(s) the model proposed in other lines were not shown")
+        if notes:
+            doc.judge_notes = notes
+        return out_ctx
+
+    def _compose(self, spec: ChangeSpec, doc: Candidate, passages: list[PassageCtx]) -> Evaluation:
+        """Rule evidence + the model's validated revision per line.
+          * the rules are sure and the model made exactly their one-line replacement -> stays definite (confidence blended); any validation flag makes it a question;
+          * the rules are sure but the model's revision is different (it adds / removes / rewrites more) -> the model's revision is proposed as `potential`, the rules' version named;
+          * the model disagrees (left the line alone) with a rule-certain line -> `potential`, the disagreement stated: neither silently overrides the other;
+          * a line the rules rejected or never saw, which the model revised and the checks accepted -> `potential` (the model alone never makes a line definite);
+          * unavailable / unusable model output -> the rules' result, never a silent edit from the model."""
+        ref = {v.passage: v for v in self._rules.evaluate(spec, doc, [pc for pc in passages if not (pc.judgement and pc.judgement.extra)]).verdicts}
+        out: list[PassageVerdict] = []
+        for pc in passages:
+            r, j = ref.get(pc.index), pc.judgement
+            hunk = doc.hunks[j.hunk] if (j is not None and j.hunk is not None and j.hunk < len(getattr(doc, "hunks", []))) else None
+            if j is not None and j.extra and hunk is not None:
+                out.append(PassageVerdict(passage=pc.index, verdict="potential", confidence=0.5, replacement=hunk.replacement, judged=True, hunk=j.hunk,
+                                          reason="Only the language model proposed this change: reading the whole section it judged that the request applies here, and the "
+                                                 "revision passed the checks. The rules saw no evidence of their own, so please confirm." + (f" Note: {'; '.join(j.flags)[:260]}." if j.flags else "")))
+                continue
+            if r is None:
+                continue
+            if j is None:
+                out.append(r)
+                continue
+            affected = r.verdict in ("definite", "potential") and r.replacement is not None
+            how = getattr(pc.hit, "how", None)
+            if j.state in ("unavailable", "unusable"):
+                if affected and not _clean(pc, r):
+                    out.append(PassageVerdict(passage=pc.index, verdict="potential", confidence=min(0.5, r.confidence), replacement=r.replacement,
+                                              reason=f"{r.reason} (The language model could not give a usable answer for this section: {j.note}.)"))
+                elif not affected:
+                    # never silent: the reviewer must be able to tell "the model judged nothing applies" from "the model was asked and its answer was not usable"
+                    out.append(r.model_copy(update={"reason": f"The language model was asked to read the section around this line, but its answer could not be used: {j.note}. "
+                                                              f"Nothing was proposed; re-run the analysis, or edit the document yourself."}))
+                else:
+                    out.append(r)
+            elif j.state == "agrees" and hunk is not None:
+                flagged = ("; ".join(j.flags))[:260]
+                same = affected and j.line is not None and r.replacement is not None and j.line.strip() == r.replacement.strip()
+                if same and not flagged:
+                    conf = round((r.confidence + 0.95) / 2, 2) if r.verdict == "definite" else r.confidence
+                    out.append(r.model_copy(update={"confidence": conf, "reason": r.reason + " The language model, reading the whole section, made the same change."}))
+                elif same:
+                    out.append(r.model_copy(update={"verdict": "potential", "confidence": min(0.6, r.confidence), "reason": f"{r.reason} The language model made the same change, but: {flagged}."}))
+                elif affected:
+                    out.append(PassageVerdict(passage=pc.index, verdict="potential", confidence=min(0.6, r.confidence), replacement=hunk.replacement, judged=True, hunk=j.hunk,
+                                              reason=f"{r.reason} The language model, reading the whole section, proposes a different revision ({hunk.kind}) than the rules' one-line "
+                                                     f"replacement; please compare." + (f" Note: {flagged}." if flagged else "")))
+                elif r.verdict == "no_change" and how not in ("already",):
+                    why = "" if spec.general else f"{r.reason} But "
+                    out.append(PassageVerdict(passage=pc.index, verdict="potential", confidence=0.5, replacement=hunk.replacement, judged=True, hunk=j.hunk,
+                                              reason=f"{why}the language model, reading the whole section, says the change applies here ({hunk.kind}); please confirm."
+                                                     + (f" Note: {flagged}." if flagged else "")))
+                else:
+                    out.append(r)
+            else:                                                                  # the model left the line alone
+                if affected and r.verdict == "definite":
+                    out.append(r.model_copy(update={"verdict": "potential", "confidence": min(0.5, r.confidence),
+                                                    "reason": f"{r.reason} However the language model, reading the whole section, judged that the change does NOT apply to this line: please confirm."}))
+                elif affected:
+                    out.append(r.model_copy(update={"reason": r.reason + " The language model also left this line unchanged."}))
+                elif spec.general:
+                    out.append(r.model_copy(update={"reason": "The language model read the whole section around this line and judged that the requested change does not apply to it, "
+                                                              "so it was returned unchanged."}))
+                else:
+                    out.append(r)
+        return Evaluation(verdicts=out)
 
     def parse(self, description: str) -> ChangeSpec:
         base = parse_rules(description)
@@ -256,13 +413,15 @@ class LlmImpactModel:
         return base
 
     def evaluate(self, spec: ChangeSpec, doc: Candidate, passages: list[PassageCtx]) -> Evaluation:
+        if self._judge_chat is not None or not spec.actionable():                 # a general change has no value to look for: only the section editor can draft it
+            return self._compose(spec, doc, passages)
         reference = {v.passage: v for v in self._rules.evaluate(spec, doc, passages).verdicts}
         by_ctx = {pc.index: pc for pc in passages}
         model: dict[int, PassageVerdict] = {}
         try:
             out = self._eval_chain.invoke([SystemMessage(SYSTEM), HumanMessage(_prompt(spec, doc, passages))])
             ev = out if isinstance(out, Evaluation) else Evaluation.model_validate(out)
-            model = {v.passage: v for v in ev.verdicts if v.passage in by_ctx}
+            model = {v.passage: v.model_copy(update={"judged": False}) for v in ev.verdicts if v.passage in by_ctx}
         except (ValidationError, ValueError, TypeError) as e:
             log.warning("impact: evaluation output rejected (%s)", type(e).__name__)
         except Exception as e:                                                  # noqa: BLE001
@@ -320,6 +479,8 @@ class Edit:
     verdict: str
     confidence: float
     reason: str
+    kind: str = "replace"                 # replace (a one-line value replacement) | add | remove | modify (a validated section revision)
+    flags: list = field(default_factory=list)
 
 
 @dataclass
@@ -342,6 +503,8 @@ def gather(spec: ChangeSpec, doc: Candidate, s: Settings, restrict: list[str] | 
     forced into the analysis) the lines containing each old value, else the best-matching lines. Passages are numbered in document order. Whatever does not fit the per-document
     limit is COUNTED (`doc.dropped`) so the result can say so instead of silently ignoring it."""
     doc.dropped = 0
+    if spec.general and not spec.actionable():
+        return _general_passages(spec, doc, s, restrict)
     hits = list(getattr(doc, "hits", None) or [])
     if hits:
         chosen, seen = [], set()
@@ -368,6 +531,54 @@ def gather(spec: ChangeSpec, doc: Candidate, s: Settings, restrict: list[str] | 
     return out[: s.kb_ai_max_passages]
 
 
+def _general_passages(spec: ChangeSpec, doc: Candidate, s: Settings, restrict: list[str] | None) -> list[PassageCtx]:
+    """A change that names no old/new value (add / remove / rewrite ...): the lines that share the most subject words with the description, counting the words of the heading chain
+    and of the document's title, are the focus of the model's reading. At least one subject word must be on the line itself."""
+    from app.knowledge.impact.passages import _HEADING, with_headings
+
+    from app.knowledge.impact.analyse import _ACTION
+
+    terms = [t for t in dict.fromkeys(spec.entity_terms) if len(t) > 1 and not _ACTION.fullmatch(t)]          # "remove", "add", "replace" say what to do, not what it is about
+    if not terms:
+        return []
+    ctx_words = set(words(doc.title + " " + doc.path))
+    scored: list[tuple[float, Passage]] = []
+    prev: set[str] = set()
+    pronoun = re.compile(r"^\s*(?:[-*+]\s+)?(?:he|she|they|his|her|their|it|its)\b", re.I)
+    for a, b, raw, heading in with_headings(doc.content):
+        if not raw.strip() or _HEADING.match(raw) or (restrict is not None and heading not in restrict):
+            continue
+        lw = set(expand(raw, spec.alias_pairs).lower().split()) | set(words(raw))
+        base = set(lw)
+        if pronoun.match(raw):
+            lw |= prev                                                  # "He completed ..." continues the line about the person above it
+        prev = base
+        own = sum(1 for t in terms if t in lw)
+        if own == 0 and not any(t in set(words(heading)) for t in terms):
+            continue                                                    # neither the line nor the heading above it names anything the request is about
+        around = sum(1 for t in terms if t in lw or t in ctx_words or t in set(words(heading)))
+        scored.append((around / len(terms) + 0.01 * own, Passage(a, b, raw, heading)))
+    floor = 0.3
+    keep = sorted([x for x in scored if x[0] >= floor], key=lambda x: -x[0])
+    if not keep:
+        # No line names the subject (it is named only in the title, or written another way): fall back to the lines that share the most WORDS of the request, so a document that was
+        # discovered is not dropped before the model has read it.
+        from app.knowledge.impact.edit import request_stems, stem
+
+        stems = request_stems(spec.summary)
+        fall = []
+        for a, b, raw, heading in with_headings(doc.content):
+            if not raw.strip() or _HEADING.match(raw) or (restrict is not None and heading not in restrict):
+                continue
+            hit = {stem(w) for w in words(raw)} & stems
+            if hit:
+                fall.append((len(hit) / max(1, len(stems)), Passage(a, b, raw, heading)))
+        keep = sorted(fall, key=lambda x: -x[0])
+    doc.dropped = max(0, len(keep) - s.kb_ai_max_passages)
+    chosen = sorted(keep[: s.kb_ai_max_passages], key=lambda x: x[1].start)
+    return [PassageCtx(i, 0, p, True) for i, (_, p) in enumerate(chosen)]
+
+
 def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evaluation, s: Settings, today: date | None = None) -> DocResult:
     facts = spec.actionable()
     by_index = {c.index: c for c in ctx}
@@ -384,14 +595,17 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
         why = "model"
         hit = c.hit
         how = getattr(hit, "how", None)
-        if verdict in ("definite", "potential") and fact is not None:
-            if is_historical(p.heading, p.text, today):
+        hk = doc.hunks[v.hunk] if (v.hunk is not None and v.hunk < len(getattr(doc, "hunks", []))) else None
+        if hk is not None:
+            rep = hk.replacement                                                        # a validated revision: history, headings, tables, figures, duplicates were checked in edit.py
+        if verdict in ("definite", "potential") and fact is not None and hk is None:
+            if is_historical(p.heading, p.text, today, p.matches, p.start):
                 # The guard's decision replaces the model's explanation: an explanation that argues for a change next to a "no change" verdict is exactly the contradiction to avoid.
                 verdict, rep, model_note = "no_change", None, reason
                 reason, conf = "Historical or explicitly dated record: left unchanged.", max(conf, 0.8)
                 res.flags["historical"] += 1
                 why = "historical"
-            elif out_of_scope(spec, context_of(doc, p)):
+            elif out_of_scope(spec, context_of(doc, p)) and not v.judged:
                 verdict, rep, model_note = "no_change", None, reason
                 reason, conf = "The passage is about a different subject than the change.", max(conf, 0.7)
                 res.flags["scope"] += 1
@@ -433,14 +647,26 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
                  "reason": reason[:400], "replacement": rep}
         if hit is not None:
             entry["evidence"] = hit.explain()
+        if hk is not None:
+            entry["hunk"] = v.hunk
+            entry["change"] = {"kind": hk.kind, "removed": hk.removed[:12], "added": hk.added[:12], "flags": hk.flags[:5], "notes": hk.notes[:3]}
+        if c.judgement is not None:
+            entry["judge"] = c.judgement.state
+            if c.judgement.note and not model_note:
+                model_note = c.judgement.note
         if model_note:
             entry["model_note"] = model_note[:300]
         res.passages.append(entry)
         if verdict in ("definite", "potential"):
-            if rep is not None:
+            if hk is not None:
+                if not any(e.start == hk.start and e.end == hk.end for e in res.edits):
+                    res.edits.append(Edit(hk.start, hk.end, hk.original, hk.replacement, p.heading, verdict, round(conf, 2), reason[:400], hk.kind, list(hk.flags)))
+            elif rep is not None:
                 res.edits.append(Edit(p.start, p.end, p.text, rep, p.heading, verdict, round(conf, 2), reason[:400]))
             else:
                 res.uncertainty.append(reason[:200] or "no replacement proposed")
+    res.edits = _non_overlapping(res)
+    res.uncertainty += list(getattr(doc, "judge_notes", None) or [])
     if getattr(doc, "dropped", 0):
         res.uncertainty.append(f"{doc.dropped} more matching passage(s) in this document were not examined (limit per document)")
     include = [p for p in res.passages if p["verdict"] in ("definite", "potential")]
@@ -458,6 +684,21 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
     return res
 
 
+def _non_overlapping(res: DocResult) -> list[Edit]:
+    """Edits are patches on one document version and must not overlap. A validated section revision wins over a one-line rule replacement it overlaps; the loser is reported."""
+    keep: list[Edit] = []
+    for e in sorted(res.edits, key=lambda e: (e.start, e.kind == "replace", e.end)):
+        if keep and e.start < keep[-1].end:
+            if e.kind != "replace" and keep[-1].kind == "replace":
+                res.uncertainty.append("a one-line replacement overlapped the model's section revision and was replaced by it")
+                keep[-1] = e
+            else:
+                res.uncertainty.append("two proposed changes overlapped; the first one is kept: check the document after accepting")
+            continue
+        keep.append(e)
+    return keep
+
+
 def apply_edits(content: str, edits: list[dict]) -> str:
     """The document text with non-overlapping [start, end) edits applied (each {start, end, original, replacement}). The original text at that span must still match,
     so a patch can never be applied to a document that has moved on."""
@@ -470,3 +711,9 @@ def apply_edits(content: str, edits: list[dict]) -> str:
         pos = e["end"]
     out.append(content[pos:])
     return "".join(out)
+
+
+def _heading_at(doc: Candidate, offset: int) -> str:
+    from app.knowledge.impact.passages import heading_chain
+
+    return heading_chain(doc.content, offset)

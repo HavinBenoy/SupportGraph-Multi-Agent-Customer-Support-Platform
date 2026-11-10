@@ -9,6 +9,7 @@ analysis_attempt=<mine>` in the UPDATE itself, so a cancelled, retried or taken-
 called OUTSIDE any database transaction. Any error returns the request to `draft` with a short error (never document text) so staff can retry."""
 
 import hashlib
+import re
 import logging
 import threading
 from dataclasses import asdict, dataclass, field
@@ -29,6 +30,16 @@ from app.knowledge.impact.spec import ChangeSpec, Question, are_siblings, entity
 log = logging.getLogger(__name__)
 ALL = "All of them"
 RESTATE = "restate"
+_ACTION = re.compile(r"\b(?:add(?:s|ed|ing)?|remov\w+|delet\w+|drop(?:s|ped|ping)?|discontinu\w+|cancel\w*|no longer|not (?:required|needed|allowed|applicable)|now|also|includ\w+|introduc\w+|new|launch\w*|"
+                     r"stop\w*|replac\w+|rewrit\w+|reword\w*|rephras\w+|instead|extend\w*|increas\w+|reduc\w+|lower\w*|rais\w+|switch\w*|convert\w*|mov(?:e|es|ed|ing)|shift\w*|waiv\w+|"
+                     r"relax\w*|require[sd]?|must|only|open|clos(?:e|es|ed|ing)|available|unavailable|offer\w*|hybrid|offline|online|merge\w*|split|renam\w+|correct\w*)\b", re.I)
+_TARGET = re.compile(r"\b(?:to|into|as|from|instead of|by)\b", re.I)
+
+
+def vague(description: str) -> bool:
+    """A description that says that something changed, but neither what the change is (no action such as add / remove / replace / now / no longer) nor to what: acting on it would be a guess."""
+    d = " ".join((description or "").split())
+    return len(d) < 12 or not (_ACTION.search(d) or _TARGET.search(d))
 
 
 class Superseded(Exception):
@@ -75,6 +86,14 @@ def _progress(tenant_id: str, request_id: str, attempt: int, an: dict, stage: st
     an["progress"] = {"stage": stage, "done": done, "total": total}
     if not _fenced(tenant_id, request_id, attempt, analysis=dict(an)):
         raise Superseded()
+
+
+def generalize(spec: ChangeSpec, description: str, restated: str = "") -> ChangeSpec | None:
+    """The spec of a change that is not a value replacement, or None when the description is too vague to act on (see `vague`)."""
+    terms = list(dict.fromkeys(spec.entity_terms + entity_terms_from(description) + entity_terms_from(restated)))[:12]
+    if not terms or vague(f"{description} {restated}"):
+        return None
+    return spec.model_copy(update={"general": True, "entity_terms": terms, "summary": (description + (" | " + restated if restated else ""))[:600]})
 
 
 def build_spec(inp: Input, model: ImpactModel) -> ChangeSpec:
@@ -169,8 +188,13 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
     _progress(tenant_id, request_id, attempt, an, "parsing")
     spec = build_spec(inp, model)
     if not spec.actionable():
-        qs = [Question(id=RESTATE, text="The description does not say what the old and the new value are. Restate it as “… from <old> to <new>”.", options=[])]
-        return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": []}
+        # Not a value replacement ("add ...", "remove ...", "now also ...", a rewrite): the language model reads the relevant sections and drafts the revision. Only a description
+        # that names nothing to search for, or says nothing about what the change is, cannot be acted on.
+        general = generalize(spec, inp.description, str(inp.answers.get(RESTATE, "")))
+        if general is None:
+            qs = [Question(id=RESTATE, text="The description does not say what should change or where. Describe it with the subject (course, person, policy ...) and what to add, remove or change.", options=[])]
+            return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": []}
+        spec = general
     _progress(tenant_id, request_id, attempt, an, "discovering")
     with session_scope() as db:
         cands, report = disc.discover_with_report(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids), include={inp.reference.doc_id} if inp.reference else set())
@@ -189,6 +213,10 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
         if not ctx:
             results.append((cand, DocResult(cand.doc_id, "not_relevant", 0.0, "Nothing in this document concerns the change.")))
             continue
+        judge = getattr(model, "judge", None)
+        if judge is not None:
+            _progress(tenant_id, request_id, attempt, an, "reading", n, total)
+            ctx = judge(spec, cand, ctx, s)                                  # the section judge (a model call, outside any transaction); a no-op without a model
         ev: Evaluation = model.evaluate(spec, cand, ctx)                 # outside any transaction
         results.append((cand, validate(spec, cand, ctx, ev, s)))
     questions += _resolve_siblings(spec, results, inp.answers)

@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import type { KwItem, KwPatch, KwRequest } from "@/lib/types";
 import { DiffLegend, DiffView } from "./DiffView";
 import { PatchLegend, PatchView, baseText } from "./PatchView";
-import { ClassChip, DecisionChip, KIND_LABEL, msg, pct, when } from "./ui";
+import { CHANGE_LABEL, ClassChip, DecisionChip, JUDGE_LABEL, KIND_LABEL, msg, pct, when } from "./ui";
 
 /** The edits to show for an item: the decided patch if there is one, otherwise the AI's suggestion. */
 export const editsOf = (it: KwItem): (KwPatch & { heading?: string })[] =>
@@ -53,13 +53,18 @@ function Candidate({ req, it, readOnly, onItem }: { req: KwRequest; it: KwItem; 
             {it.ai.passages.map((p) => (
               <li key={p.n}><b>{KIND_LABEL[p.kind ?? ""] ?? p.verdict}</b>{p.heading ? <> · <i>{p.heading}</i></> : null}: “{p.text.length > 160 ? `${p.text.slice(0, 160)}…` : p.text}”
                 {p.evidence && <div className="kw-muted tiny">Evidence: {p.evidence}</div>}
+                {p.judge && <div className="kw-muted tiny">{JUDGE_LABEL[p.judge]}</div>}
+                {p.change && <div className="kw-muted tiny">Proposed: {CHANGE_LABEL[p.change.kind] ?? p.change.kind}
+                  {p.change.removed.length > 0 && <> — removes {p.change.removed.length} line{p.change.removed.length === 1 ? "" : "s"}</>}
+                  {p.change.added.length > 0 && <> — adds {p.change.added.length} line{p.change.added.length === 1 ? "" : "s"}</>}</div>}
+                {p.change?.flags?.map((f, k) => <div key={k} className="kw-muted tiny kw-flag">Check: {f}</div>)}
                 {p.reason && <div className="kw-muted tiny">{p.reason}</div>}</li>))}
           </ul></details>)}
       {it.classification === "potential" && !it.decision && <p className="kw-banner">The AI is not certain this passage must change. Please confirm before accepting.</p>}
       {mode !== "edit" && (it.decision === "discarded" ? (
         <p className="kw-muted">Discarded. The published text stays as it is.{it.rationale ? ` Reason: ${it.rationale}` : ""}</p>
       ) : hasPatch ? (
-        <><PatchLegend /><PatchView base={base} edits={shown.map((e, i) => ({ ...e, heading: ai[i]?.heading }))} label={`Proposed change to ${it.doc_title}`} /></>
+        <><PatchLegend /><PatchView base={base} edits={shown.map((e, i) => ({ ...e, heading: ai[i]?.heading, kind: ai[i]?.kind }))} label={`Proposed change to ${it.doc_title}`} /></>
       ) : (
         <p className="kw-banner warn">The AI found a related passage but could not write a safe replacement. Edit it yourself, or discard.</p>
       ))}

@@ -144,8 +144,9 @@ export type KwClass = "definite" | "potential" | "related_no_change";
 export type KwDecision = "accepted" | "manual" | "discarded";
 /** One proposed edit of a whole line of the BASE (published) text: [start, end) offsets into it. */
 export interface KwPatch { start: number; end: number; original: string; replacement: string }
-export interface KwAiEdit extends KwPatch { heading: string; verdict: string; confidence: number; reason: string }
-export interface KwAiPassage { n: number; start: number; end: number; text: string; heading: string; verdict: string; confidence: number; reason: string; replacement: string | null; kind?: string; evidence?: string; model_note?: string }
+export type KwEditKind = "replace" | "add" | "remove" | "modify";
+export interface KwAiEdit extends KwPatch { heading: string; verdict: string; confidence: number; reason: string; kind?: KwEditKind; flags?: string[] }
+export interface KwAiPassage { n: number; start: number; end: number; text: string; heading: string; verdict: string; confidence: number; reason: string; replacement: string | null; kind?: string; evidence?: string; model_note?: string; hunk?: number; change?: { kind: KwEditKind; removed: string[]; added: string[]; flags: string[]; notes: string[] }; judge?: "agrees" | "disagrees" | "only" | "unusable" | "unavailable" }
 export interface KwAi {
   reason: string | null; signals: Record<string, unknown> | null; uncertainty: string[] | null; flags: Record<string, number> | null; path: string | null;
   passages: KwAiPassage[] | null; edits: KwAiEdit[] | null;
@@ -169,7 +170,7 @@ export interface KwAnalysis {
 }
 export interface KwCounts { accepted: number; edited: number; discarded: number; pending: number; manual_items: number; related: number; included: number; excluded_by_admin: number }
 export interface KwVerifyItem { doc_id: string; title: string; heading?: string; text: string; kind: "outdated" | "possible"; evidence?: string; left_by_reviewer?: boolean }
-export interface KwVerification { checked_at: string; documents_scanned: number; clean: boolean; unreviewed?: number; remaining: KwVerifyItem[]; remaining_total: number; historical_skipped?: number; confirmed_new?: number; other_subject?: number; values_searched?: string[] }
+export interface KwVerification { checked_at: string; documents_scanned: number; clean: boolean; unreviewed?: number; remaining: KwVerifyItem[]; remaining_total: number; historical_skipped?: number; confirmed_new?: number; other_subject?: number; values_searched?: string[]; mode?: "values" | "statements"; verifiable?: boolean; note?: string; edits_missing?: number }
 export interface KwRelease { versions: Record<string, number>; previous: Record<string, number>; attempts: number; model: string; published_at: string; verification?: KwVerification | null }
 export interface KwFailure { stage: string; message: string; documents: string[] }
 export interface KwRequest {

@@ -237,6 +237,30 @@ def get_judge(settings: Settings | None = None):
     return _get(settings)
 
 
+def get_judge_chat(settings: Settings | None = None):
+    """The chat model for the section editor: the "impact" model with thinking on (setting), the OUTPUT limit `kb_ai_judge_max_tokens` (num_predict: thinking + the revised section),
+    Ollama's TOTAL window `kb_ai_judge_num_ctx` and a long timeout. The input size of a section is a separate limit (`kb_ai_context_tokens`, see impact/context.py). None when off."""
+    s = settings or get_settings()
+    if s.kb_ai_judge == "off":
+        return None
+    if s.llm_provider != "ollama":
+        return get_chat_model("impact", s)
+    s2 = s.model_copy(update={"llm_thinking": s.kb_ai_judge_thinking, "impact_max_output_tokens": s.kb_ai_judge_max_tokens, "llm_timeout_seconds": s.kb_ai_judge_timeout_s,
+                              "llm_num_ctx": s.kb_ai_judge_num_ctx})
+    return get_chat_model("impact", s2)
+
+
+def get_check_chat(settings: Settings | None = None):
+    """The short second opinion on a revision (PASS / FAIL / UNSURE and a reason): same model, thinking OFF, a small output cap. None when the check is off."""
+    s = settings or get_settings()
+    if s.kb_ai_judge == "off" or s.kb_ai_semantic_check == "off":
+        return None
+    if s.llm_provider != "ollama":
+        return get_chat_model("impact", s)
+    s2 = s.model_copy(update={"llm_thinking": False, "impact_max_output_tokens": 200, "llm_timeout_seconds": min(s.kb_ai_judge_timeout_s, 180.0), "llm_num_ctx": s.kb_ai_judge_num_ctx})
+    return get_chat_model("impact", s2)
+
+
 def get_impact_model(settings: Settings | None = None):
     """The knowledge impact-analysis model (Part 2). "rules" mode and the fake provider use the deterministic rule engine (no model call, fully offline); otherwise the
     chat model of role "impact" (SG_LLM_MODEL_IMPACT, falling back to SG_LLM_MODEL) fills validated schemas. The rule engine's checks run after EVERY model."""
@@ -245,4 +269,4 @@ def get_impact_model(settings: Settings | None = None):
 
     if s.kb_ai_mode == "rules" or (s.kb_ai_mode == "auto" and s.llm_provider == "fake"):
         return RuleImpactModel()
-    return LlmImpactModel(get_chat_model("impact", s), name=f"{s.llm_provider}:{_role_model('impact', s)}")
+    return LlmImpactModel(get_chat_model("impact", s), name=f"{s.llm_provider}:{_role_model('impact', s)}", judge_chat=get_judge_chat(s), check_chat=get_check_chat(s))

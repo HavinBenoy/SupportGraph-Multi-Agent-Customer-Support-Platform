@@ -208,6 +208,28 @@ class Settings(BaseSettings):
     # discovery, kept for comparison and as a fallback. kb_ai_verify: after a release, search the published base again for references to the old value that were missed.
     kb_ai_discovery: Literal["v1", "v2"] = "v2"
     kb_ai_verify: bool = True
+    # The section judge (Part 2 final): the way a person would test the model in a terminal. A short section of the document is given as TEXT, the model is asked to make the
+    # change "only where it is applicable" and to return the text inside a fenced block; its answer is then checked line by line (only the value may differ). Thinking is ON for
+    # this role because it is what makes a small model reliable at this task; it runs in the background analysis job, never in a chat turn.
+    #   uncertain = ask only about sections where the rules are not completely sure; all = ask about every section with a candidate; off = the older per-passage structured call
+    kb_ai_judge: Literal["off", "uncertain", "all"] = "uncertain"
+    kb_ai_judge_thinking: bool = True
+    kb_ai_judge_timeout_s: float = Field(default=300.0, gt=0, le=1800)
+    kb_ai_judge_max_tokens: int = Field(default=4096, ge=256, le=16384)        # OUTPUT limit (Ollama num_predict): thinking + the revised section. Too small = the answer is cut off (then it is rejected)
+    kb_ai_judge_max_calls: int = Field(default=16, ge=1, le=100)               # model calls per analysis
+    kb_ai_judge_window_chars: int = Field(default=1600, ge=400, le=6000)       # legacy fixed-size window (used only with kb_ai_context_mode = "fixed")
+    # Adaptive context (three DIFFERENT limits, see docs/CONFIGURATION_AI_EDITING.md): kb_ai_context_tokens = how much DOCUMENT text one request may carry (input capacity of
+    # the section); kb_ai_judge_max_tokens = how much the model may WRITE (output limit); kb_ai_judge_num_ctx = Ollama's total window (prompt + thinking + answer, which also
+    # sets the RAM used for the attention cache). The effective section size is the smallest that all three allow. Defaults suit a CPU-only 16 GB machine.
+    kb_ai_context_mode: Literal["adaptive", "fixed"] = "adaptive"
+    kb_ai_context_tokens: int = Field(default=1800, ge=300, le=24000)
+    kb_ai_judge_num_ctx: int = Field(default=8192, ge=2048, le=65536)
+    kb_ai_thinking_reserve_tokens: int = Field(default=1500, ge=0, le=12000)   # output tokens kept for reasoning before the answer when sizing a section
+    kb_ai_max_sections: int = Field(default=6, ge=1, le=40)                    # model calls per document (sections beyond it are reported, not silently skipped)
+    # Validation of the model's revision. semantic_check: a SECOND, short model call that asks whether the revision does what was requested and nothing else.
+    kb_ai_semantic_check: Literal["off", "uncertain", "all"] = "uncertain"
+    kb_ai_max_changed_fraction: float = Field(default=0.6, ge=0.05, le=1)      # more of a section's lines changed than this => the whole revision goes to a person
+    kb_ai_max_removed_fraction: float = Field(default=0.5, ge=0.05, le=1)      # more of a section's text removed than this => rejected as an accidental deletion
     kb_ai_background: bool = True                                              # run analysis and release in a background thread (False = inline; tests)
     llm_model_impact: str = ""
     impact_max_output_tokens: int = Field(default=900, ge=64, le=4096)         # the impact role writes replacement text, so it gets a larger output cap than 400

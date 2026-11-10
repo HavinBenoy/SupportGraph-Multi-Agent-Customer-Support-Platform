@@ -227,10 +227,10 @@ def scan_doc(doc, spec: ChangeSpec, fi: int, fact: Fact, *, rnd: int = 1) -> lis
             line_cue = _cue_of(attr, f"{u.text} {' '.join(u.columns)}", strong_only=True)
             if subj == "line" and line_cue and roles < MAX_ROLE_HITS:
                 roles += 1
-                out.append(Hit(doc.doc_id, Passage(u.start, u.end, u.text, u.heading), fi, fact, "role", subj, rnd, line_cue, "", used))
+                out.append(Hit(doc.doc_id, Passage(u.start, u.end, u.text, u.heading, (), u.lead), fi, fact, "role", subj, rnd, line_cue, "", used))
             continue
         shared = _shared_subject(spec, u) if (how in ("old", "old_core", "slot", "similar") and subj != "none") else ""
-        out.append(Hit(doc.doc_id, Passage(u.start, u.end, u.text, u.heading, tuple(spans)), fi, resolved, how, subj, rnd, text_cue, column, used,
+        out.append(Hit(doc.doc_id, Passage(u.start, u.end, u.text, u.heading, tuple(spans), u.lead), fi, resolved, how, subj, rnd, text_cue, column, used,
                        tuple(dict.fromkeys(s.text.strip() for s in spans)), shared=shared))
     return out
 

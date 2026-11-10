@@ -10,6 +10,7 @@ from app.knowledge.impact.passages import _HEADING, with_headings
 _SEPARATOR = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 _LIST = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+")
 _ANSWER = re.compile(r"^\s*(?:A|Ans|Answer)\s*[:.]\s*", re.I)
+_PRONOUN = re.compile(r"^\s*(?:[-*+]\s+)?(?:he|she|they|his|her|their|it|its)\b", re.I)
 _QUESTION = re.compile(r"^\s*(?:Q|Question)\s*[:.]\s*", re.I)
 
 
@@ -57,9 +58,10 @@ def units(content: str) -> list[Unit]:
     columns: tuple[str, ...] = ()
     last_question = ""
     in_table = False
+    prev: Unit | None = None                   # the previous line of the same paragraph block: what a "He has ..." line talks about
     for i, (a, b, raw, h) in enumerate(rows):
         if not raw.strip() or _HEADING.match(raw):
-            in_table, columns = False, ()
+            in_table, columns, prev = False, (), None
             if _HEADING.match(raw):
                 last_question = ""
             continue
@@ -72,10 +74,14 @@ def units(content: str) -> list[Unit]:
                 continue
             cells = _cells(raw, a)
             out.append(Unit(a, b, raw, h, "table_row", columns=columns if in_table else (), cells=cells))
+            prev = None
             continue
         in_table, columns = False, ()
         if _QUESTION.match(raw):
             last_question = _QUESTION.sub("", raw).strip()
         lead = last_question if _ANSWER.match(raw) else ""
-        out.append(Unit(a, b, raw, h, "list" if _LIST.match(raw) else "paragraph", lead=lead))
+        if not lead and prev is not None and _PRONOUN.match(raw):          # "He has a work experience of 3 years." continues the line above
+            lead = prev.lead if (prev.lead and _PRONOUN.match(prev.text)) else prev.text
+        prev = Unit(a, b, raw, h, "list" if _LIST.match(raw) else "paragraph", lead=lead)
+        out.append(prev)
     return out

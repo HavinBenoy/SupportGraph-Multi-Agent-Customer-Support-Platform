@@ -9,6 +9,7 @@ Inputs are the stored, validated spec of the request and the values learned duri
 code as the analysis (scan.py), so the two cannot disagree about what a line says."""
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -40,8 +41,59 @@ def _facts_to_check(spec: ChangeSpec, learned: list[dict]) -> ChangeSpec:
     return spec.model_copy(update={"facts": facts})
 
 
-def compute(db, tenant_id: str, spec_dict: dict, learned: list[dict], left_alone: set[str]) -> dict:
+def _canon(line: str) -> str:
+    return " ".join(re.sub(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+", "", line).lower().split())
+
+
+def compute_statements(corpus, edits_by_doc: dict[str, list[dict]], left_alone: set[str]) -> dict:
+    """Residual check for a change that is not a value replacement (add / remove / rewrite): there is no old value to search for, so the check uses the published edits themselves.
+      * applied     the lines the edit added are in the live document (it is the version that was published);
+      * remaining   a statement that was REMOVED or REWRITTEN (a line of the edit's original text that is no longer in its replacement) still appears, word for word, in a live document
+                    (another document, or the same one): the same outdated statement may exist elsewhere. Historical lines are counted, not listed.
+    It cannot prove that a rewritten statement is semantically gone everywhere, and says so (`verifiable` = False for the part it cannot check)."""
+    by_doc = {c.doc_id: c for c in corpus}
+    removed: dict[str, tuple[str, str]] = {}
+    applied = missing = 0
+    for doc_id, edits in edits_by_doc.items():
+        live = by_doc.get(doc_id)
+        for e in edits:
+            old_lines = [x for x in str(e.get("original", "")).split("\n")]
+            new_lines = [x for x in str(e.get("replacement", "")).split("\n")]
+            new_c = {_canon(x) for x in new_lines}
+            added = [x for x in new_lines if _canon(x) not in {_canon(o) for o in old_lines} and len(_canon(x)) >= 6]
+            if added and live is not None:
+                if all(x.strip() in live.content for x in added):
+                    applied += 1
+                else:
+                    missing += 1
+            for x in old_lines:
+                c = _canon(x)
+                if len(c) >= 14 and c not in new_c and not x.lstrip().startswith("#") and not x.strip().startswith("|---"):
+                    removed.setdefault(c, (x.strip(), doc_id))
+    remaining, historical = [], 0
+    for c in corpus:
+        for pos, raw in enumerate(c.content.split("\n")):
+            key = _canon(raw)
+            if key not in removed:
+                continue
+            if is_historical("", raw, None):
+                historical += 1
+                continue
+            remaining.append({"doc_id": c.doc_id, "title": c.title, "version": c.version, "heading": "", "text": raw.strip()[:300], "kind": "possible",
+                              "evidence": "The same statement that this change removed or rewrote in another place still appears here, word for word.",
+                              "left_by_reviewer": c.doc_id in left_alone})
+    remaining.sort(key=lambda r: (r["left_by_reviewer"], r["doc_id"], r["text"]))
+    return {"checked_at": store._iso(datetime.now(timezone.utc)), "documents_scanned": len(corpus), "mode": "statements", "clean": not remaining and not missing,
+            "verifiable": False, "unreviewed": len([r for r in remaining if not r["left_by_reviewer"]]), "remaining": remaining[:MAX_LISTED], "remaining_total": len(remaining),
+            "historical_skipped": historical, "confirmed_new": applied, "other_subject": 0, "values_searched": [], "edits_missing": missing,
+            "note": "This change is not a value replacement, so there is no old value to search for. The check confirms that the new text is live and looks for the removed or rewritten "
+                    "statements word for word elsewhere; it cannot prove that every related statement was updated."}
+
+
+def compute(db, tenant_id: str, spec_dict: dict, learned: list[dict], left_alone: set[str], edits_by_doc: dict[str, list[dict]] | None = None) -> dict:
     spec = ChangeSpec.model_validate(spec_dict)
+    if not spec.actionable():
+        return compute_statements(disc.published_corpus(db, tenant_id), edits_by_doc or {}, left_alone)
     spec = _facts_to_check(spec, learned)
     corpus = disc.published_corpus(db, tenant_id)
     spec.alias_pairs = build_aliases(spec, disc._tenant_groups(tenant_id), [c.content for c in corpus])
@@ -60,7 +112,7 @@ def compute(db, tenant_id: str, spec_dict: dict, learned: list[dict], left_alone
             if h.subject == "none":
                 other_subject += 1
                 continue
-            if is_historical(h.passage.heading, h.passage.text):
+            if is_historical(h.passage.heading, h.passage.text, None, h.passage.matches, h.passage.start):
                 historical += 1
                 continue
             kind = "outdated" if (h.how in ("old", "old_core", "slot") and h.subject == "line" and not h.conflict) else "possible"
@@ -82,7 +134,11 @@ def verify_request(tenant_id: str, request_id: str, s: Settings, actor: str = "s
             an = r.analysis or {}
             left = {i.doc_id for i in db.execute(select(KbChangeItem).where(KbChangeItem.tenant_id == tenant_id, KbChangeItem.request_id == request_id)).scalars()
                     if i.decision == "discarded" or i.admin_decision == "excluded"}
-            out = compute(db, tenant_id, an["spec"], (an.get("summary") or {}).get("learned") or [], left)
+            edits: dict[str, list[dict]] = {}
+            for i in db.execute(select(KbChangeItem).where(KbChangeItem.tenant_id == tenant_id, KbChangeItem.request_id == request_id)).scalars():
+                if i.decision in ("accepted", "manual") and i.admin_decision != "excluded" and i.final_edits:
+                    edits[i.doc_id] = list(i.final_edits)
+            out = compute(db, tenant_id, an["spec"], (an.get("summary") or {}).get("learned") or [], left, edits)
             rel = dict(r.release or {})
             rel["verification"] = out
             r.release = rel

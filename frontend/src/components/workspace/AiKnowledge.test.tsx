@@ -74,6 +74,41 @@ describe("AI-assisted change (staff)", () => {
     expect(body(f, "POST", "/api/staff/knowledge/ai-changes")).toEqual({ description: "Python fee is now 48000" });
   }, 15000);
 
+  it("shows, per passage, how it was judged: class, evidence and what the language model said", async () => {
+    const base = item();
+    const withPassages = item({ ai: { ...base.ai!, passages: [
+      { n: 0, start: 0, end: 5, text: "His total work experience is 3 years.", heading: "Faculty", verdict: "potential", confidence: 0.5, reason: "The rules saw no link to the subject.", replacement: "His total work experience is 5 years.",
+        kind: "potential", evidence: "the old value is written here; subject only in the context", judge: "agrees" },
+      { n: 1, start: 6, end: 9, text: "Until 2023 he had 3 years.", heading: "Faculty", verdict: "no_change", confidence: 0.8, reason: "Historical or explicitly dated record: left unchanged.", replacement: null, kind: "historical" }] } });
+    mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [withPassages] }) }) });
+    mount({ requestId: "cr_ai1" });
+    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" }, { timeout: 5000 });
+    expect(card).toHaveTextContent("How each passage was judged (2)");
+    expect(card).toHaveTextContent("Potentially affected");
+    expect(card).toHaveTextContent("Historical — keep");
+    expect(card).toHaveTextContent("Evidence: the old value is written here; subject only in the context");
+    expect(card).toHaveTextContent("The language model read the section and agrees.");
+  });
+
+  it("shows an added, a removed and a rewritten change as labelled hunks with the checks the validator raised", async () => {
+    const base = item();
+    const doc = "# DS\n- Any graduate\n- Age under 30\nSanthosh sir teaches ML.\n";
+    const edits = [
+      { start: 5, end: 33, original: "- Any graduate\n- Age under 30", replacement: "- Any graduate", heading: "DS", verdict: "potential", confidence: 0.5, reason: "r", kind: "remove" as const },
+      { start: 34, end: 58, original: "Santhosh sir teaches ML.", replacement: "Santhosh sir teaches ML.\nHe holds an MTech in AI.", heading: "DS", verdict: "potential", confidence: 0.5, reason: "r", kind: "add" as const, flags: ["it uses names that are in neither the document nor the request (MTech)"] }];
+    const generalItem = item({ diff: { header: { old_title: "DS", new_title: "DS" }, body: [{ op: "equal", text: doc }] } as KwItem["diff"], classification: "potential",
+      ai: { ...base.ai!, edits, passages: [{ n: 0, start: 34, end: 58, text: "Santhosh sir teaches ML.", heading: "DS", verdict: "potential", confidence: 0.5, reason: "the language model says the change applies here (add); please confirm.",
+        replacement: "x", kind: "potential", judge: "agrees", hunk: 0, change: { kind: "add", removed: [], added: ["He holds an MTech in AI."], flags: ["it uses names that are in neither the document nor the request (MTech)"], notes: [] } }] } });
+    mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [generalItem] }) }) });
+    mount({ requestId: "cr_ai1" });
+    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" }, { timeout: 5000 });
+    expect(card).toHaveTextContent("Removed");
+    expect(card).toHaveTextContent("Added");
+    expect(card).toHaveTextContent("Proposed: add information — adds 1 line");
+    expect(card).toHaveTextContent("Check: it uses names that are in neither the document nor the request (MTech)");
+    expect(card).toHaveTextContent("He holds an MTech in AI.");
+  });
+
   it("asks the follow-up question instead of guessing, and sends the answer back", async () => {
     const q = req({ status: "awaiting_clarification", items: [], analysis: { ...req().analysis!, summary: null, questions: [{ id: "q1", text: "Which Data Science batch?", options: ["Weekend batch", "Weekday batch"] }] } });
     const f = mockApi({
@@ -220,6 +255,17 @@ describe("Administrator change requests (integrated approve → process → publ
     expect(screen.getByText(/Python fees: v1/)).toHaveTextContent("Python fees: v1 → v2");
   }, 15000);
 
+  it("says that a change that is not a value replacement cannot be fully verified automatically", async () => {
+    const pub = submitted({ status: "published", published_by: "admin1", published_at: "2026-11-03T10:00:00Z",
+      release: { versions: { "python-fees": 2 }, previous: { "python-fees": 1 }, attempts: 1, model: "m", published_at: "x",
+        verification: { checked_at: "2026-11-03T10:01:00Z", documents_scanned: 9, clean: true, mode: "statements", verifiable: false, remaining_total: 0, remaining: [], confirmed_new: 1,
+          note: "This change is not a value replacement, so there is no old value to search for." } } });
+    world({ r: pub }, {});
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /Open request cr_ai1/ }));
+    expect(await screen.findByText(/not a value replacement\): the new text is live and no removed statement was found elsewhere/)).toBeInTheDocument();
+    expect(screen.getByText(/no old value to search for/)).toBeInTheDocument();
+  });
   it("shows what the follow-up check still finds in the live knowledge, and can run it again", async () => {
     const pub = submitted({ status: "published", published_by: "admin1", published_at: "2026-11-03T10:00:00Z",
       release: { versions: { "python-fees": 2 }, previous: { "python-fees": 1 }, attempts: 1, model: "m", published_at: "x",

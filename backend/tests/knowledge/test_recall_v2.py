@@ -120,3 +120,42 @@ def test_change_phrasings_are_understood():
     g = m.parse(Q.NEW_ONLY).facts[0]
     assert g.old_value is None and g.new_value == "Santhosh sir"
     assert m.parse(Q.ABBREVIATED).entity_terms == ["ml"]
+
+
+# ---- reported from the demo: "He has a work experience of 3 years. Previously he worked in IT." ----------------------------------------------
+def _one_doc(body, desc):
+    from app.knowledge.impact.discover import Candidate
+    c = Candidate(doc_id="ds", title="Data-Science", path="", category="courses", tags=[], version=1, checksum="x", content=body)
+    s = Settings(kb_ai_discovery="v2")
+    m = RuleImpactModel()
+    spec = m.parse(desc)
+    cands, _ = D.rank([c], s, spec, groups={})
+    out = []
+    for cc in cands:
+        ctx = gather(spec, cc, s, None)
+        out += validate(spec, cc, ctx, m.evaluate(spec, cc, ctx), s).passages if ctx else []
+    return out
+
+
+EXP = "change the work experience of santhosh sir from 3 years to 5 years"
+
+
+def test_a_pronoun_line_belongs_to_the_person_named_on_the_line_above():
+    body = "# Data-Science\n\nMachine Learning faculty is Santhosh sir\nHe has a work experience of 3 years. Previously he worked in IT.\n"
+    p = [x for x in _one_doc(body, EXP) if x["kind"] == "definite"]
+    assert [x["replacement"] for x in p] == ["He has a work experience of 5 years. Previously he worked in IT."]
+
+
+def test_a_pronoun_line_after_a_different_person_is_not_edited():
+    body = "# Data-Science\n\nPython faculty is Ramesh sir\nHe has a work experience of 3 years.\n"
+    assert not [x for x in _one_doc(body, EXP) if x["replacement"]]
+
+
+def test_history_in_the_same_line_only_matters_when_it_holds_the_value():
+    keep = "# Data-Science\n\nSanthosh sir\nPreviously he had a work experience of 3 years.\n"
+    assert not [x for x in _one_doc(keep, EXP) if x["kind"] == "definite"]
+    from app.knowledge.impact.scope import is_historical
+    from app.knowledge.impact.passages import Span
+    line = "He has 3 years of experience. Previously he worked in IT."
+    assert not is_historical("Faculty", line, None, (Span(7, 14, "3 years"),), 0)
+    assert is_historical("Faculty", line, None, (Span(40, 50, "worked"),), 0)

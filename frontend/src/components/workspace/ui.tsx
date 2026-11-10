@@ -28,3 +28,6 @@ export const DecisionChip = ({ d }: { d: string | null | undefined }) => (
 export const STEP_STATUS: KwStatus[] = ["submitted", "under_review", "approved", "processing", "publishing", "published"];
 
 export const KIND_LABEL: Record<string, string> = { definite: "Definitely affected", potential: "Potentially affected", ambiguous: "Contradictory or ambiguous", related: "Related — no change", historical: "Historical — keep", not_relevant: "Not relevant" };
+export const CHANGE_LABEL: Record<string, string> = { add: "add information", remove: "remove information", modify: "rewrite the passage", replace: "replace a value" };
+export const JUDGE_LABEL: Record<string, string> = { agrees: "The language model read the section and agrees.", disagrees: "The language model read the section and judged that the change does not apply here.",
+  only: "Only the language model found this line.", unusable: "The language model's answer for this line could not be used safely.", unavailable: "The language model gave no usable answer for this section." };

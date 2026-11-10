@@ -19,7 +19,7 @@ from app.db.models import KbDocument, KbVersion
 from app.knowledge import workspace
 from app.knowledge.impact.aliases import build_aliases, expand
 from app.knowledge.impact.scan import ScanReport, scan_corpus
-from app.knowledge.impact.scope import scope_fraction  # noqa: F401 (re-exported)
+from app.knowledge.impact.scope import person_terms, scope_fraction  # noqa: F401 (scope_fraction re-exported)
 from app.knowledge.impact.passages import slot_passages, with_headings
 from app.knowledge.impact.spec import ChangeSpec, words
 from app.knowledge.impact.values import find_value
@@ -43,6 +43,8 @@ class Candidate:
     score: float = 0.0
     hits: list = field(default_factory=list)       # scan.Hit: the sections of this document that carry evidence (discovery "v2")
     dropped: int = 0                               # matching passages beyond the per-document limit (set by evaluate.gather)
+    judge_notes: list = field(default_factory=list)  # things the section judge saw but did not use (shown to the reviewer)
+    hunks: list = field(default_factory=list)      # edit.Hunk: the validated section revisions proposed by the model (patches on this document version)
 
 
 def published_corpus(db: Session, tenant_id: str, *, exclude: set[str] = frozenset()) -> list[Candidate]:
@@ -131,7 +133,7 @@ def rank(corpus: list[Candidate], s: Settings, spec: ChangeSpec, *, groups: dict
     vocab = {w for c in corpus for w in words(f"{c.title} {c.path} {c.content}")}
     known = build_aliases(spec, groups, texts, with_acronym=False) if v2 else []           # institute / document vocabulary only: the subject's own acronym says nothing about a word
     alias_words = {w for form, target in known for w in (*words(form), *target)}
-    pruned = [t for t in spec.entity_terms if t in vocab or t in alias_words]           # a word of the description that no document contains ("goes", "raise") names nothing
+    pruned = [t for t in spec.entity_terms if t in vocab or t in alias_words or t in person_terms(spec)]           # a word of the description that no document contains ("goes", "raise") names nothing
     if pruned:
         spec.entity_terms = pruned
     if v2:
@@ -153,7 +155,7 @@ def rank(corpus: list[Candidate], s: Settings, spec: ChangeSpec, *, groups: dict
         if v2:
             c.signals.update(evidence=len(c.hits), strong=strong, aliases=sorted({a for h in c.hits for a in h.aliases}))
         c.score = round(W_VALUE * (1.0 if occ else 0.0) + W_SCOPE * scope + W_LEX * lex + W_SEM * sm + (0.1 if strong else 0.0) + (0.05 if c.hits else 0.0), 4)
-        if occ or c.hits or c.doc_id in include or (scope >= 0.99 and spec.entity_terms and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)):
+        if occ or c.hits or c.doc_id in include or (spec.general and not facts and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)) or (scope >= 0.99 and spec.entity_terms and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)):
             out.append(c)
     out.sort(key=lambda c: (-c.score, c.doc_id))
     return out[: s.kb_ai_max_candidates], report

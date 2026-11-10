@@ -84,7 +84,14 @@ word (teaches, handles, instructor, ...), and context (historical, a sibling alt
 Settings: `SG_KB_AI_DISCOVERY` (v2|v1), `SG_KB_AI_VERIFY` (true|false), `SG_RAG_RETRIEVAL_MODE` (hybrid|vector), `SG_KB_AI_MAX_CANDIDATES`, `SG_KB_AI_MAX_PASSAGES`; tenant `entity_aliases`
 in `tenants/<id>/config.yaml`.
 
-Limits: two rounds only; no pronoun continuation ("He also teaches ..." on the next line); person detection is English-name heuristics; the ambiguity rules are heuristics, which is why
+* **Section judge (the language model's role).** `kb_ai_judge` (uncertain | all | off). For sections where the rules are not completely sure, the model gets the section TEXT and the staff
+  sentence ("make the change only where it is applicable ... return the text in a ```text block"), with thinking on, and answers freely. Its text is compared with the original line by line
+  (`impact/judge.py`): only a value-sized change counts. Agreement raises confidence, disagreement turns a rule-certain line into a question, a model-confirmed line the rules rejected becomes
+  *potential*, a line only the model found becomes *potential*, and the model alone never makes a line *definite*. See docs/PART2_MODEL_METHOD_ANALYSIS.md. Settings: `SG_KB_AI_JUDGE`,
+  `SG_KB_AI_JUDGE_THINKING`, `SG_KB_AI_JUDGE_TIMEOUT_S`, `SG_KB_AI_JUDGE_MAX_TOKENS`, `SG_KB_AI_JUDGE_MAX_CALLS`, `SG_KB_AI_JUDGE_WINDOW_CHARS`.
+* **Pronoun lines and mixed lines.** A line that starts with he/she/they/his/her/their continues the line above it in the same block (that line becomes its context, never edited). In a line of several sentences, "historical" is decided on the sentence that holds the value, so "He has 3 years of experience. Previously he worked in IT." is a current fact followed by history. A person named in the change ("santhosh sir") must appear in the passage or its context; the shared title "sir" is not a subject word.
+
+Limits: two rounds only; pronoun continuation looks one block back only (no coreference across blank lines or headings); person detection is English-name heuristics; the ambiguity rules are heuristics, which is why
 anything not clearly supported goes to a person.
 
 ## 5. Model strategy
