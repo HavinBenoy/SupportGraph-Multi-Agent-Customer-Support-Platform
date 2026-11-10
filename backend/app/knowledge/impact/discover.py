@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import KbDocument, KbVersion
 from app.knowledge import workspace
+from app.knowledge.impact import trace as T
 from app.knowledge.impact.aliases import build_aliases, expand
 from app.knowledge.impact.scan import ScanReport, scan_corpus
 from app.knowledge.impact.scope import person_terms, scope_fraction  # noqa: F401 (scope_fraction re-exported)
@@ -155,7 +156,22 @@ def rank(corpus: list[Candidate], s: Settings, spec: ChangeSpec, *, groups: dict
         if v2:
             c.signals.update(evidence=len(c.hits), strong=strong, aliases=sorted({a for h in c.hits for a in h.aliases}))
         c.score = round(W_VALUE * (1.0 if occ else 0.0) + W_SCOPE * scope + W_LEX * lex + W_SEM * sm + (0.1 if strong else 0.0) + (0.05 if c.hits else 0.0), 4)
-        if occ or c.hits or c.doc_id in include or (spec.general and not facts and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)) or (scope >= 0.99 and spec.entity_terms and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)):
+        why = ("the old value occurs in it" if occ else "evidence lines were found" if c.hits else "the reference document" if c.doc_id in include else
+               "it names what the change is about" if (spec.general and not facts and lex >= 0.5) else
+               "it is semantically close to the change" if (spec.general and not facts and sm >= s.kb_ai_semantic_floor) else
+               "its title / headings name the subject" if (scope >= 0.99 and spec.entity_terms and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)) else None)
+        if why:
             out.append(c)
+            c.signals["why"] = why
+        elif lex > 0 or scope > 0 or sm >= 0.7 * s.kb_ai_semantic_floor:
+            T.event("discovery", "not_discovered", c.doc_id, score=c.score, signals={k: c.signals[k] for k in ("value", "scope", "lexical", "semantic")},
+                    why=f"too weak: subject words {lex:.0%} of the request (needs 50%), semantic {sm:.2f} (needs {s.kb_ai_semantic_floor:.2f}), no old value found")
     out.sort(key=lambda c: (-c.score, c.doc_id))
+    silent = [c.doc_id for c in corpus if c not in out and not (c.signals["lexical"] > 0 or c.signals["scope"] > 0 or c.signals["semantic"] >= 0.7 * s.kb_ai_semantic_floor)]
+    T.event("discovery", "summary", documents=len(corpus), nominated=min(len(out), s.kb_ai_max_candidates), over_limit=max(0, len(out) - s.kb_ai_max_candidates),
+            no_signal=len(silent), no_signal_docs=silent[:20], why="documents without any subject word, title match or semantic similarity are not listed one by one")
+    for k, c in enumerate(out):
+        T.event("discovery", "nominated" if k < s.kb_ai_max_candidates else "not_discovered", c.doc_id, score=c.score, why=c.signals.get("why") if k < s.kb_ai_max_candidates
+                else f"ranked {k + 1}, below the limit SG_KB_AI_MAX_CANDIDATES={s.kb_ai_max_candidates}",
+                signals={k2: c.signals[k2] for k2 in ("value", "scope", "lexical", "semantic") if k2 in c.signals})
     return out[: s.kb_ai_max_candidates], report

@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from app.config import Settings
+from app.knowledge.impact import context as C
 from app.knowledge.impact import edit as E
+from app.knowledge.impact import trace as T
 from app.knowledge.impact.context import Budget, Section, sections_for
 from app.knowledge.impact.spec import ChangeSpec
 
@@ -66,22 +68,76 @@ def _finish(out) -> str | None:
     return meta.get("done_reason") or meta.get("finish_reason")
 
 
-def ask(chat, description: str, title: str, section: Section, model_name: str) -> tuple[E.Extraction, bool]:
-    """(the extraction of the model's reply, cache hit). A provider error is a 'none' extraction; the caller then relies on the rules."""
-    key = cache_key("edit", model_name, description, title, section.text, section.header)
-    hit = cache_get(key)
-    if hit is not None:
-        return hit, True
+_NO_THINKING: set[str] = set()          # models that told us they cannot think (an "instruct" build): asked without thinking from then on
+
+
+def _config(chat) -> dict:
+    return {k: getattr(chat, k) for k in ("model", "reasoning", "num_ctx", "num_predict", "temperature") if getattr(chat, k, None) is not None}
+
+
+def _without_thinking(chat):
+    try:
+        return chat.model_copy(update={"reasoning": False}) if getattr(chat, "reasoning", None) else chat
+    except Exception:                                                # noqa: BLE001
+        return chat
+
+
+def _failure(e: Exception, timeout: float | None) -> str:
+    msg = str(e).lower()
+    name = type(e).__name__
+    if "timeout" in name.lower() or "timed out" in msg:
+        return f"the model did not answer within {int(timeout or 0)} s (SG_KB_AI_JUDGE_TIMEOUT_S); on a CPU a large section with thinking can take longer"
+    if "connect" in msg or "connection" in name.lower() or "refused" in msg:
+        return "the language model could not be reached (is `ollama serve` running?)"
+    if "not found" in msg and "model" in msg:
+        return "the configured model is not installed in Ollama (ollama pull it, or fix SG_LLM_MODEL_IMPACT)"
+    return f"the model call failed ({name}: {str(e)[:120]})"
+
+
+def _invoke(chat, text: str, model_name: str, timeout: float | None):
+    """One call. A model that cannot think (Ollama answers 'does not support thinking', e.g. an *-instruct build) is retried once without thinking and remembered: before this, the
+    error made every section 'unavailable' and the request looked like 'no change needed'."""
     from langchain_core.messages import HumanMessage
 
-    t0 = time.monotonic()
+    use = _without_thinking(chat) if model_name in _NO_THINKING else chat
     try:
-        out = chat.invoke([HumanMessage(E.prompt(description, title, section))])
-        ex = E.extract(getattr(out, "content", out), _finish(out))
-    except Exception as e:                                           # noqa: BLE001 - an unreachable model is an outcome, not a crash
-        log.warning("impact editor: call failed (%s)", type(e).__name__)
-        return E.Extraction("none", why="the language model could not be reached"), False
-    log.info("impact editor: %d lines, ~%d tokens in %.1fs, answer %s", len(section.rows), section.tokens, time.monotonic() - t0, ex.state)
+        return use.invoke([HumanMessage(text)]), use, None
+    except Exception as e:                                          # noqa: BLE001
+        if "think" in str(e).lower() and getattr(use, "reasoning", None):
+            log.warning("impact editor: %s does not support thinking; asking without it", model_name)
+            _NO_THINKING.add(model_name)
+            T.event("model_call", "retry_without_thinking", model=model_name, why=str(e)[:200])
+            plain = _without_thinking(use)
+            try:
+                return plain.invoke([HumanMessage(text)]), plain, None
+            except Exception as e2:                                 # noqa: BLE001
+                return None, plain, _failure(e2, timeout)
+        return None, use, _failure(e, timeout)
+
+
+def ask(chat, description: str, title: str, section: Section, model_name: str, feedback: str = "", doc: str | None = None,
+        timeout: float | None = None) -> tuple[E.Extraction, bool]:
+    """(the extraction of the model's reply, cache hit). A provider error is a 'none' extraction with the reason; the caller then relies on the rules."""
+    key = cache_key("edit", model_name, description, title, section.text, section.header, feedback)
+    hit = cache_get(key)
+    if hit is not None:
+        T.event("model_call", "cached", doc, section=section.heading, state=hit.state)
+        return hit, True
+    text = E.prompt(description, title, section, feedback)
+    t0 = time.monotonic()
+    out, used, failed = _invoke(chat, text, model_name, timeout)
+    dt = round(time.monotonic() - t0, 1)
+    if failed:
+        log.warning("impact editor: call failed after %.1fs: %s", dt, failed)
+        T.event("model_call", "model_failed", doc, section=section.heading, seconds=dt, config=_config(used), why=failed, prompt_tokens=C.est_tokens(text))
+        return E.Extraction("none", why=failed), False
+    raw = getattr(out, "content", out)
+    finish = _finish(out)
+    ex = E.extract(raw, finish)
+    log.info("impact editor: %d lines, ~%d tokens in %.1fs, answer %s", len(section.rows), section.tokens, dt, ex.state)
+    outcome = {"ok": "answered", "truncated": "truncated", "malformed": "malformed", "empty": "malformed", "none": "malformed"}[ex.state]
+    T.event("model_call", outcome, doc, section=section.heading, seconds=dt, config=_config(used), finish=finish, prompt_tokens=C.est_tokens(text),
+            answer_chars=len(str(raw or "")), retry=bool(feedback), why=ex.why or None, text={"prompt": text, "answer": raw})
     if ex.state == "ok":
         cache_put(key, ex)
     return ex, False
@@ -95,14 +151,11 @@ def semantic(chat, description: str, original: str, revised: str, model_name: st
     hit = cache_get(key)
     if hit is not None:
         return hit
-    from langchain_core.messages import HumanMessage
-
-    try:
-        out = chat.invoke([HumanMessage(E.semantic_prompt(description, original, revised))])
-        res = E.parse_semantic(getattr(out, "content", out))
-    except Exception as e:                                           # noqa: BLE001
-        log.warning("impact editor: semantic check failed (%s)", type(e).__name__)
+    out, _, failed = _invoke(chat, E.semantic_prompt(description, original, revised), model_name + ":check", None)
+    if failed:
+        log.warning("impact editor: semantic check failed (%s)", failed)
         return "none", ""
+    res = E.parse_semantic(getattr(out, "content", out))
     if res[0] != "none":
         cache_put(key, res)
     return res
@@ -125,33 +178,79 @@ class Reading:
     outcome: E.SectionOutcome | None = None
     semantic: tuple[str, str] = ("none", "")
     cached: bool = False
+    retried: bool = False
 
 
-def read_section(chat, check_chat, section: Section, description: str, title: str, rules: E.Rules, s: Settings, model_name: str, expect_change: bool) -> Reading:
-    """Ask, validate, and (when configured) double-check one section. `expect_change`: the rule evidence already says the change applies here (used to decide whether the second
-    check is worth a call: it is skipped for an unchanged answer and for a revision the checks already reject)."""
-    if "```" in section.text:
-        return Reading(section, "unavailable", "the section contains a code fence, which the answer format cannot carry")
-    ex, cached = ask(chat, description, title, section, model_name)
+def _feedback(rd: "Reading") -> str:
+    o = rd.outcome
+    if rd.state == "invalid":
+        return rd.why
+    if o is not None and rd.semantic[0] == "fail":
+        return f"a reviewer found: {rd.semantic[1] or 'it does not carry out the request'}"
+    if o is not None and o.rejected:
+        return "; ".join(o.rejected[:3])
+    return ""
+
+
+def _attempt(chat, check_chat, section: Section, description: str, title: str, rules: E.Rules, s: Settings, model_name: str, doc: str | None, feedback: str) -> "Reading":
+    ex, cached = ask(chat, description, title, section, model_name, feedback, doc, s.kb_ai_judge_timeout_s)
     if ex.state != "ok":
         return Reading(section, "unavailable", ex.why, cached=cached)
     out = E.revise(section, ex.text, rules)
     rd = Reading(section, out.state, out.why, out, cached=cached)
+    T.event("validation", {"revised": "review" if (out.review or any(h.flags for h in out.hunks)) else "proposed", "unchanged": "no_change", "invalid": "rejected"}[out.state], doc,
+            section=section.heading, accepted=[{"kind": h.kind, "removed": len(h.removed), "added": len(h.added), "flags": h.flags} for h in out.hunks],
+            rejected=out.rejected, review=out.review, notes=out.notes, why=out.why or None,
+            checks=["extraction", "line comparison", "headings", "table header and columns", "history", "invented figures", "relevance to the request", "duplicates",
+                    "deleted share", "rewritten share"])
     if out.state != "revised":
         return rd
     if check_chat is not None and s.kb_ai_semantic_check != "off":
         risky = bool(out.review or out.rejected or any(h.flags for h in out.hunks))
         if s.kb_ai_semantic_check == "all" or risky:
             rd.semantic = semantic(check_chat, description, section.text, out.revised, model_name)
-            verdict, why = rd.semantic
-            if verdict == "fail":
-                out.review.append(f"a second check of the revision disagrees: {why or 'it does not match the request'}")
-            elif verdict == "unsure":
-                out.review.append(f"a second check of the revision is unsure: {why or 'it could not tell'}")
-    for h in out.hunks:
-        h.flags += [f for f in out.review if f not in h.flags]
-        h.notes += [n for n in out.notes if n not in h.notes]
+            T.event("semantic_check", rd.semantic[0], doc, section=section.heading, why=rd.semantic[1] or None)
     return rd
+
+
+def read_section(chat, check_chat, section: Section, description: str, title: str, rules: E.Rules, s: Settings, model_name: str, expect_change: bool,
+                 doc: str | None = None, budget_left=lambda: True) -> Reading:
+    """Ask, validate, double-check one section; when a check rejects the revision or the second check FAILS, ask ONCE more with the reasons (`SG_KB_AI_EDIT_RETRIES`). The better
+    reading wins (a clean revision over a flagged one over none); a failed model call is not retried (a timeout would only double the wait)."""
+    if "```" in section.text:
+        T.event("context", "not_sent", doc, section=section.heading, why="the section contains a ``` code fence, which the answer format cannot carry")
+        return Reading(section, "unavailable", "the section contains a code fence, which the answer format cannot carry")
+    rd = _attempt(chat, check_chat, section, description, title, rules, s, model_name, doc, "")
+    tries = 0
+    while tries < s.kb_ai_edit_retries and rd.state in ("invalid", "revised") and _feedback(rd) and budget_left():
+        if rd.state == "revised" and rd.semantic[0] != "fail":
+            break                     # a usable revision whose bad parts were dropped is not worth another CPU-minute; only "nothing usable" or a FAILED second check is
+        tries += 1
+        T.event("retry", "asking_again", doc, section=section.heading, why=_feedback(rd)[:300])
+        again = _attempt(chat, check_chat, section, description, title, rules, s, model_name, doc, _feedback(rd))
+        if _rank(again) > _rank(rd):
+            rd = again
+        rd.retried = True
+    verdict, why = rd.semantic
+    out = rd.outcome
+    if out is not None and rd.state == "revised":
+        if verdict == "fail":
+            out.review.append(f"a second check of the revision disagrees: {why or 'it does not match the request'}")
+        elif verdict == "unsure":
+            out.review.append(f"a second check of the revision is unsure: {why or 'it could not tell'}")
+        for h in out.hunks:
+            if verdict == "pass":
+                h.notes.append("a second check confirmed that the revision does what was requested")
+            h.flags += [f for f in out.review if f not in h.flags]
+            h.notes += [n for n in out.notes if n not in h.notes]
+    return rd
+
+
+def _rank(rd: "Reading") -> int:
+    if rd.state == "revised":
+        flagged = bool(rd.outcome.review or rd.outcome.rejected or any(h.flags for h in rd.outcome.hunks))
+        return 0 if rd.semantic[0] == "fail" else (2 if flagged else 3)
+    return 1 if rd.state == "unchanged" else 0
 
 
 def rules_for(spec: ChangeSpec, title: str, s: Settings, extra_olds: list[str], today: date | None = None) -> E.Rules:

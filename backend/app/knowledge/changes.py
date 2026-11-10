@@ -156,7 +156,7 @@ def request_view(db: Session, r: KbChangeRequest, *, detail: bool = False, admin
            "analysis": {"stage": (an.get("progress") or {}).get("stage"), "done": (an.get("progress") or {}).get("done"), "total": (an.get("progress") or {}).get("total"),
                         "summary": an.get("summary"), "questions": an.get("questions") or [], "answers": an.get("answers") or {}, "error": an.get("error"), "model": an.get("model"),
                         "spec": an.get("spec"), "completed_at": store._iso(r.analysis_completed_at), "started_at": store._iso(r.analysis_started_at),
-                        "attempt": r.analysis_attempt} if (r.analysis or r.analysis_attempt) else None}
+                        "attempt": r.analysis_attempt, "trace": an.get("trace") if detail else None} if (r.analysis or r.analysis_attempt) else None}
     if detail:
         ov = _overlaps(db, r, items) if admin else {}
         out["items"] = [item_view(db, i, detail=True, overlaps=ov.get(i.doc_id)) for i in items]

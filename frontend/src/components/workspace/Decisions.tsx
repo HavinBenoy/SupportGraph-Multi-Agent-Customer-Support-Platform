@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import type { KwItem, KwPatch, KwRequest } from "@/lib/types";
 import { DiffLegend, DiffView } from "./DiffView";
 import { PatchLegend, PatchView, baseText } from "./PatchView";
+import { ProcessingLog } from "./ProcessingLog";
 import { CHANGE_LABEL, ClassChip, DecisionChip, JUDGE_LABEL, KIND_LABEL, msg, pct, when } from "./ui";
 
 /** The edits to show for an item: the decided patch if there is one, otherwise the AI's suggestion. */
@@ -119,6 +120,7 @@ export function Decisions({ req, readOnly = false, onItem, onSubmit, onReanalyse
           {!!summary.learned?.length && <> Because the request did not say what the old value was, the documents were read to learn it: {summary.learned.join(", ")}.</>}
           {!!summary.kinds?.ambiguous && <> {summary.kinds.ambiguous} passage(s) were contradictory or ambiguous and are listed for your judgement.</>}
         </p>)}
+      <ProcessingLog trace={req.analysis?.trace} />
       {cands.length === 0 && <p className="kw-banner warn">The AI found no document that needs to change. Nothing is forced: you can re-describe the change, or close this request.</p>}
       {cands.map((it) => <Candidate key={`${it.doc_id}:${it.row_version}`} req={req} it={it} readOnly={readOnly} onItem={onItem} />)}
       {related.length > 0 && (

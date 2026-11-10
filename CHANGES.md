@@ -1,3 +1,31 @@
+# M6 Part 2 — FINAL (deep review): root causes fixed, prompts rewritten, processing trace
+
+**This is the single final Part 2 ZIP.** It contains every file changed during Part 2 (it supersedes all earlier Part 2 zips). No migration (alembic stays at 0012), no new dependency, no infrastructure change; `.env`, secrets and data are not in it and are never touched.
+
+Full write-up: **docs/PART2_FINAL.md** — §0 root causes and the processing trace, §1–§7 the generalized editor / adaptive context / validation / decisions / verification / configuration, §8 tests, §9 exact commands, §10 limitations.
+
+## Root causes found (reported Santhosh-sir cases run through the real pipeline)
+1. History guard rejected explicit corrections of the past (cases B, C) → `edit.targets_past`.
+2. The prompt itself forbade changing the past and had no correction / "only" / removal-by-category guidance → prompt `edit-v2` with three worked examples.
+3. Qwen *instruct* builds reject thinking (Ollama 400 "does not support thinking") → every section "unavailable" → automatic retry without thinking.
+4. Relevance judged by shared words only (case A) → meaning-based acceptance near the candidate lines, flagged (strict when some change matches by words).
+5. A long explanation (> 400 chars) or a long revision (> 2000 chars) raised a ValidationError and failed the WHOLE analysis → shortened / limit raised.
+6. One bad line in a block of adjacent changed lines rejected its correct neighbours → line-for-line splitting.
+7. No second chance for a correction that kept the contradicted statement → one feedback retry (`SG_KB_AI_EDIT_RETRIES`).
+8. Outcomes were indistinguishable ("related, no change") → explicit reasons + per-request processing trace (log + stored + "Processing log" in the staff UI).
+9. Acronym aliases built from scattered words ("swp") → only from a name said as one phrase.
+
+## Files in this final round
+backend/app/knowledge/impact/{trace.py (new), edit.py, judge.py, evaluate.py, analyse.py, discover.py, aliases.py}, backend/app/knowledge/changes.py (trace in the request detail), backend/app/config.py, backend/scripts/judge_probe.py (13 scenarios incl. the three reported ones), backend/tests/knowledge/{test_pipeline_trace.py (new), test_judge.py}, frontend/src/components/workspace/{ProcessingLog.tsx (new), ProcessingLog.test.tsx (new), Decisions.tsx}, frontend/src/lib/types.ts, frontend/src/app/knowledge-workspace.css, .env.example, docs/PART2_FINAL.md, CHANGES.md.
+
+## New settings
+`SG_KB_AI_EDIT_RETRIES=1`, `SG_KB_AI_TRACE_CONTENT=false`. Earlier in Part 2: `SG_KB_AI_CONTEXT_TOKENS`, `SG_KB_AI_JUDGE_NUM_CTX`, `SG_KB_AI_THINKING_RESERVE_TOKENS`, `SG_KB_AI_CONTEXT_MODE`, `SG_KB_AI_MAX_SECTIONS`, `SG_KB_AI_SEMANTIC_CHECK`, `SG_KB_AI_MAX_CHANGED_FRACTION`, `SG_KB_AI_MAX_REMOVED_FRACTION`; default `SG_KB_AI_JUDGE_MAX_TOKENS` 4096 (your `.env` still says 2500: remove or raise it).
+
+## Verification status
+Run here (scripted model): backend knowledge+rag+eval 683 passed / 3 skipped; rest of backend 1362 passed / 75 skipped; PostgreSQL 104 passed; frontend 235 passed, tsc and next build clean. **Real Qwen was NOT run** (no Ollama in the build sandbox): run `scripts/judge_probe.py --suite` (docs/PART2_FINAL.md §9).
+
+---
+
 # Part 2 closure - fix: documents found as relevant were not reaching the model / its result was invisible
 
 Reported case: "Remove the education details of santhosh sir" listed the Data-Science document as "related, no change" with the rules' message "can only be drafted by the language model". Three generic causes, all fixed (no example-specific rule):
@@ -12,7 +40,7 @@ Tests: 5 new in tests/knowledge/test_judge.py. Real Qwen was not run here (no Ol
 
 # Part 2 CLOSURE: generalized AI knowledge editing + adaptive context (M6 Part 2, final)
 
-Apply on top of the previous Part 2 delivery: `unzip -o ../supportgraph-part2-closure.zip`. **No migration** (alembic stays at 0012), **no new dependency**, no new infrastructure. `.env`, secrets and database content are not in the zip and are never touched. Full report, configuration reference and exact verification commands: **docs/PART2_FINAL.md**.
+Apply on top of the previous Part 2 delivery: `unzip -o ../supportgraph-m6-part2-final.zip`. **No migration** (alembic stays at 0012), **no new dependency**, no new infrastructure. `.env`, secrets and database content are not in the zip and are never touched. Full report, configuration reference and exact verification commands: **docs/PART2_FINAL.md**.
 
 | Area | Files |
 |---|---|

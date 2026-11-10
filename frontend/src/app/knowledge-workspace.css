@@ -123,3 +123,10 @@
 .kw-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: .85rem; } .kw-events li { padding: 7px 10px; border: 1px solid var(--kw-line); border-radius: 8px; }
 .kw-failbox { border: 1px solid rgba(248, 81, 73, .55); background: rgba(248, 81, 73, .08); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
 @media (prefers-reduced-motion: reduce) { .kw-progress > span { transition: none; } }
+
+/* processing log (per-request trace) */
+.kw-trace { margin: 0.75rem 0; font-size: 0.85rem; }
+.kw-trace > summary { cursor: pointer; color: var(--kw-muted, #9aa3b2); }
+.kw-trace ol { margin: 0.5rem 0 0; padding-left: 1.4rem; display: grid; gap: 0.3rem; }
+.kw-trace li.kw-trace-bad > .kw-chip { border-color: #d29922; color: #d29922; }
+.kw-trace pre { white-space: pre-wrap; max-height: 16rem; overflow: auto; font-size: 0.75rem; }

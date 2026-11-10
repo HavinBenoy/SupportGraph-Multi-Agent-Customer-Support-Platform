@@ -194,8 +194,8 @@ def test_scenario_5_add_a_new_course_row_and_its_details():
 def test_scenario_6_several_related_statements_in_one_section_are_separate_hunks():
     ans = DS.replace("3 years", "5 years").replace("Machine Learning faculty is Santhosh sir.", "Machine Learning and Deep Learning faculty is Santhosh sir.")
     o = revise(DS, "santhosh sir now has 5 years of experience and also teaches deep learning", ans, ["5 years"], ["3 years"], at="Machine Learning faculty")
-    assert o.state == "revised" and len(o.hunks) == 1 and o.hunks[0].kind == "modify"          # adjacent lines: one patch
-    assert "Deep Learning" in o.hunks[0].replacement and "5 years" in o.hunks[0].replacement
+    assert o.state == "revised" and [h.kind for h in o.hunks] == ["modify", "modify"]         # line for line: each statement is its own patch (and judged on its own)
+    assert "Deep Learning" in o.hunks[0].replacement and "5 years" in o.hunks[1].replacement
 
 
 def test_scenario_7_historical_sentences_must_survive_and_history_sections_are_not_edited():
@@ -260,7 +260,7 @@ def test_a_rewrite_of_most_of_the_section_goes_to_a_person():
 def test_value_change_the_model_agrees_stays_definite_and_the_prompt_is_the_general_instruction():
     chat, r, _ = run(DS, EXP, lambda p: fenced(DS.replace("3 years", "5 years").strip("\n")))
     assert r.classification == "definite" and r.passages[0]["judge"] == "agrees"
-    assert "understand the requested change and make the corresponding modification wherever it is applicable" in chat.calls[0]
+    assert "understand what the requested change means, then make the corresponding modification wherever it applies" in chat.calls[0]
     assert "completely unchanged" in chat.calls[0] and "Preserve all unrelated information" in chat.calls[0] and "Change nothing except" not in chat.calls[0]
     assert EXP in chat.calls[0] and "<section>" in chat.calls[0] and "## Eligibility" in chat.calls[0]                  # the complete section, not isolated lines
 
@@ -332,7 +332,7 @@ def test_calls_are_capped_cached_and_a_second_run_costs_nothing():
     chat2, _, _ = run(DS, "santhosh sir now also holds an MTech in AI", lambda p: fenced("zzz"))
     assert len(chat.calls) == 1 and not chat2.calls
     many = "\n\n".join(f"## S{i}\n\nMachine Learning faculty line {i} " + "filler " * 40 for i in range(10))
-    chat3, r3, _ = run(many, "santhosh sir now also teaches machine learning", lambda p: fenced("x"), kb_ai_max_sections=2, kb_ai_context_tokens=300)
+    chat3, r3, _ = run(many, "santhosh sir now also teaches machine learning", lambda p: fenced("x"), kb_ai_max_sections=2, kb_ai_context_tokens=300, kb_ai_edit_retries=0)
     assert len(chat3.calls) <= 2 and any("not read" in u for u in r3.uncertainty)
 
 
@@ -444,3 +444,46 @@ def test_a_discovered_document_whose_lines_do_not_name_the_subject_is_still_read
     assert _general_passages(spec, other, Settings(), None) == []                                       # nothing there is about the request: honestly nothing
     spec2 = g(ChangeSpec(), "Remove the education details from the faculty profile")
     assert _general_passages(spec2, c, Settings(), None)
+
+
+# ---- the reported single-line case, requests phrased in different ways --------------------------------------------------------------------------------
+ONE = "# Data Science\n\n## Faculty\n\nMachine Learning faculty is Santhosh sir. He has a work experience of 3 years. Previously he worked in IT. He do have a M.Tech in Data Science.\n"
+NO_MTECH = ONE.replace(" He do have a M.Tech in Data Science.", "")
+
+
+@pytest.mark.parametrize("desc", ["Remove the education details of santhosh sir", "Delete Santhosh sir's qualification", "Take out the degree information of Santhosh sir",
+                                  "Santhosh sir's M.Tech should not be mentioned any more", "remove his education (santhosh sir)"])
+def test_the_same_removal_asked_in_different_words_is_accepted(desc):
+    o = revise(ONE, desc, NO_MTECH, at="Machine Learning")
+    assert o.state == "revised" and "M.Tech" not in o.revised and "Previously he worked in IT." in o.revised, (desc, o.why)
+
+
+def test_information_spread_over_lines_with_a_pronoun_is_edited_where_it_is():
+    doc = "# DS\n\n## Faculty\n\nMachine Learning faculty is Santhosh sir.\nHe holds an M.Tech in Data Science.\nHe has 3 years of experience.\n"
+    _, r, _ = run(doc, "Remove the education details of santhosh sir", lambda p: fenced(doc.replace("He holds an M.Tech in Data Science.\n", "").strip("\n")))
+    assert [e.kind for e in r.edits] == ["remove"] and "M.Tech" not in patched(doc, r) and "3 years" in patched(doc, r)
+
+
+def test_a_correction_of_the_past_is_allowed_only_when_the_request_targets_it():
+    corr = ONE.replace("Previously he worked in IT.", "Previously he worked in a mechanical company.")
+    assert revise(ONE, "santhosh sir actually worked in a mechanical company before", corr, at="Machine").state == "revised"
+    assert revise(ONE, "change the work experience of santhosh sir from 3 years to 5 years", corr.replace("3 years", "5 years"), ["5 years"], ["3 years"], at="Machine").state == "invalid"
+
+
+def test_one_bad_line_does_not_sink_a_good_neighbour():
+    doc = "# Fees\n\nIn 2021 the fee was 10000.\nThe fee is 10000.\n"
+    o = revise(doc, "change the fee from 10000 to 12000", doc.replace("10000", "12000"), ["12000"], ["10000"], at="The fee")
+    assert o.state == "revised" and o.revised.endswith("The fee is 12000.") and "In 2021 the fee was 10000." in o.revised and o.rejected
+
+
+def test_a_semantic_failure_against_a_clean_deterministic_result_goes_to_a_person():
+    ans = fenced(DS.replace("- Online classes only", "- Hybrid classes").strip("\n"))
+    check = Chat(lambda p: "FAIL - the weekend batch was also meant")
+    _, r, _ = run(DS, "change online classes to hybrid classes", lambda p: ans, check=check, kb_ai_semantic_check="all", kb_ai_edit_retries=0)
+    assert r.edits and r.classification == "potential" and any("second check" in f for e in r.edits for f in e.flags)
+
+
+def test_a_very_long_explanation_never_crashes_the_analysis():
+    from app.knowledge.impact.evaluate import PassageVerdict
+    v = PassageVerdict(passage=0, verdict="potential", confidence=0.5, reason="x" * 2000, replacement="y" * 30000)
+    assert len(v.reason) <= 400 and v.reason.endswith("…") and len(v.replacement) == 30000

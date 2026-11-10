@@ -133,7 +133,10 @@ def build_aliases(spec: ChangeSpec, config_groups: dict[str, list[str]] | None =
     groups: list[list[str]] = [[k, *v] for k, v in (config_groups or {}).items()]
     groups += groups_from_documents(doc_texts or [])
     ac = acronym(spec.entity_terms)
-    if ac and with_acronym:
+    phrase = " ".join(spec.entity_terms)
+    said = " ".join(re.findall(r"[a-z0-9]+", (spec.summary or "").lower()))
+    if ac and with_acronym and (not spec.summary or f" {phrase} " in f" {said} "):          # only for a name said as one phrase ("machine learning" -> "ml"), not for a
+        # bag of scattered words ("santhosh ... worked ... previously" -> "swp" was noise that could match unrelated text)
         groups.append([" ".join(spec.entity_terms), ac])
     pairs: dict[str, list[str]] = {}
     for g in groups:

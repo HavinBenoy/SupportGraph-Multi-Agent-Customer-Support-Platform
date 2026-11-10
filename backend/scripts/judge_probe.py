@@ -4,7 +4,7 @@ One request on your own text:
     cd backend
     ../.venv/bin/python scripts/judge_probe.py -d "remove the age restriction from eligibility" --file section.md
     ../.venv/bin/python scripts/judge_probe.py -d "..." --text $'Machine Learning faculty is Santhosh sir\\nHe has a work experience of 3 years.'
-The ten realistic scenarios (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
+The thirteen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
 ambiguous request, tables / headings / lists preserved), against the real model, with the real validator:
     ../.venv/bin/python scripts/judge_probe.py --suite
     SG_LLM_MODEL_IMPACT=qwen3:4b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2          # another model; SG_KB_AI_JUDGE_THINKING=false to compare without thinking
@@ -53,6 +53,8 @@ He has a work experience of 3 years. Previously he worked in IT.
 WEB = "# Web Development\n\n## Faculty\n\nWeb faculty is Rao sir. He has a work experience of 7 years.\n\n## Eligibility\n\n- 12th pass\n- Classes are conducted offline\n"
 MULTI = DS.replace("- Online classes only", "- Online classes only\n- Weekend batch: online classes")
 
+ONE = "# Data Science\n\n## Faculty\n\nMachine Learning faculty is Santhosh sir. He has a work experience of 3 years. Previously he worked in IT. He do have a M.Tech in Data Science.\n"
+
 # (name, description, document, a line inside the part that matters, predicate on (state, patched text, original text), what is expected in words)
 SUITE = [
     ("1 replace a value", "change the work experience of santhosh sir from 3 years to 5 years", DS, "He has a work", lambda st, new, old: st == "revised" and "5 years" in new and "3 years" not in new and "Previously he worked in IT." in new, "3 -> 5 years, history kept"),
@@ -64,6 +66,13 @@ SUITE = [
     ("7 history kept", "change the work experience of santhosh sir from 3 years to 5 years", DS, "He has a work", lambda st, new, old: st == "revised" and "Previously he worked in IT." in new, "current value updated, the 'Previously ...' sentence untouched"),
     ("8 unrelated unchanged", "change online classes to hybrid classes", WEB, "- Classes", lambda st, new, old: st == "unchanged" or new == old, "the section is returned unchanged"),
     ("9 ambiguous request", "We changed the Data Science eligibility.", DS, "- Any", lambda st, new, old: vague("We changed the Data Science eligibility.") and st in ("unchanged", "invalid", "revised"), "the request is vague: the application asks a question before any model call"),
+    ("11 (reported A) remove education", "Remove the education details of santhosh sir", ONE, "Machine Learning",
+     lambda st, new, old: st == "revised" and "M.Tech" not in new and "Previously he worked in IT." in new and "3 years" in new, "the M.Tech sentence removed, the rest kept"),
+    ("12 (reported B) correct the past industry", "Change the industry in which santhosh sir worked to Mechanical. That is whatever mentioned as the field in which santhosh sir "
+     "worked previously in should be changed towards Mechanical Field rather than any other field.", ONE, "Machine Learning",
+     lambda st, new, old: st == "revised" and "IT." not in new and "echanical" in new and "M.Tech" in new, "IT -> Mechanical in the 'Previously' sentence, nothing else"),
+    ("13 (reported C) correct several statements", "Santhosh sir actually has only a B.Tech in AI and worked in a mechanical company as a support officer.", ONE, "Machine Learning",
+     lambda st, new, old: st == "revised" and "M.Tech" not in new and "B.Tech in AI" in new and "support officer" in new and "3 years" in new, "M.Tech replaced by B.Tech, IT replaced"),
     ("10 structure preserved", "change online classes to hybrid classes", DS, "- Online", lambda st, new, old: st == "revised" and new.count("## ") == 3 and "| Course | Fee |\n|---|---|" in new, "headings, list, table intact"),
 ]
 

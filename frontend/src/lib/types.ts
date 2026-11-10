@@ -167,7 +167,10 @@ export interface KwAnalysis {
   summary: { discovered: number; definite: number; potential: number; related_no_change: number; not_relevant: { doc_id: string; title: string; reason: string }[];
     flags: { unsupported: number; historical: number; scope: number }; kinds?: Record<string, number>; rounds?: number; learned?: string[] } | null;
   spec: { summary: string; facts: { attribute: string; old_value: string | null; new_value: string | null; effective: string | null }[]; entity_terms: string[] } | null;
+  trace?: KwTrace | null;
 }
+export interface KwTraceEvent { n: number; ms: number; stage: string; outcome: string; doc?: string; text?: Record<string, string>; [k: string]: unknown }
+export interface KwTrace { events: KwTraceEvent[]; dropped: number; content: boolean; outcomes?: Record<string, string> }
 export interface KwCounts { accepted: number; edited: number; discarded: number; pending: number; manual_items: number; related: number; included: number; excluded_by_admin: number }
 export interface KwVerifyItem { doc_id: string; title: string; heading?: string; text: string; kind: "outdated" | "possible"; evidence?: string; left_by_reviewer?: boolean }
 export interface KwVerification { checked_at: string; documents_scanned: number; clean: boolean; unreviewed?: number; remaining: KwVerifyItem[]; remaining_total: number; historical_skipped?: number; confirmed_new?: number; other_subject?: number; values_searched?: string[]; mode?: "values" | "statements"; verifiable?: boolean; note?: string; edits_missing?: number }

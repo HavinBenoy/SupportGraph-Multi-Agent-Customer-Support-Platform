@@ -18,7 +18,7 @@ from datetime import date
 from typing import Literal, Protocol
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import Settings
 from app.knowledge.impact import values
@@ -46,9 +46,17 @@ class PassageVerdict(BaseModel):
     verdict: Literal["definite", "potential", "no_change", "irrelevant"]
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(default="", max_length=400)
-    replacement: str | None = Field(default=None, max_length=2000)
+    replacement: str | None = Field(default=None, max_length=200_000)     # a validated section revision can be long; the per-passage model answer is still bounded below
     judged: bool = False              # set only by the section judge's own composition (never read from a model's answer): the line was read by the model in its section
     hunk: int | None = None           # set only by the composition: index into Candidate.hunks (a validated section revision that covers this line); the edit is the hunk's patch
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fit_reason(cls, data):
+        # an explanation that grew long (rules + model + validation notes) must be shortened, never crash the whole analysis (it did: "String should have at most 400 characters")
+        if isinstance(data, dict) and isinstance(data.get("reason"), str) and len(data["reason"]) > 400:
+            data = {**data, "reason": data["reason"][:397] + "…"}
+        return data
 
 
 class Evaluation(BaseModel):
@@ -256,7 +264,11 @@ class LlmImpactModel:
         """Give the model the COMPLETE logical sections around this document's candidate lines (adaptive context, see context.py), let it revise them freely, validate the revision
         (edit.py) and attach what it decided to each line; revisions in lines the rules never nominated are appended as model-only passages. Sections whose every candidate line the
         rules are completely sure about are not sent (`kb_ai_judge = "uncertain"`); a general change has no rule evidence, so every section is sent. Never raises."""
+        from app.knowledge.impact import trace as T
+
         if self._judge_chat is None or s.kb_ai_judge == "off" or not ctx:
+            if ctx:
+                T.event("context", "model_not_invoked", doc.doc_id, why="SG_KB_AI_JUDGE=off" if s.kb_ai_judge == "off" else "no section-editor model is configured")
             return ctx
         from dataclasses import replace
 
@@ -267,6 +279,12 @@ class LlmImpactModel:
         secs, budget = J.plan(doc.content, [pc.passage.start for pc in ctx], s)
         unsure = {pc.passage.start for pc in ctx if not _clean(pc, ref.get(pc.index))}
         todo = [x for x in secs if s.kb_ai_judge == "all" or spec.general or (x.focus & unsure)]
+        T.event("context", "built", doc.doc_id, budget=budget.describe(),
+                sections=[{"heading": x.heading, "kind": x.kind, "lines": len(x.rows), "tokens": x.tokens, "partial": x.partial, "candidates": len(x.focus)} for x in secs][:12],
+                text={"sections": "\n-----\n".join(x.text for x in secs[:6])})
+        for x in secs:
+            if x not in todo:
+                T.event("context", "not_sent", doc.doc_id, section=x.heading, why="the rules are certain about every candidate line in it (SG_KB_AI_JUDGE=uncertain)")
         if not todo:
             return ctx
         rules = J.rules_for(spec, doc.title, s, [pc.fact.old_value for pc in ctx if pc.fact is not None and pc.fact.old_value])
@@ -276,15 +294,20 @@ class LlmImpactModel:
         extra_hunks: list[int] = []
         if len(todo) > s.kb_ai_max_sections:
             notes.append(f"{len(todo) - s.kb_ai_max_sections} more section(s) of this document were not read (limit of sections per document)")
+            for x in todo[s.kb_ai_max_sections:]:
+                T.event("context", "not_sent", doc.doc_id, section=x.heading, why=f"over the limit SG_KB_AI_MAX_SECTIONS={s.kb_ai_max_sections}")
             todo = todo[: s.kb_ai_max_sections]
         have = {pc.passage.start for pc in ctx}
         for sec in todo:
             if self._judge_calls >= s.kb_ai_judge_max_calls:
                 notes.append("the language model was not asked about every section (limit of model calls per analysis)")
+                for x in todo[todo.index(sec):]:
+                    T.event("context", "not_sent", doc.doc_id, section=x.heading, why=f"over the limit SG_KB_AI_JUDGE_MAX_CALLS={s.kb_ai_judge_max_calls} per analysis")
                 break
-            rd = J.read_section(self._judge_chat, self._check_chat, sec, spec.summary, doc.title, rules, s, self.name, expect_change=bool(sec.focus & unsure))
+            rd = J.read_section(self._judge_chat, self._check_chat, sec, spec.summary, doc.title, rules, s, self.name, expect_change=bool(sec.focus & unsure),
+                                doc=doc.doc_id, budget_left=lambda: self._judge_calls + 1 < s.kb_ai_judge_max_calls)
             if not rd.cached:
-                self._judge_calls += 1
+                self._judge_calls += 2 if rd.retried else 1
             if rd.state in ("unavailable", "invalid"):
                 state = "unavailable" if rd.state == "unavailable" else "unusable"
                 for st in sec.focus:

@@ -21,6 +21,7 @@ from app.db.models import KbChangeItem, KbChangeRequest
 from app.db.session import session_scope
 from app.knowledge import audit, diffing, store
 from app.knowledge import validation as v
+from app.knowledge.impact import trace as T
 from app.knowledge.impact import discover as disc
 from app.knowledge.impact.discover import Candidate
 from app.knowledge.impact.aliases import expand
@@ -186,15 +187,23 @@ def _resolve_siblings(spec: ChangeSpec, results: list[tuple[Candidate, DocResult
 def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: ImpactModel, embedder) -> dict:
     inp, an = _load(tenant_id, request_id, attempt)
     _progress(tenant_id, request_id, attempt, an, "parsing")
+    T.event("request", "received", description_chars=len(inp.description), answers=sorted(inp.answers)[:10], model=model.name,
+            settings={"discovery": s.kb_ai_discovery, "judge": s.kb_ai_judge, "thinking": s.kb_ai_judge_thinking, "context_tokens": s.kb_ai_context_tokens,
+                      "max_output": s.kb_ai_judge_max_tokens, "num_ctx": s.kb_ai_judge_num_ctx, "semantic_check": s.kb_ai_semantic_check, "retries": s.kb_ai_edit_retries},
+            text={"description": inp.description})
     spec = build_spec(inp, model)
+    T.event("understanding", "value_change" if spec.actionable() else "other_change", facts=[{"attribute": f.attribute, "old": f.old_value, "new": f.new_value} for f in spec.actionable()],
+            terms=spec.entity_terms, aliases=[a for a, _ in spec.alias_pairs][:10])
     if not spec.actionable():
         # Not a value replacement ("add ...", "remove ...", "now also ...", a rewrite): the language model reads the relevant sections and drafts the revision. Only a description
         # that names nothing to search for, or says nothing about what the change is, cannot be acted on.
         general = generalize(spec, inp.description, str(inp.answers.get(RESTATE, "")))
         if general is None:
+            T.event("understanding", "vague", why="the description names no action (add / remove / change to ...) or no subject: a question is asked, no model edit is attempted")
             qs = [Question(id=RESTATE, text="The description does not say what should change or where. Describe it with the subject (course, person, policy ...) and what to add, remove or change.", options=[])]
             return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": []}
         spec = general
+        T.event("understanding", "general_change", terms=spec.entity_terms, why="not a value replacement: the model reads the sections and drafts the revision")
     _progress(tenant_id, request_id, attempt, an, "discovering")
     with session_scope() as db:
         cands, report = disc.discover_with_report(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids), include={inp.reference.doc_id} if inp.reference else set())
@@ -206,19 +215,28 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
         ctx = gather(spec, cand, s, None)
         restrict, q = _heading_questions(spec, cand, ctx, inp.answers)
         if q is not None:
+            T.event("passages", "question", cand.doc_id, why="several sections could be meant; the staff member is asked which", headings=[o for o in getattr(q, "options", [])][:8])
             questions.append(q)
             continue
         if restrict is not None:
             ctx = gather(spec, cand, s, restrict)
         if not ctx:
+            T.event("passages", "no_passage", cand.doc_id, why="no line of the document (or the heading above it) names what the change is about")
             results.append((cand, DocResult(cand.doc_id, "not_relevant", 0.0, "Nothing in this document concerns the change.")))
             continue
+        T.event("passages", "selected", cand.doc_id, count=len(ctx), headings=list(dict.fromkeys(pc.passage.heading for pc in ctx))[:8],
+                how=[getattr(pc.hit, "how", None) or ("general" if spec.general else "value") for pc in ctx][:12], text={"lines": "\n".join(pc.passage.text for pc in ctx)})
         judge = getattr(model, "judge", None)
+        if judge is None:
+            T.event("context", "model_not_invoked", cand.doc_id, why="the configured impact model has no section editor (rules-only mode)")
         if judge is not None:
             _progress(tenant_id, request_id, attempt, an, "reading", n, total)
             ctx = judge(spec, cand, ctx, s)                                  # the section judge (a model call, outside any transaction); a no-op without a model
         ev: Evaluation = model.evaluate(spec, cand, ctx)                 # outside any transaction
-        results.append((cand, validate(spec, cand, ctx, ev, s)))
+        res = validate(spec, cand, ctx, ev, s)
+        results.append((cand, res))
+        T.event("classification", res.classification, cand.doc_id, confidence=res.confidence, edits=[e.kind for e in res.edits], reason=res.reason[:300],
+                passages=[{"verdict": p.get("verdict"), "judge": p.get("judge"), "why": (p.get("reason") or "")[:200]} for p in res.passages][:12], uncertainty=[u[:200] for u in res.uncertainty][:6])
     questions += _resolve_siblings(spec, results, inp.answers)
     _progress(tenant_id, request_id, attempt, an, "finishing", total, total)
     return {"outcome": "clarify" if questions else "done", "spec": spec, "questions": questions, "results": results, "discovered": total,
@@ -249,7 +267,8 @@ def _persist(tenant_id: str, request_id: str, attempt: int, s: Settings, model: 
                "not_relevant": [{"doc_id": c.doc_id, "title": c.title, "reason": r.reason[:200]} for c, r in results if r.classification == "not_relevant"][:20]}
     an = dict(an)
     an.update(progress={"stage": "clarify" if clarify else "done", "done": out["discovered"], "total": out["discovered"]}, summary=summary, error=None, model=model.name,
-              prompt_version=getattr(model, "prompt_version", "impact-v1"), spec=spec.model_dump(), questions=[q.model_dump() for q in out["questions"]])
+              prompt_version=getattr(model, "prompt_version", "impact-v1"), spec=spec.model_dump(), questions=[q.model_dump() for q in out["questions"]],
+              trace=out.get("trace"))
     status = "awaiting_clarification" if clarify else "awaiting_decisions"
     with session_scope() as db:
         r = db.get(KbChangeRequest, (tenant_id, request_id))
@@ -275,13 +294,15 @@ def _persist(tenant_id: str, request_id: str, attempt: int, s: Settings, model: 
             audit.record(db, tenant_id, actor, "change_suggestions_generated", "request", request_id, request_id=request_id, count=len(kept), documents=[c.doc_id for c, _ in kept][:20])
 
 
-def _fail(tenant_id: str, request_id: str, attempt: int, message: str) -> None:
+def _fail(tenant_id: str, request_id: str, attempt: int, message: str, trace: dict | None = None) -> None:
     with session_scope() as db:
         r = db.get(KbChangeRequest, (tenant_id, request_id))
         if r is None:
             return
         an = dict(r.analysis or {})
         an.update(error=message[:300], progress={"stage": "failed", "done": 0, "total": 0})
+        if trace is not None:
+            an["trace"] = trace
         n = db.execute(update(KbChangeRequest).where(KbChangeRequest.tenant_id == tenant_id, KbChangeRequest.request_id == request_id, KbChangeRequest.status == "analysing",
                                                      KbChangeRequest.analysis_attempt == attempt)
                        .values(status="draft", analysis=an, analysis_completed_at=store.now(), row_version=KbChangeRequest.row_version + 1, updated_at=store.now())
@@ -292,8 +313,12 @@ def _fail(tenant_id: str, request_id: str, attempt: int, message: str) -> None:
 
 def run(tenant_id: str, request_id: str, attempt: int, s: Settings, model: ImpactModel, embedder) -> None:
     """The whole job. Never raises: it either finishes, asks a question, hands the request back to the author with an error, or notices it was superseded."""
+    tr = T.Trace(request_id, attempt, content=s.kb_ai_trace_content)
     try:
-        out = analyse(tenant_id, request_id, attempt, s, model, embedder)
+        with T.tracing(tr):
+            out = analyse(tenant_id, request_id, attempt, s, model, embedder)
+            T.event("analysis", out["outcome"], documents=out["discovered"], questions=len(out["questions"]))
+        out["trace"] = tr.export()
         with session_scope() as db:
             r = db.get(KbChangeRequest, (tenant_id, request_id))
             an = dict(r.analysis or {}) if r is not None else {}
@@ -302,8 +327,9 @@ def run(tenant_id: str, request_id: str, attempt: int, s: Settings, model: Impac
         log.info("impact analysis %s attempt %s was superseded; stopping", request_id, attempt)
     except Exception as e:                                                  # noqa: BLE001 - the author gets a retryable error; never document text
         log.exception("impact analysis %s failed", request_id)
+        tr.add("analysis", "error", error=type(e).__name__)
         try:
-            _fail(tenant_id, request_id, attempt, f"{type(e).__name__}: the analysis could not be completed. Try again, or edit the documents yourself.")
+            _fail(tenant_id, request_id, attempt, f"{type(e).__name__}: the analysis could not be completed. Try again, or edit the documents yourself.", tr.export())
         except Exception:                                                   # noqa: BLE001
             log.exception("could not record the analysis failure for %s", request_id)
 

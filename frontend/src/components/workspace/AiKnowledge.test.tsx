@@ -96,7 +96,7 @@ describe("AI-assisted change (staff)", () => {
     const edits = [
       { start: 5, end: 33, original: "- Any graduate\n- Age under 30", replacement: "- Any graduate", heading: "DS", verdict: "potential", confidence: 0.5, reason: "r", kind: "remove" as const },
       { start: 34, end: 58, original: "Santhosh sir teaches ML.", replacement: "Santhosh sir teaches ML.\nHe holds an MTech in AI.", heading: "DS", verdict: "potential", confidence: 0.5, reason: "r", kind: "add" as const, flags: ["it uses names that are in neither the document nor the request (MTech)"] }];
-    const generalItem = item({ diff: { header: { old_title: "DS", new_title: "DS" }, body: [{ op: "equal", text: doc }] } as KwItem["diff"], classification: "potential",
+    const generalItem = item({ diff: { header: { old_title: "DS", new_title: "DS" }, body: [{ op: "equal", text: doc }] } as unknown as KwItem["diff"], classification: "potential",
       ai: { ...base.ai!, edits, passages: [{ n: 0, start: 34, end: 58, text: "Santhosh sir teaches ML.", heading: "DS", verdict: "potential", confidence: 0.5, reason: "the language model says the change applies here (add); please confirm.",
         replacement: "x", kind: "potential", judge: "agrees", hunk: 0, change: { kind: "add", removed: [], added: ["He holds an MTech in AI."], flags: ["it uses names that are in neither the document nor the request (MTech)"], notes: [] } }] } });
     mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [generalItem] }) }) });

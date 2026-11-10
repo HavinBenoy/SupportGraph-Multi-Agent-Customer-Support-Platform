@@ -4,6 +4,41 @@ Final delivery of M6 Part 2. It replaces the value-replacement-only section judg
 to, and carries both through the whole workflow. No migration, no new dependency, no new infrastructure; the document-centric architecture, hybrid retrieval, multi-round discovery,
 immutable versions, staff request + admin approval, atomic publication, audit and RBAC are untouched.
 
+## 0. Final review (deep investigation): root causes, fixes, processing trace
+
+The three reported cases (single-line document "Machine Learning faculty is Santhosh sir. He has a work experience of 3 years. Previously he worked in IT. He do have a M.Tech in Data Science.") were run through the REAL pipeline (HTTP, analysis job, discovery, context, validation, persistence) with a scripted model answering the way Qwen answered in your Ollama session. Retrieval was never the problem: the document was nominated every time. Where they stopped:
+
+| # | Root cause (evidence) | Effect | Fix |
+|---|---|---|---|
+| R1 | **History guard rejected explicit corrections.** `edit.check_op` rejected any revision that changed a sentence with "previously" / a past year - even when the request was *about* that past fact. B and C were rejected with "drops or changes historical information". | B, C: "related, no change" | `targets_past()`: a historical sentence may change when the request speaks about the past or corrects something (worked, previously, actually, should be ...) AND shares a content word with that sentence; flagged "explicitly corrects it: please confirm". For VALUE changes only an explicit correction cue counts, so "fee from 10000 (previously) to 12000" still never rewrites "In 2021 the fee was 10000". History headings (Archive/History) stay protected. |
+| R2 | **The prompt forbade it too**: "Statements about the past … keep them as they are". It also had no guidance for corrections ("actually", "only") or removals by category. | Real model answers "No"/keeps the M.Tech (your B and C transcripts) | New prompt (`edit-v2`): judge by meaning (a degree is an education detail; he/she = the person named before); a correction REPLACES the statements it contradicts, "only X" removes the other items of that kind; a removal removes every statement of that kind; history stays UNLESS the request changes that past fact; never invent; keep untouched text verbatim; three tiny worked examples (unrelated domain), incl. a "not applicable" one. |
+| R3 | **Instruct builds cannot think.** The editor always asked with thinking on; Ollama answers `"... does not support thinking"` (HTTP 400) for e.g. `qwen3:4b-instruct-2507`. The error made every section "unavailable" and the document looked like "no change needed". | Any instruct model: nothing ever proposed | `judge._invoke`: on that error ask again without thinking and remember the model (`_NO_THINKING`), logged and traced. |
+| R4 | **Lexical relevance.** A revision was accepted only if the changed words occur in the request ("education details" vs "M.Tech"). | A: dropped as unrelated (fixed in the previous delivery, kept) | Meaning-based acceptance near the candidate lines, flagged; strict mode whenever some change matches by words. |
+| R5 | **A long explanation crashed the analysis.** `PassageVerdict.reason` had `max_length=400`; the combined rules + model + validation explanation can exceed it -> `ValidationError` -> the whole analysis failed. Same for `replacement` (2000) and a long section revision. | Analysis error instead of proposals | Reasons are shortened (validator), replacements allow 200 000 chars. |
+| R6 | **All-or-nothing multi-line edits.** difflib groups adjacent changed lines into one block; one bad line (a dated sentence) made its correct neighbour fail too. | Good edits lost | Line-for-line blocks are split and judged per line. |
+| R7 | **No second chance.** A correction that kept the contradicted statement (your C: "B.Tech in AI and a M.Tech") or an invented figure was final. | Wrong / no proposal | One feedback retry (`SG_KB_AI_EDIT_RETRIES=1`): the reasons from the checks or the second check's FAIL are given back to the model ("YOUR PREVIOUS ANSWER WAS NOT ACCEPTED: ..."); the better reading wins. |
+| R8 | **Invisible outcomes.** A model failure, a rejection and "does not apply" all looked like "related, no change". | Impossible to diagnose | Reasons name the outcome; the processing trace below. |
+| R9 | **Noise aliases.** An acronym was built from every bag of subject words ("santhosh worked previously" -> "swp"). | Spurious matches | Only for a name said as one phrase ("machine learning" -> "ml"). |
+
+### Processing trace (`impact/trace.py`)
+
+Every analysis attempt records a trace; it is stored in the request (`analysis.trace`, returned only by the request DETAIL endpoint, i.e. to the staff author / admins who already see the request) and written to the log, one JSON line per step (`logger supportgraph.knowledge.trace`, `kb.trace {"trace": "<request_id>#<attempt>", ...}`), **without document text**. Staff see it as **"Processing log"** under the summary.
+
+| Stage | Outcomes | Tells you |
+|---|---|---|
+| request | received | description length, model, the effective limits (context/output/num_ctx), thinking, retries |
+| understanding | value_change / general_change / vague | facts extracted (attribute, old, new), subject terms, aliases |
+| discovery | nominated / not_discovered / summary | per document: score, signals (value, scope, lexical, semantic) and WHY; documents below the limit; count of documents with no signal |
+| passages | selected / no_passage / question | how many lines, under which headings, how they were found |
+| context | built / not_sent / model_not_invoked | the budget and which limit bound it; each section (kind, lines, tokens, partial); sections not sent and why (rules certain, section / call limits, code fence) |
+| model_call | answered / cached / truncated / malformed / model_failed / retry_without_thinking | model config (model, reasoning, num_ctx, num_predict), seconds, finish reason, answer size, the failure reason (timeout, unreachable, not installed, error) |
+| validation | proposed / review / no_change / rejected | accepted hunks (kind, lines), dropped changes with reasons, review flags, the checks that ran |
+| semantic_check | pass / fail / unsure | the second opinion and its reason |
+| retry | asking_again | the feedback given to the model |
+| classification | definite / potential / related_no_change / not_relevant | per passage: verdict, model's view, reason |
+
+`SG_KB_AI_TRACE_CONTENT=true` (debugging, default off) also stores the selected lines, the sections, the exact prompt and the raw answer in the stored trace (truncated to 4000 characters each) - never in the log.
+
 ## 1. Where the value-only assumptions were (all removed)
 
 | Layer | Assumption | Now |
@@ -101,31 +136,34 @@ Value changes: the existing scan for the old value. Other changes: `compute_stat
 | `SG_KB_AI_SEMANTIC_CHECK` | `uncertain` | `off` / `uncertain` (when a safeguard flagged something) / `all` |
 | `SG_KB_AI_MAX_CHANGED_FRACTION` | `0.6` | more lines changed ⇒ whole revision to a person |
 | `SG_KB_AI_MAX_REMOVED_FRACTION` | `0.5` | more text deleted ⇒ rejected |
+| `SG_KB_AI_EDIT_RETRIES` | `1` | ask once more, with the reasons, when a check rejects the revision or the second check fails (0 = off) |
+| `SG_KB_AI_TRACE_CONTENT` | `false` | store prompt / answer / section text in the request's processing trace (debugging; never logged) |
 | `SG_LLM_MODEL_IMPACT` | model of `SG_LLM_MODEL` | `qwen3:1.7b` or `qwen3:4b` |
 
 Unchanged from earlier parts: `SG_KB_AI_DISCOVERY`, `SG_KB_AI_VERIFY`, `SG_KB_AI_MAX_CANDIDATES`, `SG_KB_AI_MAX_PASSAGES`, `SG_KB_AI_MODE`, `SG_RAG_RETRIEVAL_MODE`.
 
 ## 8. Tests — what was run and what was not
 
-**Run in this sandbox (Linux, Python 3.13, scripted model, SQLite API fixtures + a local PostgreSQL 16):**
+**Run in this sandbox (Linux, Python 3.13; scripted model; SQLite API fixtures + a local PostgreSQL 16) — final round:**
 
 | Suite | Result |
 |---|---|
-| backend `tests/knowledge` + `tests/rag` (includes the new `test_judge.py` 32 tests and `test_generalized_flow.py` 12 HTTP end-to-end tests) | 643 passed, 3 skipped |
-| backend everything else (api, security, step4, calls, voice, graph, db, unit, eval regression) | 1362 passed, 75 skipped (skips need external services/PostgreSQL env) |
-| PostgreSQL (`tests/db`, with `SG_TEST_DATABASE_URL`) | 81 passed |
-| new editing tests re-run on PostgreSQL | 44 passed |
-| frontend `tsc --noEmit`, `vitest run`, `next build` | clean; 233 tests passed; build succeeded |
+| backend `tests/knowledge` + `tests/rag` + eval regression (incl. `test_ai_eval.py` = `make eval-impact`) | **683 passed, 3 skipped** |
+| backend everything else (api, security, step4, calls, voice, graph, db, unit) | **1362 passed, 75 skipped** (skips need external services) |
+| PostgreSQL: `tests/db` + `test_pipeline_trace.py` + `test_generalized_flow.py` with `SG_TEST_DATABASE_URL` | **104 passed** |
+| frontend `tsc --noEmit` / `vitest run` / `next build` | clean / **235 passed** / built |
 
-**Mocked (scripted model):** all of the above. The stub returns the revised section a good or a deliberately bad model would return, so these tests prove the context building, validation, decision handling, persistence, approval, publication, stale/concurrent/failure handling and RBAC, not Qwen's quality. Scenarios covered: replace a value; add an absent qualification; online -> hybrid; remove a restriction; add a table row/course; several related statements; history preserved / historical section protected; unrelated section unchanged; invented figures, heading/table-header edits, deletions, duplicates, truncated/empty/echoed output; conflicting rules-vs-model; vague request; large sections and context boundaries (budget clamps, block splitting, Q&A and table-header preservation, merge/non-overlap); stale version (409); two overlapping requests; publication failure with rollback and retry; staff edit of a multi-line revision.
+New in the final round: `tests/knowledge/test_pipeline_trace.py` (11 HTTP end-to-end: reported cases A, B, C; a dated record not rewritten by a value change; instruct model without thinking; timeout; truncated answer; the trace's stages, no text in logs, content switch, "why nothing happened" distinctions, trace only in the detail view) and 15 more in `test_judge.py` (five phrasings of the same removal, pronoun spread over lines, past correction only when targeted, one bad line not sinking a neighbour, semantic FAIL vs clean deterministic, long explanation not crashing). Frontend: `ProcessingLog.test.tsx`.
 
-**NOT run: real Qwen3 1.7B / 4B.** The sandbox has no Ollama and no model weights, so no real-model result exists and none is claimed. `backend/scripts/judge_probe.py --suite` runs the ten scenarios against your Ollama with the same prompt, budget and validator; please run the commands in section 9 and send me the output. Expect Qwen3 1.7B to miss some scenarios (those become "no proposal" or a flagged proposal, not wrong edits).
+**Scripted, not real:** every test above uses a scripted model (it answers the way your Qwen did, correctly or incorrectly). They prove the pipeline, the checks and the decisions — not Qwen's quality.
+
+**NOT run: real Qwen3 1.7B / 4B (thinking or instruct).** The build sandbox has no Ollama and no weights; no real-model result is claimed. `scripts/judge_probe.py --suite` runs 13 scenarios — including your three Santhosh-sir cases word for word — against your Ollama with the app's exact prompt, budget, validator, second check and retry.
 
 ## 9. Exact local verification
 
 ```bash
 cd supportgraph
-unzip -o ../supportgraph-part2-closure.zip            # no migration, no new dependency; .env and your data are not in the zip
+unzip -o ../supportgraph-m6-part2-final.zip            # no migration, no new dependency; .env and your data are not in the zip
 
 # 1. backend (offline; scripted model)
 cd backend
@@ -143,6 +181,7 @@ cd ../frontend && npx tsc --noEmit && npx vitest run && npx next build
 cd ../backend
 SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:1.7b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2
 SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b   ../.venv/bin/python scripts/judge_probe.py --suite --runs 2
+SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b-instruct-2507 ../.venv/bin/python scripts/judge_probe.py --suite     # an instruct build: thinking is switched off automatically
 SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b SG_KB_AI_CONTEXT_TOKENS=3000 SG_KB_AI_JUDGE_MAX_TOKENS=6144 SG_KB_AI_JUDGE_NUM_CTX=12288 ../.venv/bin/python scripts/judge_probe.py --suite
 
 # 5. through the application (staff console): start the stack as usual, sign in as staff, "AI-assisted change", e.g.
@@ -150,11 +189,16 @@ SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b SG_KB_AI_CONTEXT_TOKENS=3000
 #    -> review the Added / Removed / Rewritten hunks and the "Check:" flags, accept, submit; as admin approve and publish; read the follow-up check.
 ```
 
+### Reading the processing log
+Open a request → "Processing log". Look for the first highlighted step: `not_discovered` / `no_passage` (selection), `not_sent` (limits / rules certain), `model_not_invoked`, `model_failed` (timeout, unreachable, not installed), `truncated` / `malformed` (raise `SG_KB_AI_JUDGE_MAX_TOKENS`), `no_change` (the model judged it does not apply), `rejected` (which check and why), then `classification`. In the server log: `grep kb.trace` and the request id. For the exact prompt and answer set `SG_KB_AI_TRACE_CONTENT=true` and re-run the analysis.
+
 ## 10. Known limitations (honest)
 
 * A small model can produce a wrong revision. The validator drops or flags it rather than applying it; the cost is a missed suggestion, not a wrong publication. Qwen3 1.7B will miss more than 4B; the ten-scenario probe tells you by how much on your machine.
 * Historical protection is word-based (`previously`, `until`, `was`, dated years): an ordinary sentence containing "was" is treated as history and protected.
-* A request to *correct* the historical record itself is deliberately refused by the guard.
+* A correction of a past statement is allowed only when the request speaks about the past/corrects and names that statement's content; records under a History/Archive heading stay protected.
+* The meaning-based acceptance (no shared words) relies on proximity to the candidate lines plus a person; the second check helps only if `SG_KB_AI_SEMANTIC_CHECK` is not off.
+* A retry costs one more model call (minutes on a CPU with thinking); set `SG_KB_AI_EDIT_RETRIES=0` to disable.
 * A non-value change cannot be proven complete after publication (see §6); the check is advisory.
 * A section containing a ``` code fence cannot be edited by the model (the answer format would be ambiguous); it is reported as unavailable.
 * A request that is both vague and value-less is answered with a question, not a guess.

@@ -230,6 +230,8 @@ class Settings(BaseSettings):
     kb_ai_semantic_check: Literal["off", "uncertain", "all"] = "uncertain"
     kb_ai_max_changed_fraction: float = Field(default=0.6, ge=0.05, le=1)      # more of a section's lines changed than this => the whole revision goes to a person
     kb_ai_max_removed_fraction: float = Field(default=0.5, ge=0.05, le=1)      # more of a section's text removed than this => rejected as an accidental deletion
+    kb_ai_edit_retries: int = Field(default=1, ge=0, le=3)                     # a revision that a check rejects or a second check FAILS is asked for ONCE more, with the reasons
+    kb_ai_trace_content: bool = False                                          # store prompts / answers / passage text in the request's processing trace (debugging; never in logs)
     kb_ai_background: bool = True                                              # run analysis and release in a background thread (False = inline; tests)
     llm_model_impact: str = ""
     impact_max_output_tokens: int = Field(default=900, ge=64, le=4096)         # the impact role writes replacement text, so it gets a larger output cap than 400
