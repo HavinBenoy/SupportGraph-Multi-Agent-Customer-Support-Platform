@@ -24,6 +24,16 @@ query_synonyms:
   discount: [concession]
   certificate: [certification]
 
+# Different names for the same thing (sample): used by search and by the AI change analysis, so "ML" and "Machine Learning" are understood as one subject.
+entity_aliases:
+  machine learning: [ml, machine-learning]
+  data science: [ds, data science with python]
+  artificial intelligence: [ai]
+  python full stack: [pfs, python fullstack]
+  java full stack: [jfs, java fullstack]
+  software testing: [qa testing, manual testing]
+  data structures and algorithms: [dsa]
+
 # Build step 4 (SAMPLE values: replace with the institute's real routing and targets)
 makeup_window_days: 14
 default_team: student-support

@@ -18,6 +18,9 @@ class TenantConfig(BaseModel):
     # The institute's own vocabulary, used to expand search queries (app/rag/rewrite.py): "marks" also searches "score".
     # Keys are lowercase single words. Tenant data, so a second tenant brings its own words with no code change.
     query_synonyms: dict[str, list[str]] = Field(default_factory=dict)
+    # Different names for the SAME thing in this institute's documents ("machine learning" = "ml"). Each key lists the other names it goes by. Used by search (a question
+    # that says "ML" also finds "machine learning") and by the AI change analysis (a passage that says "ML" is about machine learning). Tenant data, not code.
+    entity_aliases: dict[str, list[str]] = Field(default_factory=dict)
     # Build step 4 (tenant data, not code, so a second institute brings its own rules):
     # A make-up class may be requested for a session held within this many days (never a future one).
     makeup_window_days: int = Field(default=14, ge=1, le=90)

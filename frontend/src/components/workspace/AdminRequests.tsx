@@ -137,7 +137,8 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
                 {!!req.failure.documents?.length && <p className="kw-muted">Affected: {req.failure.documents.join(", ")}</p>}</div>)}
             {s === "published" && (
               <div className="kw-banner ok" role="status"><p><b>Published</b> by {req.published_by} on {when(req.published_at)}. Every document went live together.</p>
-                <ul>{Object.entries(req.release?.versions ?? {}).map(([d, v]) => <li key={d}>{items.find((i) => i.doc_id === d)?.doc_title ?? d}: v{req.release?.previous?.[d] ?? "—"} → <b>v{v}</b></li>)}</ul></div>)}
+                <ul>{Object.entries(req.release?.versions ?? {}).map(([d, v]) => <li key={d}>{items.find((i) => i.doc_id === d)?.doc_title ?? d}: v{req.release?.previous?.[d] ?? "—"} → <b>v{v}</b></li>)}</ul>
+                <Verification req={req} onRun={() => act((t) => api.kwVerify(t, req.request_id), "Checked the live knowledge again.")} busy={busy} /></div>)}
             {s === "needs_revision" && <p className="kw-banner">Returned to {req.created_by}: {req.return_note}</p>}
             {s === "approved" && <p className="kw-banner">Approved. <b>Nothing has been published yet.</b> Use “Process and Publish Approved Changes” when you are ready.</p>}
 
@@ -231,5 +232,22 @@ function AdminDoc({ req, it, editable, onItem, onDone }: { req: KwRequest; it: K
         </div>)}
       {editable && it.admin_decision === "excluded" && mode === "none" && <div className="kw-actions"><button className="kw-btn" disabled={busy} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "confirmed", undefined, it.row_version))}>Include again</button></div>}
     </article>
+  );
+}
+
+
+/** After publication: what a search of the live knowledge still finds that looks out of date. Advisory only; it never changes anything. */
+function Verification({ req, onRun, busy }: { req: KwRequest; onRun: () => void; busy: boolean }) {
+  const v = req.release?.verification;
+  return (
+    <section aria-label="Check of the live knowledge" className="kw-verify">
+      {!v ? <p className="kw-muted tiny">No follow-up check has been recorded for this release.</p>
+        : v.clean ? <p role="status"><b>Follow-up check: nothing outdated found</b> in {v.documents_scanned} live documents ({when(v.checked_at)}).</p>
+        : (<><p role="status"><b>Follow-up check: {v.remaining_total} passage{v.remaining_total === 1 ? "" : "s"} may still be out of date</b>{v.unreviewed === 0 ? " — all were left unchanged by a reviewer" : ""} ({when(v.checked_at)}). Nothing was changed automatically.</p>
+          <ul>{v.remaining.map((r, i) => (
+            <li key={i}><b>{r.title}</b>{r.heading ? <> · {r.heading}</> : null} — “{r.text.length > 160 ? `${r.text.slice(0, 160)}…` : r.text}”
+              <span className="kw-muted tiny"> {r.kind === "outdated" ? "Still shows the old value." : "Possibly related."}{r.left_by_reviewer ? " A reviewer chose to leave this unchanged." : ""}{r.evidence ? ` ${r.evidence}` : ""}</span></li>))}</ul></>)}
+      <div className="kw-actions"><button className="kw-btn" disabled={busy} onClick={onRun}>Check again</button></div>
+    </section>
   );
 }

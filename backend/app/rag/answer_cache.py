@@ -50,7 +50,7 @@ def kb_fingerprint(db: Session, tenant_id: str, embedding_name: str) -> str:
 def settings_fingerprint(s: Settings, embedding_name: str) -> str:
     parts = (s.llm_provider, s.llm_model, s.llm_model_faq, s.llm_temperature, s.llm_seed, s.llm_num_ctx, s.llm_max_output_tokens,
              embedding_name, s.rag_top_k, s.rag_min_score, s.rag_context_band, s.rag_max_context_chars, s.faq_citation_retries,
-             s.knowledge_max_attempts, s.rewriter_mode)
+             s.knowledge_max_attempts, s.rewriter_mode, s.rag_retrieval_mode)
     return hashlib.sha1("|".join(map(str, parts)).encode()).hexdigest()[:12]
 
 

@@ -12,6 +12,7 @@ giving up on a vocabulary mismatch. The retry is capped (`knowledge_max_attempts
 grader is real-model work (see README, known limits); a wrong-but-cited answer is not retried, because nothing flags it.
 """
 
+import inspect
 from typing import Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
@@ -42,6 +43,7 @@ def build_knowledge_graph(faq_graph=None, rewriter: Rewriter | None = None, sett
     s = settings or get_settings()
     faq = faq_graph or build_faq_graph(settings=s)
     rewriter = rewriter or get_rewriter(s)
+    takes_aliases = "aliases" in inspect.signature(rewriter.rewrite).parameters
 
     def rewrite(state: KnowledgeState, config: RunnableConfig) -> dict:
         tenant_id = ((config or {}).get("configurable") or {}).get("tenant_id")
@@ -49,8 +51,9 @@ def build_knowledge_graph(faq_graph=None, rewriter: Rewriter | None = None, sett
             raise ScopeError("Knowledge graph run without tenant_id in config['configurable']")
         attempt = state.get("attempt", 0)
         with stages.stage("rewrite"):   # M3: glossary expansion (no model call) unless SG_REWRITER_MODE=llm
-            synonyms = load_tenant_config(tenant_id).query_synonyms
-            query = rewriter.rewrite(state["question"], attempt=attempt, synonyms=synonyms)
+            cfg = load_tenant_config(tenant_id)
+            extra = {"aliases": cfg.entity_aliases} if takes_aliases else {}      # a custom rewriter written before aliases existed is called as before
+            query = rewriter.rewrite(state["question"], attempt=attempt, synonyms=cfg.query_synonyms, **extra)
         return {"query": query, "queries": [*state.get("queries", []), query]}
 
     def duplicate_query(state: KnowledgeState) -> bool:

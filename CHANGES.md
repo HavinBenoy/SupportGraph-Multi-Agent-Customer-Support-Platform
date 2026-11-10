@@ -1,3 +1,23 @@
+# Part 2 recall, precision and verification (document-centric knowledge, no architecture change)
+
+Apply on top of the previous Part 2 zips: `unzip -o ../supportgraph-part2-recall-and-verification.zip`. **No migration** (alembic stays at 0012). No new dependency. Report: PART2_RECALL_REPORT.md; design: docs/PART2.md §4c.
+
+| Area | Files |
+|---|---|
+| Impact analysis | backend/app/knowledge/impact/{aliases,scope,sections,scan,verify}.py (new); {spec,discover,evaluate,analyse}.py (changed) |
+| Release / API / audit | backend/app/knowledge/release.py (follow-up check after publish), audit.py, api/routes/knowledge_workspace.py (`POST /api/admin/knowledge/changes/{id}/verify`) |
+| Retrieval | backend/app/rag/{hybrid (new),retrieval,faq,answer_cache,chunking,rewrite}.py; app/graph/subgraphs/knowledge.py |
+| Config | backend/app/config.py, app/tenants/schema.py, tenants/qspiders_sample/config.yaml (`entity_aliases`) |
+| Tests | tests/knowledge/{qs_corpus,test_recall_v2,test_ai_recall_flow}.py, tests/rag/test_hybrid_and_tables.py (new); frontend AiKnowledge.test.tsx |
+| Frontend | src/components/workspace/{Decisions,AdminRequests,ui}.tsx, src/lib/{types,api}.ts |
+| Docs | docs/PART2.md §4c, PART2_RECALL_REPORT.md |
+
+New environment variables (all optional): `SG_KB_AI_DISCOVERY=v2|v1` (v1 = previous discovery, kept for comparison/fallback), `SG_KB_AI_VERIFY=true|false`, `SG_RAG_RETRIEVAL_MODE=hybrid|vector`, `SG_KB_AI_MAX_CANDIDATES` (20), `SG_KB_AI_MAX_PASSAGES` (12).
+Behaviour changes: analysis now inspects units (lines, list items, table rows with header, answers with question) instead of whole documents; passages carry a class and evidence; a contradicting or shared
+line is never "definite"; after publication a follow-up check of the live base is stored on the release (advisory); chat retrieval is hybrid by default (set `SG_RAG_RETRIEVAL_MODE=vector` to restore the old behaviour).
+
+---
+
 # Part 2 final fix - impact analysis for changes that name no old value, and model-output safety
 
 Apply on top of Part 2: `unzip -o ../supportgraph-part2-final-fix.zip`. **No migration** (alembic stays at 0012), no frontend change. Details and root cause: PART2_FINAL_FIX_REPORT.md.

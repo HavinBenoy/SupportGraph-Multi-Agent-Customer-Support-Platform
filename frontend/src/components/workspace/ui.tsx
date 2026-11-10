@@ -26,3 +26,5 @@ export const DecisionChip = ({ d }: { d: string | null | undefined }) => (
 );
 
 export const STEP_STATUS: KwStatus[] = ["submitted", "under_review", "approved", "processing", "publishing", "published"];
+
+export const KIND_LABEL: Record<string, string> = { definite: "Definitely affected", potential: "Potentially affected", ambiguous: "Contradictory or ambiguous", related: "Related — no change", historical: "Historical — keep", not_relevant: "Not relevant" };

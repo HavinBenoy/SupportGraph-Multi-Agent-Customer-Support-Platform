@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # Chunks scoring below this cosine similarity are not shown to the model, and if none remain the bot abstains.
     # Similarity scales differ per embedding model: calibrate with `make eval-rag` when you change the model.
     rag_min_score: float = Field(default=0.2, ge=0.0, le=1.0)
+    # "hybrid" = vector search plus a keyword lane (names, codes, amounts, abbreviations), fused by rank; "vector" = the earlier vector-only search.
+    rag_retrieval_mode: Literal["vector", "hybrid"] = "hybrid"
 
     # --- Triage, routing and corrective RAG (build step 3) ---
     # Below this triage confidence the router asks a clarifying question instead of acting.
@@ -197,11 +199,15 @@ class Settings(BaseSettings):
     # model (offline, deterministic); "llm" = require the model. The model role is SG_LLM_MODEL_IMPACT (empty = SG_LLM_MODEL). Nothing leaves the machine: the endpoint
     # guard (SG_ALLOW_EXTERNAL_LLM) applies exactly as for every other role.
     kb_ai_mode: Literal["auto", "rules", "llm"] = "auto"
-    kb_ai_max_candidates: int = Field(default=12, ge=1, le=40)                 # documents evaluated per analysis
-    kb_ai_max_passages: int = Field(default=6, ge=1, le=20)                    # passages shown to the model per document
+    kb_ai_max_candidates: int = Field(default=20, ge=1, le=40)                 # documents evaluated per analysis
+    kb_ai_max_passages: int = Field(default=12, ge=1, le=20)                   # passages shown to the model per document
     kb_ai_semantic_floor: float = Field(default=0.3, ge=0, le=1)               # semantic similarity that can nominate a document that lacks the old value
     kb_ai_definite_confidence: float = Field(default=0.75, ge=0, le=1)         # below this a "definite" verdict is shown as "potential"
     kb_ai_analysis_stale_s: int = Field(default=900, ge=30, le=86400)          # an analysis stuck in `analysing` this long (crash) may be started again
+    # Part 2 recall: "v2" reads every document section by section (aliases, people, table rows, learned old values, several rounds); "v1" is the earlier document-level
+    # discovery, kept for comparison and as a fallback. kb_ai_verify: after a release, search the published base again for references to the old value that were missed.
+    kb_ai_discovery: Literal["v1", "v2"] = "v2"
+    kb_ai_verify: bool = True
     kb_ai_background: bool = True                                              # run analysis and release in a background thread (False = inline; tests)
     llm_model_impact: str = ""
     impact_max_output_tokens: int = Field(default=900, ge=64, le=4096)         # the impact role writes replacement text, so it gets a larger output cap than 400

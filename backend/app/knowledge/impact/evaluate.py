@@ -22,16 +22,14 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings
 from app.knowledge.impact import values
-from app.knowledge.impact.discover import Candidate, scope_fraction
+from app.knowledge.impact.aliases import expand
+from app.knowledge.impact.discover import Candidate
+from app.knowledge.impact.scope import context_of, is_historical, out_of_scope, scope_fraction, sibling_conflict  # noqa: F401 (re-exported)
 from app.knowledge.impact.passages import Passage, best_lines, find_passages, slot_passages
 from app.knowledge.impact.spec import ATTRIBUTES, ChangeSpec, Fact, attribute_terms_from, entity_terms_from, parse_rules, sibling_marks, words
 
 log = logging.getLogger("supportgraph.knowledge.impact")
-PROMPT_VERSION = "impact-v2"
-_HIST_WORDS = re.compile(r"\b(history|historical|archive[ds]?|previous(?:ly)?|prior|former(?:ly)?|superseded|obsolete|outdated|old|earlier|until|till|before|was|were|used to|no longer|expired|valid\s+(?:until|till|through))\b", re.I)
-_YEAR = re.compile(r"\b(19\d{2}|20\d{2})\b")
-
-
+PROMPT_VERSION = "impact-v3"
 @dataclass(frozen=True)
 class PassageCtx:
     index: int
@@ -39,6 +37,7 @@ class PassageCtx:
     passage: Passage
     has_value: bool
     fact: Fact | None = None          # a change that names no old value: the fact with THIS passage's current value filled in
+    hit: object | None = None         # scan.Hit: the evidence that nominated this passage (None for passages found the older way)
 
 
 class PassageVerdict(BaseModel):
@@ -60,44 +59,6 @@ class ImpactModel(Protocol):
     def evaluate(self, spec: ChangeSpec, doc: Candidate, passages: list[PassageCtx]) -> Evaluation: ...
 
 
-# ------------------------------------------------------------------------------------------------------------------------------ safety checks
-def is_historical(heading: str, line: str, today: date | None = None) -> bool:
-    """A passage that is a record of the past, not the current fact: it sits under a historical heading, says so ("previous", "until", "was"), or carries an
-    explicit year before this year."""
-    year = (today or date.today()).year
-    for chunk in (heading, line):
-        if _HIST_WORDS.search(chunk):
-            return True
-        if any(int(y) < year for y in _YEAR.findall(chunk)):
-            return True
-    return False
-
-
-def sibling_conflict(spec: ChangeSpec, text: str) -> bool:
-    """The change names one alternative (the weekend batch, the morning slot, batch A) and this text is about a DIFFERENT alternative of the same thing."""
-    want = sibling_marks(" ".join(spec.entity_terms))
-    have = sibling_marks(text)
-    for key, val in have:
-        mine = {v for k, v in want if k == key}
-        if mine and val not in mine and not any(k == key and v in mine for k, v in have):
-            return True
-    return False
-
-
-def out_of_scope(spec: ChangeSpec, text: str) -> bool:
-    """Is this text about something other than the change's subject? A different alternative (weekday vs weekend), a missing distinguishing term (Java vs Python), or,
-    when nothing distinguishes the subject, fewer than half of its words."""
-    if sibling_conflict(spec, text):
-        return True
-    if spec.key_terms:
-        return scope_fraction(spec.key_terms, text) < 1.0
-    return bool(spec.entity_terms) and scope_fraction(spec.entity_terms, text) < 0.5
-
-
-def context_of(doc: Candidate, p: Passage) -> str:
-    return f"{doc.title} {doc.path} {doc.category} {p.heading} {p.text}"
-
-
 # ------------------------------------------------------------------------------------------------------------------------------- rule model
 class RuleImpactModel:
     """Deterministic: no model, no network. Also the reference behaviour the evaluation suite pins down."""
@@ -111,25 +72,47 @@ class RuleImpactModel:
         out = []
         for pc in passages:
             fact = pc.fact or facts[pc.fact_index]
+            hit = pc.hit
+            how = getattr(hit, "how", None)
+            if how == "role":
+                out.append(PassageVerdict(passage=pc.index, verdict="no_change", confidence=0.6,
+                                          reason=f"Mentions the {fact.attribute or 'role'} of the subject without naming anyone or a value, so there is nothing to replace here."))
+                continue
             if not pc.has_value:
                 out.append(PassageVerdict(passage=pc.index, verdict="no_change", confidence=0.6, reason="Related to the change but it does not contain the old value."))
                 continue
-            frac = scope_fraction(spec.entity_terms, context_of(doc, pc.passage))
+            ctx = expand(context_of(doc, pc.passage), spec.alias_pairs)
+            frac = scope_fraction(spec.entity_terms, ctx)
             if out_of_scope(spec, context_of(doc, pc.passage)):
                 frac = 0.0
-            if already_new(fact):
+            if how == "already" or already_new(fact):
                 out.append(PassageVerdict(passage=pc.index, verdict="no_change", confidence=0.9, reason=f"The passage already says {fact.new_value}."))
                 continue
             if not spec.entity_terms:
                 verdict, conf, why = "potential", 0.5, "The change names no specific course, batch or person, so this occurrence needs staff confirmation."
             elif frac >= 0.999:
                 verdict, conf, why = "definite", 0.92, f"The passage states the old {fact.attribute or 'value'} for the same subject ({', '.join(spec.entity_terms)})."
+                if how == "old_core":
+                    conf, why = 0.9, why + " The name is written without/with a different title than in the change."
+                if getattr(hit, "aliases", ()):
+                    conf, why = min(conf, 0.88), why + f" The subject is written as {', '.join(repr(a) for a in hit.aliases)}."
+                if how == "similar":
+                    verdict, conf, why = "potential", 0.55, f"The passage has a name spelt like the old value ({', '.join(hit.values)}): please confirm it is the same person."
+                elif how == "other":
+                    verdict, conf, why = "potential", 0.5, f"The passage gives {', '.join(hit.values)} for the same subject: neither the old nor the new value. The documents may disagree; please confirm."
+                elif how == "multi":
+                    verdict, conf, why = "potential", 0.4, f"The line names several values ({', '.join(hit.values)}); only a person can say which one changes."
+                elif getattr(hit, "shared", ""):
+                    verdict, conf, why = "potential", 0.55, "The line names this value for several subjects at once; replacing it would change the other subjects too. Please edit it by hand if only this one changes."
+                    rep = None
+                elif getattr(hit, "conflict", ()):
+                    verdict, conf, why = "potential", 0.55, "The documents state different current values for this subject (" + "; ".join(hit.conflict) + "): please confirm this one."
             elif frac >= 0.5:
-                verdict, conf, why = "potential", 0.6, "The passage has the old value but only part of the subject matches (" + ", ".join(t for t in spec.entity_terms if t in set(words(context_of(doc, pc.passage)))) + "): please confirm it is the same one."
+                verdict, conf, why = "potential", 0.6, "The passage has the old value but only part of the subject matches (" + ", ".join(t for t in spec.entity_terms if t in set(words(ctx))) + "): please confirm it is the same one."
             else:
                 verdict, conf, why = "no_change", 0.8, "The old value appears, but for a different subject than the one named in the change."
             rep = None
-            if verdict in ("definite", "potential"):
+            if verdict in ("definite", "potential") and how != "multi" and not getattr(hit, "shared", ""):
                 rep = rewrite_line(pc.passage, fact)
                 if rep is None:
                     verdict, conf, why = "potential", 0.3, "The value was found but could not be rewritten safely; please edit it manually."
@@ -194,7 +177,8 @@ def _prompt(spec: ChangeSpec, doc: Candidate, passages: list[PassageCtx]) -> str
     facts = "\n".join(f"- {f.attribute or 'value'}: old={(f.old_value if f.old_value else '(whatever the document states now)')!r} new={f.new_value!r}"
                       + (f" effective={f.effective!r}" if f.effective else "") for f in spec.actionable())
     ps = "\n".join(f"<passage n=\"{p.index}\" fact=\"{p.fact_index}\" heading=\"{p.passage.heading}\""
-                    + (f" current_value=\"{p.fact.old_value}\"" if p.fact is not None else "") + f">\n{p.passage.text}\n</passage>" for p in passages)
+                    + (f" current_value=\"{p.fact.old_value}\"" if p.fact is not None else "")
+                    + (f" evidence=\"{p.hit.explain()}\"" if getattr(p, "hit", None) is not None else "") + f">\n{p.passage.text}\n</passage>" for p in passages)
     return (f"<change>\n{spec.summary}\n{facts}\nabout: {', '.join(spec.entity_terms)}\n</change>\n"
             f"<document title=\"{doc.title}\" folder=\"{doc.path}\" category=\"{doc.category}\">\n{ps}\n</document>")
 
@@ -350,19 +334,37 @@ class DocResult:
     passages: list[dict] = field(default_factory=list)       # every passage considered, with its verdict, for the reviewer
 
 
+_RANK = {"old": 0, "old_core": 1, "slot": 1, "other": 2, "similar": 3, "multi": 3, "already": 4, "role": 5}
+
+
 def gather(spec: ChangeSpec, doc: Candidate, s: Settings, restrict: list[str] | None) -> list[PassageCtx]:
-    """Numbered passages for the model: the lines containing each old value (optionally only under the headings staff chose), else the best-matching lines."""
+    """Numbered passages for the model. When discovery read the document (`doc.hits`), these are the units it found evidence in, most telling first; otherwise (a document
+    forced into the analysis) the lines containing each old value, else the best-matching lines. Passages are numbered in document order. Whatever does not fit the per-document
+    limit is COUNTED (`doc.dropped`) so the result can say so instead of silently ignoring it."""
+    doc.dropped = 0
+    hits = list(getattr(doc, "hits", None) or [])
+    if hits:
+        chosen, seen = [], set()
+        for h in sorted(hits, key=lambda h: (_RANK.get(h.how, 9), h.subject == "none", h.passage.start)):
+            if (restrict is not None and h.passage.heading not in restrict) or h.passage.start in seen:
+                continue
+            seen.add(h.passage.start)
+            chosen.append(h)
+        doc.dropped = max(0, len(chosen) - s.kb_ai_max_passages)
+        chosen = sorted(chosen[: s.kb_ai_max_passages], key=lambda h: h.passage.start)
+        return [PassageCtx(i, h.fact_index, h.passage, h.how != "role", h.fact, h) for i, h in enumerate(chosen)]
     out: list[PassageCtx] = []
-    seen: set[int] = set()
+    seen_lines: set[int] = set()
     for fi, fact in enumerate(spec.actionable()):
         found = [(p, None) for p in find_passages(doc.content, fact.old_value)] if fact.old_value else slot_passages(doc.content, fact)
         for p, resolved in found:
-            if (restrict is not None and p.heading not in restrict) or p.start in seen:
+            if (restrict is not None and p.heading not in restrict) or p.start in seen_lines:
                 continue                                                               # one line is one passage, however many facts it carries
-            seen.add(p.start)
+            seen_lines.add(p.start)
             out.append(PassageCtx(len(out), fi, p, True, resolved))
     if not out and restrict is None:
         out = [PassageCtx(i, 0, p, False) for i, p in enumerate(best_lines(doc.content, spec.entity_terms, 2))]
+    doc.dropped = max(0, len(out) - s.kb_ai_max_passages)
     return out[: s.kb_ai_max_passages]
 
 
@@ -379,19 +381,29 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
         p, fact = c.passage, (c.fact or (facts[c.fact_index] if facts else None))
         verdict, conf, reason, rep = v.verdict, float(v.confidence), v.reason.strip(), (v.replacement or None)
         model_note = None
+        why = "model"
+        hit = c.hit
+        how = getattr(hit, "how", None)
         if verdict in ("definite", "potential") and fact is not None:
             if is_historical(p.heading, p.text, today):
                 # The guard's decision replaces the model's explanation: an explanation that argues for a change next to a "no change" verdict is exactly the contradiction to avoid.
                 verdict, rep, model_note = "no_change", None, reason
                 reason, conf = "Historical or explicitly dated record: left unchanged.", max(conf, 0.8)
                 res.flags["historical"] += 1
+                why = "historical"
             elif out_of_scope(spec, context_of(doc, p)):
                 verdict, rep, model_note = "no_change", None, reason
                 reason, conf = "The passage is about a different subject than the change.", max(conf, 0.7)
                 res.flags["scope"] += 1
+                why = "scope"
             elif already_new(fact):
                 verdict, rep, model_note = "no_change", None, reason
                 reason, conf = f"The passage already says {fact.new_value}.", max(conf, 0.9)
+                why = "already"
+            elif how == "already":
+                verdict, rep, model_note = "no_change", None, reason
+                reason, conf = f"The passage already says {fact.new_value}.", max(conf, 0.9)
+                why = "already"
             elif rep is not None:
                 rep = rep.strip("\n")
                 bad = replacement_problem(rep, p, fact)
@@ -401,11 +413,26 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
             else:
                 verdict, conf = "potential", min(conf, 0.4)
                 reason = reason or "No replacement was proposed: edit it manually or discard."
+            if verdict in ("definite", "potential") and (how in ("other", "multi", "similar") or getattr(hit, "shared", "")):
+                if verdict == "definite":                                                # a model may not promote a line the evidence says is uncertain
+                    verdict, conf = "potential", min(conf, 0.6)
+                    res.uncertainty.append("the evidence for this line is uncertain (different or several values, or a similar spelling)")
+            if verdict == "definite" and getattr(hit, "conflict", ()):
+                verdict, conf = "potential", min(conf, 0.6)
+                res.uncertainty.append("the documents disagree about the current value")
             if verdict == "definite" and conf < s.kb_ai_definite_confidence:
                 verdict = "potential"
                 res.uncertainty.append("confidence below the 'definite' threshold")
-        entry = {"n": v.passage, "start": p.start, "end": p.end, "text": p.text, "heading": p.heading, "verdict": verdict, "confidence": round(conf, 2),
+        if verdict in ("definite", "potential"):
+            kind = "ambiguous" if (how in ("other", "multi") or getattr(hit, "conflict", ())) else verdict
+        elif v.verdict == "irrelevant" and why == "model":
+            kind = "not_relevant"
+        else:
+            kind = "historical" if why == "historical" else "related"
+        entry = {"n": v.passage, "start": p.start, "end": p.end, "text": p.text, "heading": p.heading, "verdict": verdict, "kind": kind, "confidence": round(conf, 2),
                  "reason": reason[:400], "replacement": rep}
+        if hit is not None:
+            entry["evidence"] = hit.explain()
         if model_note:
             entry["model_note"] = model_note[:300]
         res.passages.append(entry)
@@ -414,6 +441,8 @@ def validate(spec: ChangeSpec, doc: Candidate, ctx: list[PassageCtx], ev: Evalua
                 res.edits.append(Edit(p.start, p.end, p.text, rep, p.heading, verdict, round(conf, 2), reason[:400]))
             else:
                 res.uncertainty.append(reason[:200] or "no replacement proposed")
+    if getattr(doc, "dropped", 0):
+        res.uncertainty.append(f"{doc.dropped} more matching passage(s) in this document were not examined (limit per document)")
     include = [p for p in res.passages if p["verdict"] in ("definite", "potential")]
     if res.edits:
         res.classification = "definite" if all(e.verdict == "definite" for e in res.edits) and not res.uncertainty else "potential"

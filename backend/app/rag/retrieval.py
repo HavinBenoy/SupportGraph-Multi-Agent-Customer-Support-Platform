@@ -16,6 +16,8 @@ import math
 from dataclasses import dataclass
 
 from sqlalchemy import and_, func, select
+
+from app.rag import hybrid
 from sqlalchemy.orm import Session
 
 from app.db.models import EMBEDDING_DIM, Chunk, Document
@@ -104,6 +106,36 @@ def retrieve(db: Session, *, tenant_id: str, query_vector: list[float], model_na
     """search() minus anything below `min_score`. An empty list means "nothing relevant", and the bot abstains."""
     return [c for c in search(db, tenant_id=tenant_id, query_vector=query_vector, model_name=model_name, top_k=top_k)
             if c.score >= min_score]
+
+
+def search_hybrid(db: Session, *, tenant_id: str, query_vector: list[float], query_text: str, model_name: str, top_k: int, lexical_weight: float = 1.0) -> list[RetrievedChunk]:
+    """Vector search AND keyword search over the same public passages, fused by rank. `score` stays the cosine similarity of each passage (so every threshold that already exists
+    keeps its meaning); only the ORDER and the membership of the top_k change: a passage the embedding ranked low but that contains the question's rare words (a name, a code, an
+    abbreviation) now gets in. The same tenant / audience / embedding-model filters apply to both lanes."""
+    _check(tenant_id, query_vector, top_k)
+    vec = search(db, tenant_id=tenant_id, query_vector=query_vector, model_name=model_name, top_k=min(MAX_TOP_K, max(top_k * 3, 12)))
+    on_doc = and_(Document.tenant_id == Chunk.tenant_id, Document.doc_id == Chunk.doc_id)
+    rows = db.execute(select(Chunk.doc_id, Chunk.chunk_index, Chunk.heading, Chunk.text, Document.title, Document.kb_version).join(Document, on_doc)
+                      .where(Chunk.tenant_id == tenant_id, Chunk.audience == "public", Document.audience == "public", Chunk.embedding_model == model_name)
+                      .order_by(Chunk.doc_id, Chunk.chunk_index)).all()
+    meta = {(r[0], r[1]): r for r in rows}
+    lex = hybrid.bm25([((r[0], r[1]), f"{r[4]} {r[2]} {r[3]}") for r in rows], query_text)[: min(MAX_TOP_K, max(top_k * 3, 12))]
+    by_key = {(c.doc_id, c.chunk_index): c for c in vec}
+    missing = [k for k, _ in lex if k not in by_key]
+    if missing:                                                       # keyword hits the vector lane did not return: they still need their cosine
+        for key, cos in _cosines(db, tenant_id, model_name, query_vector, missing).items():
+            r = meta[key]
+            by_key[key] = RetrievedChunk(doc_id=key[0], chunk_index=key[1], doc_title=r[4], heading=r[2], text=r[3], score=cos, doc_version=r[5])
+    fused = hybrid.rrf([[(c.doc_id, c.chunk_index) for c in vec], [k for k, _ in lex]], [1.0, lexical_weight])
+    order = sorted((k for k in fused if k in by_key), key=lambda k: (-fused[k], -by_key[k].score, k))
+    return [by_key[k] for k in order[:top_k]]
+
+
+def _cosines(db: Session, tenant_id: str, model_name: str, vector: list[float], keys: list[tuple[str, int]]) -> dict[tuple[str, int], float]:
+    docs = sorted({k[0] for k in keys})
+    want = set(keys)
+    stmt = select(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.embedding_model == model_name, Chunk.doc_id.in_(docs))
+    return {(c.doc_id, c.chunk_index): _cosine(vector, list(c.embedding)) for c in db.execute(stmt).scalars() if (c.doc_id, c.chunk_index) in want}
 
 
 def count_chunks(db: Session, *, tenant_id: str, model_name: str) -> int:

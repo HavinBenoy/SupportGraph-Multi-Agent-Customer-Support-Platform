@@ -22,7 +22,7 @@ installment installments instalment instalments rupees rupee rs inr program prog
 _MONTHS = set("january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec".split())
 _DATE = (r"(?:[A-Z][a-z]+\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?[A-Z][a-z]+(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2}|"
          r"\d{1,2}/\d{1,2}/\d{2,4})")
-_RELATIVE = re.compile(r"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|as of|with effect from|onwards? from)\s+(?P<r>today|tomorrow|now|immediately)\b|\b(?P<r2>immediately)\b", re.I)
+_RELATIVE = re.compile(r"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|as of|with effect from|onwards? from)\s+(?P<r>today|tomorrow|now|immediately)\b(?:\s+on(?:wards?)?\b)?|\b(?P<r2>immediately)\b", re.I)
 _EFFECTIVE = re.compile(rf"\b(?:starting|effective|beginning|w\.?e\.?f\.?|from|with effect from|onwards? from)\s+(?:on\s+)?(?P<d>{_DATE})")
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9+#.\-]*|\d+")
 
@@ -72,6 +72,7 @@ class ChangeSpec(BaseModel):
     facts: list[Fact] = Field(default_factory=list, max_length=MAX_FACTS)
     entity_terms: list[str] = Field(default_factory=list, max_length=12)
     key_terms: list[str] = Field(default_factory=list, max_length=12)      # the entity terms that tell this subject apart from its neighbours (set by discovery, never by a model)
+    alias_pairs: list[tuple[str, list[str]]] = Field(default_factory=list, max_length=24)   # (surface form, subject words it stands for): "ml" -> machine learning (set by discovery, never by a model)
     wants_all: bool = False                                  # the description says "all" / "every" / "both": no need to ask which one
 
     @field_validator("entity_terms", mode="before")
@@ -158,7 +159,11 @@ _SLOT_PATTERNS = [re.compile(p, re.I) for p in (
     rf"^(?:please\s+)?(?:change|update|set|revise|modify|reassign)\s+(?:the\s+)?(?P<subj>.+?)\s+(?:to|as)\s+(?P<new>.+?)\s*$",
     r"^(?P<subj>.+?)\s+(?:is|are|will be)\s+now\s+(?P<new>.+?)\s*$",
     r"^(?:the\s+)?new\s+(?P<subj>.+?)\s+(?:is|will be)\s+(?P<new>.+?)\s*$",
+    # a plain statement in a change description ("Machine Learning faculty is Santhosh sir"): last, and only for a subject that carries an attribute word (checked by the caller)
+    r"^(?P<subj>.+?)\s+(?:is|are|will be)\s+(?!(?:being|going|not|no|the same|still|also|to\b|changed|updated)\b)(?P<new>[^,;]{1,60})\s*$",
 )]
+_INSTEAD = re.compile(r"^(?P<head>.+?)[,\s]+(?:instead of|in place of|rather than|replacing|and not)\s+(?P<old>.+?)\s*$", re.I)
+_LEAD = re.compile(r"^\s*(?:onwards?|henceforth|going forward|from now on)\b[,\s]*", re.I)
 
 
 def _slot_change(rest: str) -> tuple[str, str, str] | None:
@@ -181,6 +186,15 @@ def parse_rules(description: str, today: date | None = None) -> ChangeSpec:
     text = " ".join((description or "").split())
     protected = _TITLES.sub(lambda m: m.group(1) + "\u2024", text)                     # "Dr. Mehta": that dot does not end the sentence
     eff, rest = _tail_effective(protected, today)
+    rest = _LEAD.sub("", rest.strip()).strip(" ,")
+    ins = _INSTEAD.match(rest.replace("\u2024", "."))
+    if ins and not _pair_values(rest):
+        sl = _slot_change(ins.group("head"))
+        old_i = ins.group("old").strip(" .,;\"'")
+        if sl and old_i and sl[2].lower() != old_i.lower():
+            subj, attr, new_v = sl
+            return ChangeSpec(summary=text[:300], facts=[Fact(attribute=attr, old_value=old_i.replace("\u2024", "."), new_value=new_v.replace("\u2024", "."), effective=eff)],
+                              entity_terms=entity_terms_from(subj.replace("\u2024", ".")), wants_all=bool(re.search(r"\b(all|every|both|each|everywhere)\b", text, re.I)))
     pair = _pair_values(rest)
     old = new = None
     if pair:

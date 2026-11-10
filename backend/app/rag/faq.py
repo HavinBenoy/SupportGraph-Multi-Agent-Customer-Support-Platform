@@ -44,7 +44,7 @@ from app.llm.truncation import finish_reason, is_truncated
 from app.observability import stages
 from app.observability.tracing import instrument_config
 from app.rag.prompts import CITATION, build_messages
-from app.rag.retrieval import RetrievedChunk, count_chunks, search
+from app.rag.retrieval import RetrievedChunk, count_chunks, search, search_hybrid
 from app.tenants.loader import load_tenant_config
 from app.tools.scope import ScopeError
 
@@ -107,7 +107,7 @@ def trim_context(found: list[RetrievedChunk], s: Settings) -> list[RetrievedChun
         return found
     keep = list(found)
     if s.rag_context_band > 0:
-        top = keep[0].score
+        top = max(c.score for c in keep)
         keep = [c for c in keep if c.score >= top - s.rag_context_band] or keep[:1]
     if s.rag_max_context_chars > 0:
         while len(keep) > 1 and sum(len(c.text) for c in keep) > s.rag_max_context_chars:
@@ -168,13 +168,16 @@ def build_faq_graph(embedder: EmbeddingClient | None = None, model: BaseChatMode
             vector = embedder.embed_query(search_text)
         with stages.stage("search"):
             with session_scope() as db:
-                found = search(db, tenant_id=tenant_id, query_vector=vector, model_name=embedder.name, top_k=s.rag_top_k)
+                if s.rag_retrieval_mode == "hybrid":
+                    found = search_hybrid(db, tenant_id=tenant_id, query_vector=vector, query_text=search_text, model_name=embedder.name, top_k=s.rag_top_k)
+                else:
+                    found = search(db, tenant_id=tenant_id, query_vector=vector, model_name=embedder.name, top_k=s.rag_top_k)
                 relevant = trim_context([c for c in found if c.score >= s.rag_min_score], s)
                 never_ingested = not found and count_chunks(db, tenant_id=tenant_id, model_name=embedder.name) == 0
         stages.note("context_chunks", len(relevant))
         stages.note("context_chars", sum(len(c.text) for c in relevant))
         out: dict[str, Any] = {"question": question, "chunks": [c.to_dict() for c in relevant],
-                               "top_score": round(found[0].score, 4) if found else None}
+                               "top_score": round(max(c.score for c in found), 4) if found else None}
         if never_ingested:
             out["reason"] = "no_documents_ingested"
         return out

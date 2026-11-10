@@ -69,9 +69,29 @@ def _hard_split(piece: str, max_chars: int) -> list[str]:
     return _pack(words, max_chars, " ")
 
 
+_TABLE_RULE = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+
+
+def _split_table(block: str, max_chars: int) -> list[str] | None:
+    """A table too long for one chunk is split by rows, and EVERY part repeats the header row and its rule line: "| Machine Learning | Jyothi sir |" alone does not say which column
+    is the faculty, but under "| Module | Faculty |" it does. None when the block is not a table with a header (the caller splits it as a list)."""
+    lines = [ln for ln in block.splitlines() if ln.strip()]
+    if len(lines) < 3 or not all(ln.lstrip().startswith("|") for ln in lines) or not _TABLE_RULE.match(lines[1]):
+        return None
+    head = "\n".join(lines[:2])
+    room = max_chars - len(head) - 1
+    if room < 100:
+        return None
+    parts = _pack([part for ln in lines[2:] for part in _hard_split(ln, room)], room, "\n")
+    return [f"{head}\n{p}" for p in parts]
+
+
 def _split_block(block: str, max_chars: int) -> list[str]:
     if len(block) <= max_chars:
         return [block]
+    table = _split_table(block, max_chars)
+    if table is not None:
+        return table
     if _is_structured(block):
         pieces, joiner = [ln for ln in block.splitlines() if ln.strip()], "\n"
     else:

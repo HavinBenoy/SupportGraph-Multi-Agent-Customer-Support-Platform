@@ -15,6 +15,7 @@ Administrators (/api/admin/knowledge, tenant from the token):
   PUT  /changes/{id}/items/{doc_id}/edit       the administrator's final manual edit of one document
   POST /changes/{id}/items/{doc_id}/review     confirm | exclude one document
   POST /changes/{id}/publish                   process and publish every approved document as ONE unit (202; poll GET /changes/{id}); retry after failure is safe
+  POST /changes/{id}/verify                    published: search the live base again for references that still say the old value (report only)
   POST /changes/{id}/reopen                    failed -> under_review      POST /changes/{id}/cancel     GET /changes/{id}/audit
 Staff (/api/staff/knowledge): read-only knowledge plus their OWN change requests.
   GET  /tree                                   published documents and the folders that lead to them
@@ -42,6 +43,7 @@ from app.auth.tokens import Principal
 from app.db.models import KB_REQUEST_STATUSES, KbDocument, KbVersion
 from app.knowledge import changes, diffing, release, store, workspace
 from app.knowledge.impact import analyse as impact_analyse
+from app.knowledge.impact import verify
 from app.llm.gateway import get_impact_model
 from app.knowledge.errors import NotFound
 from sqlalchemy import select
@@ -258,6 +260,20 @@ async def admin_publish(request_id: REQ, request: Request, body: ApplyIn | None 
         await asyncio.to_thread(release.launch, p.tenant_id, p.subject, request_id, out["attempt"], s, emb)
     view = await asyncio.to_thread(_guard, lambda db: changes.admin_get(db, p.tenant_id, request_id))
     return {"outcome": out["outcome"], "attempt": out["attempt"], "request": view}
+
+
+@admin_router.post("/changes/{request_id}/verify")
+async def admin_verify(request_id: REQ, request: Request, p: Principal = Depends(require_admin)) -> dict:
+    """Search the published knowledge base again for references that still say what a PUBLISHED request replaced (a report only; nothing is changed). The same check runs
+    automatically after a release; this runs it again, for example after other documents were edited."""
+    s = request.app.state.settings
+    view = await asyncio.to_thread(_guard, lambda db: changes.admin_get(db, p.tenant_id, request_id))
+    if view["status"] != "published":
+        raise HTTPException(status_code=409, detail="only a published request can be verified")
+    out = await asyncio.to_thread(verify.verify_request, p.tenant_id, request_id, s, p.subject)
+    if out is None:
+        raise HTTPException(status_code=409, detail="this request has no analysed change to verify")
+    return {"verification": out}
 
 
 @admin_router.post("/changes/{request_id}/reopen")

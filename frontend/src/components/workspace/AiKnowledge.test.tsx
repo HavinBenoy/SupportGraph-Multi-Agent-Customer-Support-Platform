@@ -220,6 +220,20 @@ describe("Administrator change requests (integrated approve → process → publ
     expect(screen.getByText(/Python fees: v1/)).toHaveTextContent("Python fees: v1 → v2");
   }, 15000);
 
+  it("shows what the follow-up check still finds in the live knowledge, and can run it again", async () => {
+    const pub = submitted({ status: "published", published_by: "admin1", published_at: "2026-11-03T10:00:00Z",
+      release: { versions: { "python-fees": 2 }, previous: { "python-fees": 1 }, attempts: 1, model: "m", published_at: "x",
+        verification: { checked_at: "2026-11-03T10:01:00Z", documents_scanned: 9, clean: false, remaining_total: 1, remaining: [{ doc_id: "faq", title: "FAQ", heading: "Fees", text: "Python fee is INR 45000.", kind: "outdated", left_by_reviewer: true }] } } });
+    const state = { r: pub };
+    const f = world(state, { "POST /api/admin/knowledge/changes/cr_ai1/verify": () => ({ json: { verification: { clean: true } } }) });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /Open request cr_ai1/ }));
+    expect(await screen.findByText(/1 passage may still be out of date/)).toBeInTheDocument();
+    expect(screen.getByText(/A reviewer chose to leave this unchanged/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(count(f, "POST", "/api/admin/knowledge/changes/cr_ai1/verify")).toBe(1));
+  });
+
   it("explains a failed release (nothing published) and offers Retry and Reopen", async () => {
     const state = { r: submitted({ status: "failed", failure: { stage: "processing", message: "Embedding service unavailable.", documents: ["faq"] } }) };
     const f = world(state, { "POST /api/admin/knowledge/changes/cr_ai1/publish": () => ({ status: 202, json: { outcome: "started", attempt: 2, request: { ...state.r, status: "processing" } } }) });

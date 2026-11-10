@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbDoc, KwAuditEvent, KwDecision, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbDoc, KwAuditEvent, KwDecision, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -125,6 +125,7 @@ export const api = {
     call<KwItem>(`/admin/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}/edit`, { method: "PUT", token, body }),
   kwItemReview: (token: string, id: string, docId: string, decision: "confirmed" | "excluded", note?: string, expected_row_version?: number) =>
     call<KwItem>(`/admin/knowledge/changes/${encodeURIComponent(id)}/items/${encodeURIComponent(docId)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}), ...(expected_row_version !== undefined ? { expected_row_version } : {}) } }),
+  kwVerify: (token: string, id: string) => call<{ verification: KwVerification }>(`/admin/knowledge/changes/${encodeURIComponent(id)}/verify`, { method: "POST", token }),
   kwPublish: (token: string, id: string) => call<{ outcome: string; attempt: number; request: KwRequest }>(`/admin/knowledge/changes/${encodeURIComponent(id)}/publish`, { method: "POST", token }),
   kwReopen: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/reopen`, { method: "POST", token }),
   kwAdminCancel: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/cancel`, { method: "POST", token }),

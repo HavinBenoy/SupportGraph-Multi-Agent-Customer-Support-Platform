@@ -219,6 +219,9 @@ def run(tenant_id: str, actor: str, request_id: str, attempt: int, s: Settings, 
                 raise Superseded()
         try:
             _publish_all(tenant_id, actor, request_id, attempt, s, embedder)
+            if s.kb_ai_verify:                                                    # a separate, later look at the published base; it can never fail or undo the release
+                from app.knowledge.impact import verify
+                verify.verify_request(tenant_id, request_id, s, actor)
         except Superseded:
             raise
         except Exception as e:                                                   # noqa: BLE001 - the publishing transaction rolled back: every document is still at its old text

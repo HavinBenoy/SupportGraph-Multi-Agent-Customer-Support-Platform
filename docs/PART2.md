@@ -61,6 +61,32 @@ attribute (faculty, trainer, fee, timing ...), a subject (the entity words) and 
 5. When a guard (historical, scope, already-new) overrides a model verdict, the guard's explanation replaces the model's; the model's text is kept as `model_note` for the reviewer.
 6. A "no change" verdict whose own explanation says the passage "must be updated" and for which no evidence exists becomes **potential, no replacement** ("verdict and explanation disagreed").
 
+## 4c. Part 2 recall and verification (evidence scan, `kb_ai_discovery = v2`)
+
+Document-level discovery missed passages whose WORDING differed ("Jyothi sir handles ML sessions") and could not tell a different subject or a contradicting value from the real thing.
+v2 reads every document as **units** (`sections.py`: paragraph line, list item, table row WITH its column header, answer line WITH its question, each with its heading chain) and collects
+**evidence** per unit (`scan.py`): the old value in any spelling (honorific optional; a respelling such as Jyoti is only a *similar* match), the subject on the line or from the heading /
+title / question (aliases such as ML = Machine Learning from the tenant's `entity_aliases`, the subject's acronym, and "Long Name (AB)" spellings in the documents, `aliases.py`), a cue
+word (teaches, handles, instructor, ...), and context (historical, a sibling alternative, already the new value, a list of several subjects, a different current value).
+
+* **Rounds.** Round 1 uses the description. When the description gives no old value, the documents are read to learn it (clear majority of the value stated for the subject; a
+  minority value is a *contradiction* for a human, never silently changed), then round 2 rescans the whole base for the learned value. Both rounds are recorded in `summary.rounds`.
+* **Classes** (stored on each passage as `kind`, with the evidence string): `definite`, `potential`, `ambiguous` (contradicts or shares), `related`, `historical`, `not_relevant`.
+  Item-level classification is unchanged (definite / potential / related_no_change), so there is no migration. A model can never promote a passage with similar / shared / contradicting
+  evidence to definite, and the deterministic guards (historical, scope, replacement must contain the new value and not the old, one line, length cap) still run after any model.
+* **Precise patches.** Only the exact line (or the cell's row line) is replaced; the heading, table header, list marker, bold markers and neighbouring lines are untouched.
+* **After publication** (`verify.py`, `kb_ai_verify`): the PUBLISHED corpus is scanned again with the stored spec and learned values. The result is stored in `release.verification`
+  (`clean`, `remaining[]`, `unreviewed`, counts of historical / confirmed-new / other-subject lines). Items a reviewer discarded are marked `left_by_reviewer`. It is advisory: it never
+  fails or undoes a release and never edits anything. Admins can run it again: `POST /api/admin/knowledge/changes/{id}/verify` (only after publication). Audit: `change_verification_completed`.
+* **Retrieval** (`rag_retrieval_mode = hybrid`): vector search plus a BM25 keyword lane over the tenant's public passages, fused by reciprocal rank; `score` stays the cosine so thresholds
+  keep their meaning; the alias expansion is added to the rewritten query. Oversized tables are split by rows with the header repeated in every chunk.
+
+Settings: `SG_KB_AI_DISCOVERY` (v2|v1), `SG_KB_AI_VERIFY` (true|false), `SG_RAG_RETRIEVAL_MODE` (hybrid|vector), `SG_KB_AI_MAX_CANDIDATES`, `SG_KB_AI_MAX_PASSAGES`; tenant `entity_aliases`
+in `tenants/<id>/config.yaml`.
+
+Limits: two rounds only; no pronoun continuation ("He also teaches ..." on the next line); person detection is English-name heuristics; the ambiguity rules are heuristics, which is why
+anything not clearly supported goes to a person.
+
 ## 5. Model strategy
 * `kb_ai_mode`: `auto` (default) = rule engine when the fake provider is configured, otherwise the chat model for role `impact`; `rules` = never call a model; `llm` = always the model.
 * Role model: `llm_model_impact` (empty = the default chat model, currently the Ollama Qwen setup). `impact_max_output_tokens` caps output. Prompt version `impact-v2` is recorded (v1 before the final fix).

@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import type { KwItem, KwPatch, KwRequest } from "@/lib/types";
 import { DiffLegend, DiffView } from "./DiffView";
 import { PatchLegend, PatchView, baseText } from "./PatchView";
-import { ClassChip, DecisionChip, msg, pct, when } from "./ui";
+import { ClassChip, DecisionChip, KIND_LABEL, msg, pct, when } from "./ui";
 
 /** The edits to show for an item: the decided patch if there is one, otherwise the AI's suggestion. */
 export const editsOf = (it: KwItem): (KwPatch & { heading?: string })[] =>
@@ -47,6 +47,14 @@ function Candidate({ req, it, readOnly, onItem }: { req: KwRequest; it: KwItem; 
       {it.base_stale && <p className="kw-banner warn" role="alert">This document was published again after the analysis, so the suggestion can no longer be applied. Discard it, or re-run the analysis.</p>}
       {it.ai?.reason && <p className="kw-why"><b>Why the AI suggests this:</b> {it.ai.reason}</p>}
       {!!it.ai?.uncertainty?.length && <ul className="kw-unsure" aria-label="What the AI is unsure about">{it.ai.uncertainty.map((u, i) => <li key={i}>{u}</li>)}</ul>}
+      {!!it.ai?.passages?.length && (
+        <details className="kw-details"><summary>How each passage was judged ({it.ai.passages.length})</summary>
+          <ul className="kw-evidence" aria-label={`Evidence for ${it.doc_title}`}>
+            {it.ai.passages.map((p) => (
+              <li key={p.n}><b>{KIND_LABEL[p.kind ?? ""] ?? p.verdict}</b>{p.heading ? <> · <i>{p.heading}</i></> : null}: “{p.text.length > 160 ? `${p.text.slice(0, 160)}…` : p.text}”
+                {p.evidence && <div className="kw-muted tiny">Evidence: {p.evidence}</div>}
+                {p.reason && <div className="kw-muted tiny">{p.reason}</div>}</li>))}
+          </ul></details>)}
       {it.classification === "potential" && !it.decision && <p className="kw-banner">The AI is not certain this passage must change. Please confirm before accepting.</p>}
       {mode !== "edit" && (it.decision === "discarded" ? (
         <p className="kw-muted">Discarded. The published text stays as it is.{it.rationale ? ` Reason: ${it.rationale}` : ""}</p>
@@ -103,6 +111,8 @@ export function Decisions({ req, readOnly = false, onItem, onSubmit, onReanalyse
         <p className="kw-banner" role="status">
           Found {summary.discovered} possible document(s): <b>{summary.definite}</b> definitely affected, <b>{summary.potential}</b> to confirm, <b>{summary.related_no_change}</b> related with no change.
           {!!summary.flags.historical && <> {summary.flags.historical} dated or historical record(s) were left alone.</>}
+          {!!summary.learned?.length && <> Because the request did not say what the old value was, the documents were read to learn it: {summary.learned.join(", ")}.</>}
+          {!!summary.kinds?.ambiguous && <> {summary.kinds.ambiguous} passage(s) were contradictory or ambiguous and are listed for your judgement.</>}
         </p>)}
       {cands.length === 0 && <p className="kw-banner warn">The AI found no document that needs to change. Nothing is forced: you can re-describe the change, or close this request.</p>}
       {cands.map((it) => <Candidate key={`${it.doc_id}:${it.row_version}`} req={req} it={it} readOnly={readOnly} onItem={onItem} />)}

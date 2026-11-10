@@ -22,6 +22,7 @@ from app.knowledge import audit, diffing, store
 from app.knowledge import validation as v
 from app.knowledge.impact import discover as disc
 from app.knowledge.impact.discover import Candidate
+from app.knowledge.impact.aliases import expand
 from app.knowledge.impact.evaluate import (DocResult, Evaluation, ImpactModel, apply_edits, context_of, gather, validate)
 from app.knowledge.impact.spec import ChangeSpec, Question, are_siblings, entity_terms_from, spec_from_edit
 
@@ -113,7 +114,7 @@ def _heading_questions(spec: ChangeSpec, cand: Candidate, ctx: list, answers: di
     best: dict[str, float] = {}
     for c in ctx:
         if c.has_value:
-            best[c.passage.heading] = max(best.get(c.passage.heading, 0.0), disc.scope_fraction(spec.entity_terms, context_of(cand, c.passage)))
+            best[c.passage.heading] = max(best.get(c.passage.heading, 0.0), disc.scope_fraction(spec.entity_terms, expand(context_of(cand, c.passage), spec.alias_pairs)))
     if len(best) < 2:
         return None, None
     top = max(best.values())
@@ -169,10 +170,10 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
     spec = build_spec(inp, model)
     if not spec.actionable():
         qs = [Question(id=RESTATE, text="The description does not say what the old and the new value are. Restate it as “… from <old> to <new>”.", options=[])]
-        return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0}
+        return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": []}
     _progress(tenant_id, request_id, attempt, an, "discovering")
     with session_scope() as db:
-        cands = disc.discover(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids), include={inp.reference.doc_id} if inp.reference else set())
+        cands, report = disc.discover_with_report(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids), include={inp.reference.doc_id} if inp.reference else set())
     results: list[tuple[Candidate, DocResult]] = []
     questions: list[Question] = []
     total = len(cands)
@@ -192,7 +193,8 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
         results.append((cand, validate(spec, cand, ctx, ev, s)))
     questions += _resolve_siblings(spec, results, inp.answers)
     _progress(tenant_id, request_id, attempt, an, "finishing", total, total)
-    return {"outcome": "clarify" if questions else "done", "spec": spec, "questions": questions, "results": results, "discovered": total}
+    return {"outcome": "clarify" if questions else "done", "spec": spec, "questions": questions, "results": results, "discovered": total,
+            "rounds": report.rounds, "learned": report.learned}
 
 
 def _item_for(tenant_id: str, request_id: str, s: Settings, cand: Candidate, res: DocResult) -> KbChangeItem:
@@ -201,7 +203,7 @@ def _item_for(tenant_id: str, request_id: str, s: Settings, cand: Candidate, res
     body, _ = v.content(body, cand.title, s)
     diff, st = diffing.build(cand.title, cand.title, cand.content, body)
     suggestion = {"reason": res.reason, "signals": cand.signals, "uncertainty": res.uncertainty[:6], "flags": res.flags, "path": cand.path, "passages": res.passages,
-                  "edits": [asdict(e) for e in res.edits]}
+                  "edits": [asdict(e) for e in res.edits], "kinds": {k: sum(1 for p in res.passages if p.get("kind") == k) for k in ("definite", "potential", "ambiguous", "related", "historical", "not_relevant")}}
     return KbChangeItem(tenant_id=tenant_id, request_id=request_id, doc_id=cand.doc_id, base_version=cand.version, base_checksum=cand.checksum, proposed_title=cand.title,
                         proposed_content=body, proposed_checksum=v.checksum(cand.title, body), diff=diff, stats=st, origin="ai", classification=res.classification,
                         confidence=res.confidence, ai_suggestion=suggestion, final_edits=edits, decision=None, row_version=0, updated_by="ai", updated_at=store.now())
@@ -214,7 +216,8 @@ def _persist(tenant_id: str, request_id: str, attempt: int, s: Settings, model: 
     counts = {k: sum(1 for _, r in results if r.classification == k) for k in ("definite", "potential", "related_no_change", "not_relevant")}
     flags = {k: sum(r.flags.get(k, 0) for _, r in results) for k in ("unsupported", "historical", "scope")}
     clarify = out["outcome"] == "clarify"
-    summary = {"discovered": out["discovered"], **counts, "flags": flags,
+    kinds = {k: sum(1 for _, r in results for p in r.passages if p.get("kind") == k) for k in ("definite", "potential", "ambiguous", "related", "historical", "not_relevant")}
+    summary = {"discovered": out["discovered"], **counts, "flags": flags, "kinds": kinds, "rounds": out.get("rounds", []), "learned": out.get("learned", []),
                "not_relevant": [{"doc_id": c.doc_id, "title": c.title, "reason": r.reason[:200]} for c, r in results if r.classification == "not_relevant"][:20]}
     an = dict(an)
     an.update(progress={"stage": "clarify" if clarify else "done", "done": out["discovered"], "total": out["discovered"]}, summary=summary, error=None, model=model.name,
