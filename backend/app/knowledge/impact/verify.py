@@ -90,6 +90,22 @@ def compute_statements(corpus, edits_by_doc: dict[str, list[dict]], left_alone: 
                     "statements word for word elsewhere; it cannot prove that every related statement was updated."}
 
 
+def _merge_reports(parts: list[dict]) -> dict:
+    """One follow-up check per intent, shown as one: clean only when every intent is clean."""
+    out = dict(parts[0])
+    out["remaining"] = [r for p in parts for r in p.get("remaining", [])][:MAX_LISTED]
+    for k in ("remaining_total", "unreviewed", "historical_skipped", "confirmed_new", "other_subject", "edits_missing"):
+        out[k] = sum(int(p.get(k) or 0) for p in parts)
+    out["clean"] = all(p.get("clean") for p in parts)
+    out["values_searched"] = [v for p in parts for v in p.get("values_searched", [])]
+    out["mode"] = "values" if any(p.get("mode", "values") == "values" for p in parts) else "statements"
+    out["intents"] = len(parts)
+    notes = [p["note"] for p in parts if p.get("note")]
+    if notes:
+        out["note"] = notes[0]
+    return out
+
+
 def compute(db, tenant_id: str, spec_dict: dict, learned: list[dict], left_alone: set[str], edits_by_doc: dict[str, list[dict]] | None = None) -> dict:
     spec = ChangeSpec.model_validate(spec_dict)
     if not spec.actionable():
@@ -138,7 +154,9 @@ def verify_request(tenant_id: str, request_id: str, s: Settings, actor: str = "s
             for i in db.execute(select(KbChangeItem).where(KbChangeItem.tenant_id == tenant_id, KbChangeItem.request_id == request_id)).scalars():
                 if i.decision in ("accepted", "manual") and i.admin_decision != "excluded" and i.final_edits:
                     edits[i.doc_id] = list(i.final_edits)
-            out = compute(db, tenant_id, an["spec"], (an.get("summary") or {}).get("learned") or [], left, edits)
+            specs = an.get("specs") or [an["spec"]]
+            parts = [compute(db, tenant_id, sp, (an.get("summary") or {}).get("learned") or [], left, edits) for sp in specs]
+            out = parts[0] if len(parts) == 1 else _merge_reports(parts)
             rel = dict(r.release or {})
             rel["verification"] = out
             r.release = rel

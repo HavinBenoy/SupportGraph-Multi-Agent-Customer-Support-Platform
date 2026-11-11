@@ -97,6 +97,10 @@ export const api = {
   kwVersion: (token: string, id: string, n: number) => call<KwHistoryRow & { content: string }>(`/staff/knowledge/documents/${encodeURIComponent(id)}/versions/${n}`, { token }),
   kwCreateFolder: (token: string, name: string, parent_id: string | null) => call<KwFolder>("/admin/knowledge/folders", { method: "POST", token, body: { name, ...(parent_id ? { parent_id } : {}) } }),
   kwRenameFolder: (token: string, id: string, name: string, expected_row_version: number) => call<KwFolder>(`/admin/knowledge/folders/${encodeURIComponent(id)}`, { method: "PUT", token, body: { name, expected_row_version } }),
+  kwMoveFolder: (token: string, id: string, parent_id: string | null, expected_row_version: number) =>
+    call<KwFolder>(`/admin/knowledge/folders/${encodeURIComponent(id)}/parent`, { method: "PUT", token, body: { parent_id, expected_row_version } }),
+  kwDeleteFolder: (token: string, id: string, expected_row_version: number) =>
+    call<{ folder_id: string; deleted: boolean }>(`/admin/knowledge/folders/${encodeURIComponent(id)}?expected_row_version=${expected_row_version}`, { method: "DELETE", token }),
   kwMove: (token: string, docId: string, folder_id: string | null, expected_row_version: number) =>
     call<{ doc_id: string; folder_id: string | null; row_version: number }>(`/admin/knowledge/documents/${encodeURIComponent(docId)}/folder`, { method: "PUT", token, body: { folder_id, expected_row_version } }),
   kwPreview: (token: string, docId: string, content: string, title?: string) => call<KwPreview>("/staff/knowledge/diff-preview", { method: "POST", token, body: { doc_id: docId, content, ...(title ? { title } : {}) } }),

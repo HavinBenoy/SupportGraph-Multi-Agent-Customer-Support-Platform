@@ -1,3 +1,50 @@
+# M6 — FINAL: Part 2 patch-up + Part 3 (one consolidated ZIP: `supportgraph-m6-final.zip`)
+
+Supersedes every earlier Part 2 zip. **No migration** (alembic stays at 0012). **No new dependency.** Your `.env`, secrets and data are not included.
+Read: docs/PART2_FINAL.md §0b (discovery/multi-intent/editing regressions) and §0 (earlier root causes, processing trace); docs/PART3.md (landing page, redesign, navigation, folder management, Publishing tab).
+
+## Part 2 patch-up (evidence: your staff-console failure and the real Qwen probe logs)
+- **Discovery recall.** "Gen AI 20000 and ML 12000" was parsed as a single 20000 → 12000 change, and the discovery gate needed the old value or a title match. Now the request is split into **intents** (each discovered, evaluated, traced and verified on its own). Documents are admitted on **independent signals**: old value / evidence / ≥ 50% of the subject words / semantic ≥ 0.6 alone / semantic + a subject word / title. A sibling subject (Java for a Python change) is kept out.
+- **Unrelated rewrite** ("offline" → "hybrid" for "online → hybrid"). "change A to B" with the same head noun is now old → new, and a run that writes the new value where the old one never was is rejected.
+- **"Unchanged" for removals/corrections.** The prompt lists the lines search found, and the model gets one second look.
+- **The verifier passed incomplete corrections.** It now fills a checklist, and its own contradictions turn into FAIL plus one retry with the reason. Negations are flagged.
+
+## Part 3
+- Design system for the whole app.
+- App bar with a mobile menu.
+- Animated landing page at `/` (chat moved to `/chat`).
+- Two-panel login, page headers.
+- URL-backed navigation (browser Back/Forward, reload) and Back buttons in every Knowledge Base view.
+- Folder management: create top-level and nested, rename, move (no cycles or depth overflow), delete only when empty after confirmation. New backend endpoints are audited and tenant-scoped.
+- Publishing tab removed. Its document capabilities moved into the workspace (New document here, Drafts & document administration, Manage versions).
+
+## Files
+backend: app/knowledge/impact/{spec,analyse,discover,edit,judge,evaluate,verify,trace,aliases,context}.py, app/knowledge/{workspace,audit,changes}.py, app/api/routes/knowledge_workspace.py, app/config.py, app/llm/gateway.py, scripts/judge_probe.py; tests/knowledge/{test_m6_regressions,test_folder_management,test_pipeline_trace,test_judge,test_generalized_flow}.py.
+frontend: src/app/{globals.css,knowledge-workspace.css,page.tsx,chat/page.tsx,login/page.tsx}, src/lib/{nav.ts,api.ts,auth.tsx,types.ts}, src/components/{Shell,Landing,AdminConsole,StaffConsole,KnowledgeAdmin,LoginForm,Part3.test}.tsx, src/components/workspace/{KnowledgeWorkspace,KnowledgeWorkspace.test,ProcessingLog,Decisions,...}.tsx, src/test/setup.ts.
+docs: PART2_FINAL.md, PART3.md, ROADMAP.md, screenshots/.
+
+## New environment variables (optional)
+`SG_KB_AI_SEMANTIC_ADMIT=0.6`, `SG_KB_AI_RECHECK_UNCHANGED=true` (plus the earlier Part 2 ones listed in docs/PART2_FINAL.md §7).
+
+## Verification status
+Run in this sandbox. All runs use a scripted model or a mocked UI; **no real Qwen was run**, because there is no Ollama here.
+
+| Suite | Result |
+|---|---|
+| backend `tests/knowledge` + `tests/rag` + eval regression | 700 passed, 3 skipped |
+| backend everything else | 1362 passed, 75 skipped (the skips need external services) |
+| PostgreSQL (`tests/db` + folder management + M6 regressions + trace) | 109 passed |
+| `make eval-impact` equivalent | 18 scenarios; precision 1.000, recall 1.000, 16/16 exact replacements, 0 wrong edits |
+| frontend `tsc` / `vitest` / `next build` | clean / 241 passed / built |
+
+Real-model check for you:
+`SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:1.7b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2`
+and the same with `SG_LLM_MODEL_IMPACT=qwen3:4b-instruct-2507-q4_K_M`. That is 15 scenarios, including the reported fee case (14–15), the education removal (11), the past-industry correction (12), the multi-statement correction (13) and the unrelated "offline" passage (8).
+
+Through the application: ask "The fees for gen ai is 20000 rs and that for machine learning is 12000 rs". Both documents should get a proposal, and the Processing log shows two intents.
+
+---
+
 # M6 Part 2 — FINAL (deep review): root causes fixed, prompts rewritten, processing trace
 
 **This is the single final Part 2 ZIP.** It contains every file changed during Part 2 (it supersedes all earlier Part 2 zips). No migration (alembic stays at 0012), no new dependency, no infrastructure change; `.env`, secrets and data are not in it and are never touched.

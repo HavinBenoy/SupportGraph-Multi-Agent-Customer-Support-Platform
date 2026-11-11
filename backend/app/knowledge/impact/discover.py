@@ -156,16 +156,21 @@ def rank(corpus: list[Candidate], s: Settings, spec: ChangeSpec, *, groups: dict
         if v2:
             c.signals.update(evidence=len(c.hits), strong=strong, aliases=sorted({a for h in c.hits for a in h.aliases}))
         c.score = round(W_VALUE * (1.0 if occ else 0.0) + W_SCOPE * scope + W_LEX * lex + W_SEM * sm + (0.1 if strong else 0.0) + (0.05 if c.hits else 0.0), 4)
+        # Independent signals (any one qualifies): discovery is for RECALL - the model and two human reviews decide whether the document really changes.
+        keyed = not spec.key_terms or any(k in doc_words for k in spec.key_terms)       # the word that tells this subject apart ("python" vs "java") is there
+        strong_sem = sm >= s.kb_ai_semantic_admit and keyed          # a sibling subject ("Java" for a "Python" change) is similar in meaning, not affected
         why = ("the old value occurs in it" if occ else "evidence lines were found" if c.hits else "the reference document" if c.doc_id in include else
-               "it names what the change is about" if (spec.general and not facts and lex >= 0.5) else
-               "it is semantically close to the change" if (spec.general and not facts and sm >= s.kb_ai_semantic_floor) else
-               "its title / headings name the subject" if (scope >= 0.99 and spec.entity_terms and (lex >= 0.5 or sm >= s.kb_ai_semantic_floor)) else None)
+               "it names most of what the change is about" if (lex >= 0.5 and keyed) else
+               f"it is semantically close to the change ({sm:.2f})" if strong_sem else
+               "its title / headings name the subject" if (scope >= 0.99 and spec.entity_terms and (lex >= 0.34 or sm >= s.kb_ai_semantic_floor)) else
+               f"it names part of the subject and is semantically related ({sm:.2f})" if (sm >= s.kb_ai_semantic_floor and (lex > 0 or scope > 0) and keyed) else None)
         if why:
             out.append(c)
             c.signals["why"] = why
         elif lex > 0 or scope > 0 or sm >= 0.7 * s.kb_ai_semantic_floor:
             T.event("discovery", "not_discovered", c.doc_id, score=c.score, signals={k: c.signals[k] for k in ("value", "scope", "lexical", "semantic")},
-                    why=f"too weak: subject words {lex:.0%} of the request (needs 50%), semantic {sm:.2f} (needs {s.kb_ai_semantic_floor:.2f}), no old value found")
+                    why=f"too weak: subject words {lex:.0%} of the request (needs 50%), semantic {sm:.2f} (needs {s.kb_ai_semantic_admit:.2f} alone, or "
+                        f"{s.kb_ai_semantic_floor:.2f} with a subject word), no old value or evidence line")
     out.sort(key=lambda c: (-c.score, c.doc_id))
     silent = [c.doc_id for c in corpus if c not in out and not (c.signals["lexical"] > 0 or c.signals["scope"] > 0 or c.signals["semantic"] >= 0.7 * s.kb_ai_semantic_floor)]
     T.event("discovery", "summary", documents=len(corpus), nominated=min(len(out), s.kb_ai_max_candidates), over_limit=max(0, len(out) - s.kb_ai_max_candidates),

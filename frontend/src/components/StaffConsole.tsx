@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useUrlParam } from "@/lib/nav";
 import type { Approval, EscalationDetail, EscalationRow } from "@/lib/types";
 import { LiveCalls } from "./LiveCalls";
 import { MyInterventions } from "./MyInterventions";
@@ -14,10 +15,13 @@ const when = (iso: string) => new Date(iso).toLocaleString();
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
 
 export function StaffConsole() {
-  const [tab, setTab] = useState<Tab>("escalations");
+  const [t, setT] = useUrlParam("tab", "escalations");
+  const tab = (["escalations", "approvals", "calls", "feedback", "knowledge"].includes(t ?? "") ? t : "escalations") as Tab;
+  const setTab = (v: Tab) => setT(v);
   return (
     <div className="console">
-      <h1>Staff console</h1>
+      <header className="page-head"><div><p className="eyebrow">Staff</p><h1 className="page-title">Staff console</h1>
+        <p>Escalations, approvals, live calls and the knowledge base in one place.</p></div></header>
       <div role="tablist" aria-label="Queues" className="tabs">
         <button role="tab" aria-selected={tab === "escalations"} onClick={() => setTab("escalations")}>Escalations</button>
         <button role="tab" aria-selected={tab === "approvals"} onClick={() => setTab("approvals")}>Make-up approvals</button>

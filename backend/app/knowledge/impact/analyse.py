@@ -12,7 +12,7 @@ import hashlib
 import re
 import logging
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import replace, asdict, dataclass, field
 
 from sqlalchemy import delete, select, update
 
@@ -26,7 +26,7 @@ from app.knowledge.impact import discover as disc
 from app.knowledge.impact.discover import Candidate
 from app.knowledge.impact.aliases import expand
 from app.knowledge.impact.evaluate import (DocResult, Evaluation, ImpactModel, apply_edits, context_of, gather, validate)
-from app.knowledge.impact.spec import ChangeSpec, Question, are_siblings, entity_terms_from, spec_from_edit
+from app.knowledge.impact.spec import split_intents, ChangeSpec, Question, are_siblings, entity_terms_from, spec_from_edit
 
 log = logging.getLogger(__name__)
 ALL = "All of them"
@@ -95,6 +95,26 @@ def generalize(spec: ChangeSpec, description: str, restated: str = "") -> Change
     if not terms or vague(f"{description} {restated}"):
         return None
     return spec.model_copy(update={"general": True, "entity_terms": terms, "summary": (description + (" | " + restated if restated else ""))[:600]})
+
+
+_PRONOUN = re.compile(r"\b(?:he|she|they|him|her|his|their|it|its)\b", re.I)
+
+
+def build_intents(inp: Input, model: ImpactModel) -> list[ChangeSpec]:
+    """One spec per independent change intent of the description (spec.split_intents). A manual edit (workflow A) or a single intent keeps the one-spec path. An intent that
+    refers back with a pronoun ("... and add that he holds an MTech") borrows the subject words of the intent before it."""
+    if inp.primary:
+        return [build_spec(inp, model)]
+    parts = split_intents(inp.description)
+    if len(parts) < 2:
+        return [build_spec(inp, model)]
+    out: list[ChangeSpec] = []
+    for part in parts:
+        sp = build_spec(replace(inp, description=part), model)
+        if out and _PRONOUN.search(part):
+            sp = sp.model_copy(update={"entity_terms": list(dict.fromkeys(sp.entity_terms + out[-1].entity_terms))[:12]})
+        out.append(sp.model_copy(update={"summary": part[:600]}))
+    return out
 
 
 def build_spec(inp: Input, model: ImpactModel) -> ChangeSpec:
@@ -191,56 +211,120 @@ def analyse(tenant_id: str, request_id: str, attempt: int, s: Settings, model: I
             settings={"discovery": s.kb_ai_discovery, "judge": s.kb_ai_judge, "thinking": s.kb_ai_judge_thinking, "context_tokens": s.kb_ai_context_tokens,
                       "max_output": s.kb_ai_judge_max_tokens, "num_ctx": s.kb_ai_judge_num_ctx, "semantic_check": s.kb_ai_semantic_check, "retries": s.kb_ai_edit_retries},
             text={"description": inp.description})
-    spec = build_spec(inp, model)
-    T.event("understanding", "value_change" if spec.actionable() else "other_change", facts=[{"attribute": f.attribute, "old": f.old_value, "new": f.new_value} for f in spec.actionable()],
-            terms=spec.entity_terms, aliases=[a for a, _ in spec.alias_pairs][:10])
-    if not spec.actionable():
-        # Not a value replacement ("add ...", "remove ...", "now also ...", a rewrite): the language model reads the relevant sections and drafts the revision. Only a description
-        # that names nothing to search for, or says nothing about what the change is, cannot be acted on.
-        general = generalize(spec, inp.description, str(inp.answers.get(RESTATE, "")))
-        if general is None:
-            T.event("understanding", "vague", why="the description names no action (add / remove / change to ...) or no subject: a question is asked, no model edit is attempted")
-            qs = [Question(id=RESTATE, text="The description does not say what should change or where. Describe it with the subject (course, person, policy ...) and what to add, remove or change.", options=[])]
-            return {"outcome": "clarify", "spec": spec, "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": []}
-        spec = general
-        T.event("understanding", "general_change", terms=spec.entity_terms, why="not a value replacement: the model reads the sections and drafts the revision")
+    intents = build_intents(inp, model)
+    ready: list[ChangeSpec] = []
+    for k, spec in enumerate(intents, 1):
+        T.event("understanding", "value_change" if spec.actionable() else "other_change", intent=k, of=len(intents),
+                facts=[{"attribute": f.attribute, "old": f.old_value, "new": f.new_value} for f in spec.actionable()], terms=spec.entity_terms,
+                aliases=[a for a, _ in spec.alias_pairs][:10], text={"intent": spec.summary})
+        if not spec.actionable():
+            # Not a value replacement ("add ...", "remove ...", "now also ...", a rewrite): the language model reads the relevant sections and drafts the revision. Only a
+            # description that names nothing to search for, or says nothing about what the change is, cannot be acted on.
+            general = generalize(spec, spec.summary or inp.description, str(inp.answers.get(RESTATE, "")))
+            if general is None:
+                T.event("understanding", "vague", intent=k, why="the intent names no action (add / remove / change to ...) or no subject: it is not acted on")
+                continue
+            spec = general
+            T.event("understanding", "general_change", intent=k, terms=spec.entity_terms, why="not a value replacement: the model reads the sections and drafts the revision")
+        ready.append(spec)
+    if not ready:
+        qs = [Question(id=RESTATE, text="The description does not say what should change or where. Describe it with the subject (course, person, policy ...) and what to add, remove or change.", options=[])]
+        return {"outcome": "clarify", "spec": intents[0], "questions": qs, "results": [], "discovered": 0, "rounds": [], "learned": [], "intents": []}
     _progress(tenant_id, request_id, attempt, an, "discovering")
-    with session_scope() as db:
-        cands, report = disc.discover_with_report(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids), include={inp.reference.doc_id} if inp.reference else set())
+    # Discovery per intent (an intent that finds nothing never hides the others); a document nominated by several intents is evaluated once per intent and the results merged.
+    by_doc: dict[str, list[tuple[int, ChangeSpec, Candidate]]] = {}
+    rounds, learned, summaries = [], [], []
+    for k, spec in enumerate(ready, 1):
+        with session_scope() as db:
+            cands, report = disc.discover_with_report(db, tenant_id, s, spec, embedder=embedder, exclude=set(inp.primary_ids),
+                                                      include={inp.reference.doc_id} if inp.reference else set())
+        T.event("intent", "discovered", intent=k, of=len(ready), documents=[c.doc_id for c in cands], why=spec.summary[:200] if len(ready) > 1 else None)
+        summaries.append({"intent": k, "text": spec.summary[:300], "facts": [{"attribute": f.attribute, "old": f.old_value, "new": f.new_value} for f in spec.actionable()],
+                          "general": spec.general, "documents": [c.doc_id for c in cands]})
+        rounds += report.rounds
+        learned += report.learned
+        for c in cands:
+            by_doc.setdefault(c.doc_id, []).append((k, spec, c))
     results: list[tuple[Candidate, DocResult]] = []
+    per_intent: dict[int, list[tuple[Candidate, DocResult]]] = {}
     questions: list[Question] = []
-    total = len(cands)
-    for n, cand in enumerate(cands):
-        _progress(tenant_id, request_id, attempt, an, "evaluating", n, total)
-        ctx = gather(spec, cand, s, None)
-        restrict, q = _heading_questions(spec, cand, ctx, inp.answers)
-        if q is not None:
-            T.event("passages", "question", cand.doc_id, why="several sections could be meant; the staff member is asked which", headings=[o for o in getattr(q, "options", [])][:8])
-            questions.append(q)
-            continue
-        if restrict is not None:
-            ctx = gather(spec, cand, s, restrict)
-        if not ctx:
-            T.event("passages", "no_passage", cand.doc_id, why="no line of the document (or the heading above it) names what the change is about")
-            results.append((cand, DocResult(cand.doc_id, "not_relevant", 0.0, "Nothing in this document concerns the change.")))
-            continue
-        T.event("passages", "selected", cand.doc_id, count=len(ctx), headings=list(dict.fromkeys(pc.passage.heading for pc in ctx))[:8],
-                how=[getattr(pc.hit, "how", None) or ("general" if spec.general else "value") for pc in ctx][:12], text={"lines": "\n".join(pc.passage.text for pc in ctx)})
-        judge = getattr(model, "judge", None)
-        if judge is None:
-            T.event("context", "model_not_invoked", cand.doc_id, why="the configured impact model has no section editor (rules-only mode)")
-        if judge is not None:
-            _progress(tenant_id, request_id, attempt, an, "reading", n, total)
-            ctx = judge(spec, cand, ctx, s)                                  # the section judge (a model call, outside any transaction); a no-op without a model
-        ev: Evaluation = model.evaluate(spec, cand, ctx)                 # outside any transaction
-        res = validate(spec, cand, ctx, ev, s)
-        results.append((cand, res))
-        T.event("classification", res.classification, cand.doc_id, confidence=res.confidence, edits=[e.kind for e in res.edits], reason=res.reason[:300],
-                passages=[{"verdict": p.get("verdict"), "judge": p.get("judge"), "why": (p.get("reason") or "")[:200]} for p in res.passages][:12], uncertainty=[u[:200] for u in res.uncertainty][:6])
-    questions += _resolve_siblings(spec, results, inp.answers)
+    total = sum(len(v) for v in by_doc.values())
+    n = 0
+    for doc_id, entries in by_doc.items():
+        parts: list[DocResult] = []
+        for k, spec, cand in entries:
+            _progress(tenant_id, request_id, attempt, an, "evaluating", n, total)
+            n += 1
+            res, q = _evaluate_one(tenant_id, request_id, attempt, an, s, model, spec, cand, inp, n, total, intent=k)
+            if q is not None:
+                questions.append(q)
+                continue
+            parts.append(res)
+            per_intent.setdefault(k, []).append((cand, res))
+        if parts:
+            merged = parts[0] if len(parts) == 1 else merge_results(parts, [k for k, _, _ in entries])
+            results.append((entries[0][2], merged))
+    for k, spec in enumerate(ready, 1):
+        questions += _resolve_siblings(spec, per_intent.get(k, []), inp.answers)
+    for sm in summaries:
+        sm["outcomes"] = {c.doc_id: r.classification for c, r in per_intent.get(sm["intent"], [])}
     _progress(tenant_id, request_id, attempt, an, "finishing", total, total)
-    return {"outcome": "clarify" if questions else "done", "spec": spec, "questions": questions, "results": results, "discovered": total,
-            "rounds": report.rounds, "learned": report.learned}
+    return {"outcome": "clarify" if questions else "done", "spec": ready[0], "questions": questions, "results": results, "discovered": len(by_doc),
+            "rounds": rounds, "learned": learned, "intents": summaries if len(ready) > 1 else [], "specs": [x.model_dump() for x in ready]}
+
+
+def _evaluate_one(tenant_id, request_id, attempt, an, s, model, spec, cand, inp, n, total, *, intent: int):
+    """One document against one intent: passages -> (model) section reading -> evaluation -> validation. Returns (result, question)."""
+    ctx = gather(spec, cand, s, None)
+    restrict, q = _heading_questions(spec, cand, ctx, inp.answers)
+    if q is not None:
+        T.event("passages", "question", cand.doc_id, intent=intent, why="several sections could be meant; the staff member is asked which",
+                headings=[o for o in getattr(q, "options", [])][:8])
+        return None, q
+    if restrict is not None:
+        ctx = gather(spec, cand, s, restrict)
+    if not ctx:
+        T.event("passages", "no_passage", cand.doc_id, intent=intent, why="no line of the document (or the heading above it) names what the change is about")
+        return DocResult(cand.doc_id, "not_relevant", 0.0, "Nothing in this document concerns the change."), None
+    T.event("passages", "selected", cand.doc_id, intent=intent, count=len(ctx), headings=list(dict.fromkeys(pc.passage.heading for pc in ctx))[:8],
+            how=[getattr(pc.hit, "how", None) or ("general" if spec.general else "value") for pc in ctx][:12], text={"lines": "\n".join(pc.passage.text for pc in ctx)})
+    judge = getattr(model, "judge", None)
+    if judge is None:
+        T.event("context", "model_not_invoked", cand.doc_id, intent=intent, why="the configured impact model has no section editor (rules-only mode)")
+    else:
+        _progress(tenant_id, request_id, attempt, an, "reading", n, total)
+        ctx = judge(spec, cand, ctx, s)                                      # the section editor (a model call, outside any transaction); a no-op without a model
+    ev: Evaluation = model.evaluate(spec, cand, ctx)                         # outside any transaction
+    res = validate(spec, cand, ctx, ev, s)
+    T.event("classification", res.classification, cand.doc_id, intent=intent, confidence=res.confidence, edits=[e.kind for e in res.edits], reason=res.reason[:300],
+            passages=[{"verdict": p.get("verdict"), "judge": p.get("judge"), "why": (p.get("reason") or "")[:200]} for p in res.passages][:12],
+            uncertainty=[u[:200] for u in res.uncertainty][:6])
+    return res, None
+
+
+_ORDER = {"definite": 3, "potential": 2, "related_no_change": 1, "not_relevant": 0}
+
+
+def merge_results(parts: list[DocResult], intents: list[int]) -> DocResult:
+    """One document, several intents: the edits of all of them (never overlapping: the earlier intent wins and the overlap is reported), every passage, and a classification
+    that is `definite` only when every edit is."""
+    from app.knowledge.impact.evaluate import _non_overlapping
+
+    best = max(parts, key=lambda r: _ORDER[r.classification])
+    out = DocResult(best.doc_id, best.classification, max(r.confidence for r in parts),
+                    " | ".join(f"Intent {k}: {r.reason}" for k, r in zip(intents, parts) if r.reason)[:1200])
+    for k, r in zip(intents, parts):
+        out.edits += r.edits
+        out.uncertainty += [f"(intent {k}) {u}" for u in r.uncertainty]
+        out.passages += [{**p, "intent": k} for p in r.passages]
+        for f, c in r.flags.items():
+            out.flags[f] = out.flags.get(f, 0) + c
+    out.edits = _non_overlapping(out)
+    for i, p in enumerate(out.passages):
+        p["n"] = i
+    if out.edits:
+        out.classification = "definite" if all(e.verdict == "definite" for e in out.edits) and not out.uncertainty else "potential"
+    return out
 
 
 def _item_for(tenant_id: str, request_id: str, s: Settings, cand: Candidate, res: DocResult) -> KbChangeItem:
@@ -268,7 +352,7 @@ def _persist(tenant_id: str, request_id: str, attempt: int, s: Settings, model: 
     an = dict(an)
     an.update(progress={"stage": "clarify" if clarify else "done", "done": out["discovered"], "total": out["discovered"]}, summary=summary, error=None, model=model.name,
               prompt_version=getattr(model, "prompt_version", "impact-v1"), spec=spec.model_dump(), questions=[q.model_dump() for q in out["questions"]],
-              trace=out.get("trace"))
+              trace=out.get("trace"), intents=out.get("intents") or [], specs=out.get("specs") or [spec.model_dump()])
     status = "awaiting_clarification" if clarify else "awaiting_decisions"
     with session_scope() as db:
         r = db.get(KbChangeRequest, (tenant_id, request_id))

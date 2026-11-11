@@ -185,6 +185,15 @@ def _slot_change(rest: str) -> tuple[str, str, str] | None:
     return None
 
 
+def _same_head(slot: tuple[str, str, str]) -> tuple[str, str, str] | None:
+    subj, _, new = slot
+    a = re.sub(r"^(?:the|all|our)\s+", "", subj.strip(), flags=re.I).split()
+    b = new.split()
+    if len(a) >= 2 and len(b) >= 1 and a[-1].lower().rstrip("s") == b[-1].lower().rstrip("s") and " ".join(a).lower() != new.lower() and len(a) <= 4:
+        return " ".join(a), new, a[-1]
+    return None
+
+
 def parse_rules(description: str, today: date | None = None) -> ChangeSpec:
     """Deterministic parse of "X changed from A to B (starting D)". Finds no facts (and the caller asks staff to rephrase) when it cannot tell old from new."""
     text = " ".join((description or "").split())
@@ -216,6 +225,12 @@ def parse_rules(description: str, today: date | None = None) -> ChangeSpec:
         facts.append(Fact(attribute=(attribute_terms_from(rest) or [""])[0], old_value=old, new_value=new, effective=eff))
     elif not (old and new):
         slot = _slot_change(rest.replace("\u2024", "."))
+        pair2 = _same_head(slot) if slot else None
+        if pair2:
+            # "change online classes to hybrid classes": both sides end in the same noun, so the left side is the OLD value, not a subject (it was read as subject "online")
+            o2, n2, head = pair2
+            facts.append(Fact(attribute=head, old_value=o2, new_value=n2, effective=eff))
+            return ChangeSpec(summary=text[:300], facts=facts, entity_terms=[], wants_all=bool(re.search(r"\b(all|every|both|each|everywhere)\b", text, re.I)))
         if slot:
             subj, attr, new_v = slot
             facts.append(Fact(attribute=attr, old_value=None, new_value=new_v.replace("\u2024", "."), effective=eff))
@@ -226,6 +241,33 @@ def parse_rules(description: str, today: date | None = None) -> ChangeSpec:
         if v:
             scoped = scoped.replace(v, " ")
     return ChangeSpec(summary=text[:300], facts=facts, entity_terms=entity_terms_from(scoped), wants_all=bool(re.search(r"\b(all|every|both|each|everywhere)\b", text, re.I)))
+
+
+_HAS_VALUE = re.compile(r"\d|\b(?:to|as|now|into|instead|no longer)\b", re.I)
+_ACTION_START = re.compile(r"^(?:please\s+)?(?:add|remove|delete|drop|change|update|replace|set|mention|include)\b", re.I)
+_ANAPHOR = re.compile(r"^\s*(?:and\s+)?(?:that|those|the same|the one|it)\s+(?=for|of|in|at)\b", re.I)
+_CLAUSE_SPLIT = re.compile(r"\s*(?:;|\.\s+(?=[A-Za-z])|,?\s+and\s+also\s+|,\s+also\s+|,?\s+and\s+(?=(?:that|those|the|for|in|of|add|remove|delete|drop|change|update|replace|set|mention|include|[A-Z0-9])\b)|,?\s+while\s+|,?\s+whereas\s+)\s*")
+
+
+def split_intents(description: str) -> list[str]:
+    """Independent change intents in one request: "The fees for gen ai is 20000 rs and that for machine learning is 12000 rs" -> ["The fees for gen ai is 20000 rs",
+    "fees for machine learning is 12000 rs"]. A clause is split off only when BOTH sides state a value / target of their own (a number, "to X", "now ..."), so a single change
+    that merely mentions two things ("Python and Java fees are now 9000") stays one intent. An anaphoric second clause ("that for ...") borrows the attribute words of the
+    first. Returns [description] when there is nothing to split."""
+    text = " ".join((description or "").split())
+    protected = _TITLES.sub(lambda m: m.group(1) + "\u2024", text)
+    parts = [p.strip(" ,.") for p in _CLAUSE_SPLIT.split(protected) if p and p.strip(" ,.")]
+    if len(parts) < 2 or not all(_HAS_VALUE.search(p) or _ACTION_START.match(p) for p in parts):
+        return [text]
+    out: list[str] = []
+    for p in parts:
+        p = p.replace("\u2024", ".")
+        if out and _ANAPHOR.match(p):
+            attr = attribute_terms_from(out[0])
+            if attr:
+                p = _ANAPHOR.sub(attr[0] + " ", p, count=1)
+        out.append(p)
+    return out[:6]
 
 
 def spec_from_edit(title: str, path: str, diff_body: list[dict], description: str | None = None) -> ChangeSpec:

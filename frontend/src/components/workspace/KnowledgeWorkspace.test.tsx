@@ -206,23 +206,81 @@ describe("Knowledge workspace — administrators", () => {
     mountAdmin();
     await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
     await userEvent.click(await screen.findByRole("button", { name: "Open folder Instalments" }));
-    await userEvent.type(screen.getByLabelText("New folder here"), "Monthly");
+    await userEvent.click(screen.getByRole("button", { name: "New sub-folder" }));
+    await userEvent.type(screen.getByLabelText("New folder inside “Instalments”"), "Monthly");
     await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
     await waitFor(() => expect(calls(f, "POST", "/api/admin/knowledge/folders")).toHaveLength(1));
     expect(JSON.parse(String((calls(f, "POST", "/api/admin/knowledge/folders")[0][1] as RequestInit).body))).toEqual({ name: "Monthly", parent_id: "f_2" });
-    const rn = screen.getByLabelText("Rename this folder");
+    await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const rn = screen.getByLabelText("New name");
     await userEvent.clear(rn);
     await userEvent.type(rn, "Payment plans");
-    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await userEvent.click(within(screen.getByRole("form", { name: "Rename folder" })).getByRole("button", { name: "Rename" }));
     await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/folders/f_2")).toHaveLength(1));
     expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/folders/f_2")[0][1] as RequestInit).body))).toEqual({ name: "Payment plans", expected_row_version: 3 });
+  });
+
+  it("moves a folder (never into itself or its own sub-folders) with its version token", async () => {
+    const f = adminWorld({ "PUT /api/admin/knowledge/folders/f_1/parent": () => ({ json: {} }) });
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Move" }));
+    const dest = screen.getByLabelText("Destination folder");
+    expect(within(dest).queryByRole("option", { name: "Fees/Instalments" })).toBeNull();               // its own sub-folder is not offered
+    expect(within(dest).getByRole("option", { name: "Knowledge base (top level)" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Move here" }));
+    await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/folders/f_1/parent")).toHaveLength(1));
+    expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/folders/f_1/parent")[0][1] as RequestInit).body))).toEqual({ parent_id: null, expected_row_version: 0 });
+  });
+
+  it("deletes only an empty folder, after a confirmation", async () => {
+    const f = adminWorld({ "DELETE /api/admin/knowledge/folders/f_2": () => ({ json: { folder_id: "f_2", deleted: true } }) });
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const full = screen.getByRole("alertdialog");
+    expect(full).toHaveTextContent("still contains 1 folder(s) and 1 document(s)");
+    expect(within(full).getByRole("button", { name: "Delete folder" })).toBeDisabled();
+    await userEvent.click(within(full).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open folder Instalments" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete folder" }));
+    await waitFor(() => expect(calls(f, "DELETE", "/api/admin/knowledge/folders/f_2")).toHaveLength(1));
+    expect(String(calls(f, "DELETE", "/api/admin/knowledge/folders/f_2")[0][0])).toContain("expected_row_version=3");
+  });
+
+  it("keeps the view in the URL: Back returns from a document to its folder and from a folder to the top level", async () => {
+    adminWorld();
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
+    expect(window.location.search).toContain("f=f_1");
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
+    expect(window.location.search).toContain("kb=doc") ;
+    await userEvent.click(await screen.findByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("heading", { name: "Fees" })).toBeInTheDocument();
+    window.history.back();
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument();
+  });
+
+  it("offers a new document inside the current folder and the document administration view", async () => {
+    adminWorld({
+      "GET /api/admin/knowledge/documents": () => ({ json: { items: [], total: 0, page: 1, page_size: 50 } }),
+      "GET /api/admin/knowledge/meta": () => ({ json: { categories: ["fees"], limits: { max_bytes: 200000, max_chunks: 300 }, embedding_model: "x", unmanaged_disk_documents: [] } }),
+      "GET /api/admin/knowledge/feedback": () => ({ json: { items: [], total: 0 } }),
+    });
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
+    await userEvent.click(screen.getByRole("button", { name: "New document here" }));
+    expect(await screen.findByRole("heading", { name: "New document in “Fees”" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Drafts & document administration");
   });
 
   it("surfaces a duplicate-folder conflict from the server", async () => {
     adminWorld({ "POST /api/admin/knowledge/folders": () => ({ status: 409, json: { detail: "a folder with this name already exists here" } }) });
     mountAdmin();
     await screen.findByRole("button", { name: "Open folder Fees" });
-    await userEvent.type(screen.getByLabelText("New folder here"), "Fees");
+    await userEvent.click(screen.getByRole("button", { name: "New folder" }));
+    await userEvent.type(screen.getByLabelText("New top-level folder"), "Fees");
     await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
   });

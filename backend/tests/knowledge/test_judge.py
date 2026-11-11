@@ -330,7 +330,7 @@ def test_a_model_found_change_in_a_line_the_rules_never_nominated_is_reviewable(
 def test_calls_are_capped_cached_and_a_second_run_costs_nothing():
     chat, r, _ = run(DS, "santhosh sir now also holds an MTech in AI", lambda p: fenced(DS.strip("\n")))
     chat2, _, _ = run(DS, "santhosh sir now also holds an MTech in AI", lambda p: fenced("zzz"))
-    assert len(chat.calls) == 1 and not chat2.calls
+    assert len(chat.calls) == 2 and "returned the section unchanged" in chat.calls[1] and not chat2.calls      # one second look at an unchanged answer, then cached
     many = "\n\n".join(f"## S{i}\n\nMachine Learning faculty line {i} " + "filler " * 40 for i in range(10))
     chat3, r3, _ = run(many, "santhosh sir now also teaches machine learning", lambda p: fenced("x"), kb_ai_max_sections=2, kb_ai_context_tokens=300, kb_ai_edit_retries=0)
     assert len(chat3.calls) <= 2 and any("not read" in u for u in r3.uncertainty)
@@ -363,7 +363,7 @@ def test_gateway_separates_the_output_limit_from_the_ollama_window():
     chat = get_judge_chat(Settings(llm_provider="ollama", kb_ai_judge="uncertain", kb_ai_judge_max_tokens=3000, kb_ai_judge_num_ctx=10000))
     assert chat.reasoning is True and chat.num_predict == 3000 and chat.num_ctx == 10000
     chk = get_check_chat(Settings(llm_provider="ollama"))
-    assert chk.reasoning is False and chk.num_predict == 200
+    assert chk.reasoning is False and chk.num_predict == 400
 
 
 def test_a_general_change_without_the_section_editor_is_reported_not_crashed():

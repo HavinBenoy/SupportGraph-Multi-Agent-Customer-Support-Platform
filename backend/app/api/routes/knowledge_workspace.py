@@ -183,6 +183,22 @@ async def rename_folder(folder_id: FOLDER, body: FolderRenameIn, p: Principal = 
     return await asyncio.to_thread(_guard, lambda db: workspace.rename_folder(db, p.tenant_id, p.subject, folder_id, body.name, expected_row_version=body.expected_row_version))
 
 
+class FolderMoveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent_id: str | None = Field(max_length=32, pattern=r"^f_[0-9a-f]+$")         # required, may be null (the top level)
+    expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+@admin_router.put("/folders/{folder_id}/parent")
+async def move_folder(folder_id: FOLDER, body: FolderMoveIn, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: workspace.move_folder(db, p.tenant_id, p.subject, folder_id, body.parent_id, expected_row_version=body.expected_row_version))
+
+
+@admin_router.delete("/folders/{folder_id}")
+async def delete_folder(folder_id: FOLDER, expected_row_version: Annotated[int | None, Query(ge=0)] = None, p: Principal = Depends(require_admin)) -> dict:
+    return await asyncio.to_thread(_guard, lambda db: workspace.delete_folder(db, p.tenant_id, p.subject, folder_id, expected_row_version=expected_row_version))
+
+
 @admin_router.put("/documents/{doc_id}/folder")
 async def move_document(doc_id: DOC, body: MoveIn, p: Principal = Depends(require_admin)) -> dict:
     return await asyncio.to_thread(_guard, lambda db: workspace.move_document(db, p.tenant_id, p.subject, doc_id, body.folder_id, expected_row_version=body.expected_row_version))

@@ -4,7 +4,7 @@ One request on your own text:
     cd backend
     ../.venv/bin/python scripts/judge_probe.py -d "remove the age restriction from eligibility" --file section.md
     ../.venv/bin/python scripts/judge_probe.py -d "..." --text $'Machine Learning faculty is Santhosh sir\\nHe has a work experience of 3 years.'
-The thirteen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
+The fifteen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
 ambiguous request, tables / headings / lists preserved), against the real model, with the real validator:
     ../.venv/bin/python scripts/judge_probe.py --suite
     SG_LLM_MODEL_IMPACT=qwen3:4b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2          # another model; SG_KB_AI_JUDGE_THINKING=false to compare without thinking
@@ -73,6 +73,10 @@ SUITE = [
      lambda st, new, old: st == "revised" and "IT." not in new and "echanical" in new and "M.Tech" in new, "IT -> Mechanical in the 'Previously' sentence, nothing else"),
     ("13 (reported C) correct several statements", "Santhosh sir actually has only a B.Tech in AI and worked in a mechanical company as a support officer.", ONE, "Machine Learning",
      lambda st, new, old: st == "revised" and "M.Tech" not in new and "B.Tech in AI" in new and "support officer" in new and "3 years" in new, "M.Tech replaced by B.Tech, IT replaced"),
+    ("14 (reported) gen ai fee, intent 1 of 2", "The fees for gen ai is 20000 rs", "# course\n\nFcaulty of gen ai is vinu sir. He does have Bsc in Data science.Fees of gen ai course is 25000 rupees\n",
+     "Fcaulty", lambda st, new, old: st == "revised" and "20000" in new and "25000" not in new and "vinu sir" in new, "25000 -> 20000, the rest unchanged"),
+    ("15 (reported) ML fee, intent 2 of 2", "fees for machine learning is 12000 rs", ONE.replace("Data Science.\n", "Data Science. Fee for Machine learning course is 9999 rupees.\n"),
+     "Machine Learning", lambda st, new, old: st == "revised" and "12000" in new and "9999" not in new and "M.Tech" in new, "9999 -> 12000 only"),
     ("10 structure preserved", "change online classes to hybrid classes", DS, "- Online", lambda st, new, old: st == "revised" and new.count("## ") == 3 and "| Course | Fee |\n|---|---|" in new, "headings, list, table intact"),
 ]
 

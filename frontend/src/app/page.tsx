@@ -1,5 +1,5 @@
-import { ChatWidget } from "@/components/ChatWidget";
+import { Landing } from "@/components/Landing";
 
 export default function Home() {
-  return <ChatWidget />;
+  return <Landing />;
 }

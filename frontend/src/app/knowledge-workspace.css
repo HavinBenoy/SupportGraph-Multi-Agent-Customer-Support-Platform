@@ -130,3 +130,12 @@
 .kw-trace ol { margin: 0.5rem 0 0; padding-left: 1.4rem; display: grid; gap: 0.3rem; }
 .kw-trace li.kw-trace-bad > .kw-chip { border-color: #d29922; color: #d29922; }
 .kw-trace pre { white-space: pre-wrap; max-height: 16rem; overflow: auto; font-size: 0.75rem; }
+
+/* Part 3: navigation and folder management */
+.kw-crumbbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 6px; }
+.kw-backbar { margin: 0 0 10px; }
+.kw-panel { margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--kw-line); border-radius: 12px; background: var(--kw-panel); }
+.kw-empty { color: var(--kw-muted); border: 1px dashed var(--kw-line-2); border-radius: 12px; padding: 20px; text-align: center; margin-top: 12px; }
+.kw-btn.danger { border-color: rgba(248, 113, 113, .45); color: #fecaca; background: rgba(239, 68, 68, .12); }
+.kw-btn.danger:hover:not(:disabled) { background: rgba(239, 68, 68, .22); }
+.kw .dialog h2 { margin-top: 0; }

@@ -39,6 +39,19 @@ Every analysis attempt records a trace; it is stored in the request (`analysis.t
 
 `SG_KB_AI_TRACE_CONTENT=true` (debugging, default off) also stores the selected lines, the sections, the exact prompt and the raw answer in the stored trace (truncated to 4000 characters each) - never in the log.
 
+## 0b. Final patch-up (after the real Qwen probe runs and the staff-console failure of 2026-11-11)
+
+Recall first: discovery decides only which documents the model READS. Whether a document changes is decided by the model, the validator and two people.
+
+| Problem (evidence) | Root cause | Fix |
+|---|---|---|
+| "The fees for gen ai is 20000 rs and that for machine learning is 12000 rs" found **no** document; the log showed semantic 0.72 / 0.83 and "too weak" | (1) The request was parsed as ONE change "fees 20000 → 12000", because two amounts were read as old → new, so the scan looked for "20000" everywhere. (2) A value change was admitted only with the old value, an evidence line, or the subject in the title/headings: the subject words in the body (50%) and the semantic score could not qualify a document on their own. | **Intent decomposition** (`spec.split_intents`): clauses that each state their own value or action become separate intents. "that for …" borrows the attribute, and "… and add that he …" borrows the subject. Each intent is discovered, evaluated and traced on its own (`analyse.build_intents`, `merge_results`), one empty intent never hides the others, and the post-publication check runs per intent. **Independent discovery signals** (`discover.rank`): any one qualifies — old value; evidence line; at least 50% of the subject words; semantic ≥ `SG_KB_AI_SEMANTIC_ADMIT` (0.6); semantic ≥ floor plus a subject word; title/headings. A document that lacks the word telling the subject apart ("python" vs "java", from titles) is not admitted by the lexical or semantic signals. |
+| "Change online classes to hybrid classes" turned "Classes are conducted offline" into "… hybrid" (real Qwen, both models) | It was parsed as subject "online", new value "hybrid classes" (no old value), so nothing tied the edit to "online". | "change A to B" where A and B share their head noun is an old → new pair (`spec._same_head`). The validator rejects a run that writes the new value into text that never contained the old one (`edit.check_op` 4a). The test asserts the unrelated passage is examined but not proposed. |
+| Education removal unchanged in 2 of 4 (1.7B) and 2 of 2 (4B instruct) runs | Small models return "unchanged" for removals worded unlike the text. | The prompt lists the lines search found. One **second look** on an unchanged answer to a removal / correction / general change (`SG_KB_AI_RECHECK_UNCHANGED`); whatever it then proposes still passes every check. |
+| "only a B.Tech": the model kept "M.Tech" or wrote "He do not have a M.Tech"; the verifier said PASS | A yes/no verifier is easily satisfied. | The verifier fills a **checklist** (REQUESTED / MISSING / CONTRADICTING / UNRELATED / VERDICT). A PASS next to a non-empty item counts as FAIL, and its reason goes back to the model (one retry). Turning a statement into a negation is flagged. The second check now always runs for corrections, removals and "only". |
+
+New settings: `SG_KB_AI_SEMANTIC_ADMIT` (0.6), `SG_KB_AI_RECHECK_UNCHANGED` (true). Tests: `tests/knowledge/test_m6_regressions.py`. The probe has scenarios 14–15 (the two fee intents).
+
 ## 1. Where the value-only assumptions were (all removed)
 
 | Layer | Assumption | Now |

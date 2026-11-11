@@ -109,6 +109,76 @@ def rename_folder(db: Session, tenant_id: str, actor: str, folder_id: str, name,
     return _folder_view(fmap[folder_id], fmap) | {"previous_name": old}
 
 
+def _subtree(fmap: dict[str, KbFolder], folder_id: str) -> set[str]:
+    out, todo = {folder_id}, [folder_id]
+    while todo:
+        cur = todo.pop()
+        for f in fmap.values():
+            if f.parent_id == cur and f.folder_id not in out:
+                out.add(f.folder_id)
+                todo.append(f.folder_id)
+    return out
+
+
+def _height(fmap: dict[str, KbFolder], folder_id: str) -> int:
+    kids = [f.folder_id for f in fmap.values() if f.parent_id == folder_id]
+    return 1 + max((_height(fmap, k) for k in kids), default=0)
+
+
+def move_folder(db: Session, tenant_id: str, actor: str, folder_id: str, parent_id: str | None, *, expected_row_version: int | None = None) -> dict:
+    """Move a folder (with everything inside it) under another folder, or to the top level (None). Refused: moving into itself or one of its own sub-folders (a cycle),
+    nesting deeper than MAX_DEPTH, or a sibling with the same name at the destination. Compare-and-set on the folder row; audited."""
+    fmap = folders_by_id(db, tenant_id)
+    if folder_id not in fmap:
+        raise NotFound("folder not found")
+    f = fmap[folder_id]
+    if parent_id is not None:
+        if parent_id not in fmap:
+            raise NotFound("destination folder not found")
+        if parent_id in _subtree(fmap, folder_id):
+            raise Invalid("a folder cannot be moved into itself or into one of its own sub-folders")
+    if f.parent_id == parent_id:
+        return _folder_view(f, fmap) | {"unchanged": True}
+    if (_depth(fmap, parent_id) if parent_id else 0) + _height(fmap, folder_id) > MAX_DEPTH:
+        raise Invalid(f"folders can be nested at most {MAX_DEPTH} levels deep")
+    rv = f.row_version if expected_row_version is None else expected_row_version
+    old_parent = f.parent_id
+    try:
+        with db.begin_nested():
+            res = db.execute(KbFolder.__table__.update().where(KbFolder.tenant_id == tenant_id, KbFolder.folder_id == folder_id, KbFolder.row_version == rv)
+                             .values(parent_id=parent_id, parent_key=parent_id or "", row_version=KbFolder.row_version + 1, updated_by=actor[:64], updated_at=store.now()))
+            if res.rowcount != 1:
+                raise Conflict("the folder was changed by someone else: reload and try again")
+            db.flush()
+    except IntegrityError:
+        raise Conflict("a folder with this name already exists in the destination") from None
+    db.expire(f)
+    audit.record(db, tenant_id, actor, "folder_moved", "folder", folder_id, folder_id=folder_id, from_folder=old_parent or "", to_folder=parent_id or "")
+    fmap = folders_by_id(db, tenant_id)
+    return _folder_view(fmap[folder_id], fmap)
+
+
+def delete_folder(db: Session, tenant_id: str, actor: str, folder_id: str, *, expected_row_version: int | None = None) -> dict:
+    """Delete an EMPTY folder. A folder that still holds sub-folders or documents (in any state, archived included) is refused with what is inside, so nothing is ever
+    deleted or orphaned by accident: move or archive the contents first. Folders hold no content, so deleting one never touches a document or a version."""
+    fmap = folders_by_id(db, tenant_id)
+    if folder_id not in fmap:
+        raise NotFound("folder not found")
+    f = fmap[folder_id]
+    rv = f.row_version if expected_row_version is None else expected_row_version
+    if f.row_version != rv:
+        raise Conflict("the folder was changed by someone else: reload and try again")
+    kids = [x for x in fmap.values() if x.parent_id == folder_id]
+    docs = db.execute(select(KbDocPlacement.doc_id).where(KbDocPlacement.tenant_id == tenant_id, KbDocPlacement.folder_id == folder_id)).scalars().all()
+    if kids or docs:
+        raise Conflict(f"the folder is not empty ({len(kids)} folder(s), {len(docs)} document(s)): move them elsewhere first")
+    res = db.execute(KbFolder.__table__.delete().where(KbFolder.tenant_id == tenant_id, KbFolder.folder_id == folder_id, KbFolder.row_version == rv))
+    if res.rowcount != 1:
+        raise Conflict("the folder was changed by someone else: reload and try again")
+    audit.record(db, tenant_id, actor, "folder_deleted", "folder", folder_id, folder_id=folder_id, parent_id=f.parent_id or "", name=f.name)
+    return {"folder_id": folder_id, "deleted": True, "name": f.name}
+
+
 def placements(db: Session, tenant_id: str) -> dict[str, str]:
     return {r[0]: r[1] for r in db.execute(select(KbDocPlacement.doc_id, KbDocPlacement.folder_id).where(KbDocPlacement.tenant_id == tenant_id)).all()}
 

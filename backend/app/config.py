@@ -202,6 +202,7 @@ class Settings(BaseSettings):
     kb_ai_max_candidates: int = Field(default=20, ge=1, le=40)                 # documents evaluated per analysis
     kb_ai_max_passages: int = Field(default=12, ge=1, le=20)                   # passages shown to the model per document
     kb_ai_semantic_floor: float = Field(default=0.3, ge=0, le=1)               # semantic similarity that can nominate a document that lacks the old value
+    kb_ai_semantic_admit: float = Field(default=0.6, ge=0, le=1)              # semantic similarity that ALONE nominates a document (recall: the model and two reviews decide)
     kb_ai_definite_confidence: float = Field(default=0.75, ge=0, le=1)         # below this a "definite" verdict is shown as "potential"
     kb_ai_analysis_stale_s: int = Field(default=900, ge=30, le=86400)          # an analysis stuck in `analysing` this long (crash) may be started again
     # Part 2 recall: "v2" reads every document section by section (aliases, people, table rows, learned old values, several rounds); "v1" is the earlier document-level
@@ -231,6 +232,7 @@ class Settings(BaseSettings):
     kb_ai_max_changed_fraction: float = Field(default=0.6, ge=0.05, le=1)      # more of a section's lines changed than this => the whole revision goes to a person
     kb_ai_max_removed_fraction: float = Field(default=0.5, ge=0.05, le=1)      # more of a section's text removed than this => rejected as an accidental deletion
     kb_ai_edit_retries: int = Field(default=1, ge=0, le=3)                     # a revision that a check rejects or a second check FAILS is asked for ONCE more, with the reasons
+    kb_ai_recheck_unchanged: bool = True                                       # removal / correction / general change returned unchanged although search found lines: one second look
     kb_ai_trace_content: bool = False                                          # store prompts / answers / passage text in the request's processing trace (debugging; never in logs)
     kb_ai_background: bool = True                                              # run analysis and release in a background thread (False = inline; tests)
     llm_model_impact: str = ""

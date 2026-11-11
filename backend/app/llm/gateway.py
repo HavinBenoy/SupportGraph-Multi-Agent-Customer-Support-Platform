@@ -257,7 +257,7 @@ def get_check_chat(settings: Settings | None = None):
         return None
     if s.llm_provider != "ollama":
         return get_chat_model("impact", s)
-    s2 = s.model_copy(update={"llm_thinking": False, "impact_max_output_tokens": 200, "llm_timeout_seconds": min(s.kb_ai_judge_timeout_s, 180.0), "llm_num_ctx": s.kb_ai_judge_num_ctx})
+    s2 = s.model_copy(update={"llm_thinking": False, "impact_max_output_tokens": 400, "llm_timeout_seconds": min(s.kb_ai_judge_timeout_s, 180.0), "llm_num_ctx": s.kb_ai_judge_num_ctx})
     return get_chat_model("impact", s2)
 
 

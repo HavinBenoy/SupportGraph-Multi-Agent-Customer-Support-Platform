@@ -11,6 +11,7 @@ per candidate line what the model decided. (Module name kept from the earlier va
 The model alone can only PROPOSE (potential). Nothing it returns is executed, stored as an edit without these checks, or published without a human."""
 
 import hashlib
+import re
 import logging
 import time
 from collections import OrderedDict
@@ -181,6 +182,9 @@ class Reading:
     retried: bool = False
 
 
+_REMOVAL = re.compile(r"\b(?:remov\w*|delet\w*|drop\w*|take out|no longer|discontinu\w*|withdraw\w*|should not be mentioned)\b", re.I)
+
+
 def _feedback(rd: "Reading") -> str:
     o = rd.outcome
     if rd.state == "invalid":
@@ -206,7 +210,8 @@ def _attempt(chat, check_chat, section: Section, description: str, title: str, r
     if out.state != "revised":
         return rd
     if check_chat is not None and s.kb_ai_semantic_check != "off":
-        risky = bool(out.review or out.rejected or any(h.flags for h in out.hunks))
+        risky = bool(out.review or out.rejected or any(h.flags for h in out.hunks)) or bool(E.CORRECTION_CUES.search(description) or _REMOVAL.search(description)
+                                                                                           or re.search(r"\bonly\b", description, re.I))
         if s.kb_ai_semantic_check == "all" or risky:
             rd.semantic = semantic(check_chat, description, section.text, out.revised, model_name)
             T.event("semantic_check", rd.semantic[0], doc, section=section.heading, why=rd.semantic[1] or None)
@@ -222,6 +227,19 @@ def read_section(chat, check_chat, section: Section, description: str, title: st
         return Reading(section, "unavailable", "the section contains a code fence, which the answer format cannot carry")
     rd = _attempt(chat, check_chat, section, description, title, rules, s, model_name, doc, "")
     tries = 0
+    if (rd.state == "unchanged" and s.kb_ai_recheck_unchanged and expect_change is not None and section.focus and s.kb_ai_edit_retries > 0 and budget_left()
+            and (_REMOVAL.search(description) or E.CORRECTION_CUES.search(description) or not rules.news)):
+        # small models often return "unchanged" for removals / corrections worded unlike the text (1.7B: "remove the age restriction" 2 of 4 runs). One second look, with
+        # the lines search found; a false change it might then make still has to pass every check, the second opinion and two people.
+        tries += 1
+        lines = "; ".join(r.text.strip()[:120] for r in section.rows if r.start in section.focus)[:400]
+        fb = (f"you returned the section unchanged. Read the request again and check these lines: {lines}. If the request really does not apply to them, return the "
+              "section unchanged again.")
+        T.event("retry", "asking_again", doc, section=section.heading, why="the model returned the section unchanged although search found lines the request may concern")
+        again = _attempt(chat, check_chat, section, description, title, rules, s, model_name, doc, fb)
+        if again.state == "revised" and _rank(again) >= 2:
+            rd = again
+        rd.retried = True
     while tries < s.kb_ai_edit_retries and rd.state in ("invalid", "revised") and _feedback(rd) and budget_left():
         if rd.state == "revised" and rd.semantic[0] != "fail":
             break                     # a usable revision whose bad parts were dropped is not worth another CPU-minute; only "nothing usable" or a FAILED second check is

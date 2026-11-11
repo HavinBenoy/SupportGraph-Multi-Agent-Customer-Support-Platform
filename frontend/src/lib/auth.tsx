@@ -41,4 +41,4 @@ export function useAuth(): AuthCtx {
   return c;
 }
 
-export const homeFor = (role: Role) => (role === "admin" ? "/admin" : role === "staff" ? "/agent" : "/");
+export const homeFor = (role: Role) => (role === "admin" ? "/admin" : role === "staff" ? "/agent" : "/chat");

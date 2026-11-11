@@ -10,11 +10,13 @@ const LABEL: Record<string, string> = { draft: "Draft", processing: "Processing"
 
 /** Knowledge store (M6), administrators only. A minimal console over the M6 API: the server enforces every rule (processing before publishing, approved proposals,
  *  versioned edits); this screen shows state and sends requests. Nothing here publishes by itself: every publish is a button an administrator presses. */
-export function KnowledgeAdmin() {
+export function KnowledgeAdmin({ folderId = null, folderName = null, openDoc = null, onChanged, onPlaced }: {
+  folderId?: string | null; folderName?: string | null; openDoc?: string | null; onChanged?: () => void; onPlaced?: (m: string) => void;
+} = {}) {
   const { withToken } = useAuth();
   const [docs, setDocs] = useState<KbDoc[] | null>(null);
   const [meta, setMeta] = useState<KbMeta | null>(null);
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(openDoc);
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function KnowledgeAdmin() {
 
   return (
     <div className="console">
-      <h1>Knowledge</h1>
+      <h1 className="kw-title">Drafts &amp; document administration</h1>
       <p className="muted">Published knowledge is what the assistant answers from. Drafts, processed-but-unpublished versions and archived documents are never used. Every change is saved as a new version and recorded in the audit trail.</p>
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="banner done">{notice}</p>}
@@ -42,25 +44,29 @@ export function KnowledgeAdmin() {
             <strong>{d.title}</strong> <span className="muted tiny">{d.category} · {LABEL[d.status] ?? d.status} · latest v{d.latest_version}{d.published_version ? ` · live v${d.published_version}` : ""}</span></button></li>))}</ul>
         {meta && meta.unmanaged_disk_documents.length > 0 && <p className="muted tiny" data-testid="unmanaged">{meta.unmanaged_disk_documents.length} article(s) come from files on disk and are not managed here yet.</p>}
       </section>
-      {meta && <NewDocument meta={meta} onDone={(id) => { setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load(); }} />}
-      {sel && <Detail key={sel} docId={sel} onChanged={(m) => { if (m) setNotice(m); load(); }} />}
-      <Proposals onChanged={(m) => { if (m) setNotice(m); load(); }} categories={meta?.categories ?? []} />
+      {meta && <NewDocument meta={meta} folderName={folderName} onDone={(id, rv) => {
+        setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load();
+        if (folderId) withToken((t) => api.kwMove(t, id, folderId, rv)).then(() => { onPlaced?.(`New document placed in “${folderName ?? "the folder"}”.`); }).catch((e) => setError(msg(e)));
+        else onChanged?.();
+      }} />}
+      {sel && <Detail key={sel} docId={sel} onChanged={(m) => { if (m) setNotice(m); load(); onChanged?.(); }} />}
+      <Proposals onChanged={(m) => { if (m) setNotice(m); load(); onChanged?.(); }} categories={meta?.categories ?? []} />
     </div>
   );
 }
 
-function NewDocument({ meta, onDone }: { meta: KbMeta; onDone: (id: string) => void }) {
+function NewDocument({ meta, onDone, folderName = null }: { meta: KbMeta; onDone: (id: string, rowVersion: number) => void; folderName?: string | null }) {
   const { withToken } = useAuth();
   const [f, setF] = useState({ doc_id: "", title: "", category: meta.categories[0] ?? "faq", content: "" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setError(null);
-    withToken((t) => api.kbCreate(t, f)).then((r) => { setF({ ...f, doc_id: "", title: "", content: "" }); onDone(r.document.doc_id); }).catch((er) => setError(msg(er))).finally(() => setBusy(false));
+    withToken((t) => api.kbCreate(t, f)).then((r) => { setF({ ...f, doc_id: "", title: "", content: "" }); onDone(r.document.doc_id, r.document.row_version); }).catch((er) => setError(msg(er))).finally(() => setBusy(false));
   };
   return (
     <section className="card" aria-label="New document">
-      <h2>New document</h2>
+      <h2>New document{folderName ? ` in “${folderName}”` : ""}</h2>
       {error && <p role="alert" className="error">{error}</p>}
       <form className="form" onSubmit={submit}>
         <label>Id (lower-case letters, digits, dashes)<input value={f.doc_id} onChange={(e) => setF({ ...f, doc_id: e.target.value })} required maxLength={128} /></label>
