@@ -277,3 +277,9 @@ def test_disk_imported_articles_appear_at_the_root_and_can_be_organised_and_edit
     with session_scope() as db:
         after = {c: t for c, t in db.execute(select(Chunk.doc_id, func.count()).where(Chunk.tenant_id == T).group_by(Chunk.doc_id)).all()}
     assert after == before
+
+
+@pytest.fixture(autouse=True)
+def _legacy_folders_on(api):  # noqa: F811
+    """These tests cover the retired (final M6) folder API, re-enabled with SG_KB_LEGACY_FOLDERS=true."""
+    api.app.state.settings.kb_legacy_folders = True

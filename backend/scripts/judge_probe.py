@@ -7,6 +7,7 @@ One request on your own text:
 The seventeen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
 ambiguous request, tables / headings / lists preserved), against the real model, with the real validator:
     ../.venv/bin/python scripts/judge_probe.py --suite
+    ../.venv/bin/python scripts/judge_probe.py --tasks          # final M6: multi-task decomposition with the real model + the sequential working copy
     SG_LLM_MODEL_IMPACT=qwen3:4b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2          # another model; SG_KB_AI_JUDGE_THINKING=false to compare without thinking
     SG_KB_AI_JUDGE_NUM_CTX=12288 SG_KB_AI_JUDGE_MAX_TOKENS=6144 SG_KB_AI_CONTEXT_TOKENS=3000 ../.venv/bin/python scripts/judge_probe.py --suite     # a larger window, for experiments
 
@@ -26,10 +27,11 @@ from app.config import get_settings  # noqa: E402
 from app.knowledge.impact import context as C  # noqa: E402
 from app.knowledge.impact import edit as E  # noqa: E402
 from app.knowledge.impact import judge as J  # noqa: E402
+from app.knowledge.impact import tasks as TK  # noqa: E402
 from app.knowledge.impact.analyse import vague  # noqa: E402
 from app.knowledge.impact.evaluate import apply_edits  # noqa: E402
 from app.knowledge.impact.spec import parse_rules  # noqa: E402
-from app.llm.gateway import get_check_chat, get_judge_chat  # noqa: E402
+from app.llm.gateway import get_chat_model, get_check_chat, get_judge_chat  # noqa: E402
 
 DS = """# Data Science
 
@@ -87,6 +89,49 @@ SUITE = [
 ]
 
 
+# Final M6: multi-task requests. (request, expected number of tasks, values every task list must carry)
+TASKS = [
+    ("18 two fees", "Change the fees of Gen AI to 15000 rupees and the fees of Machine Learning to 6000 rupees.", 2, ["15000 rupees", "6000 rupees"]),
+    ("19 four faculty + two timings", "Change the Gen AI faculty to Mohanan sir, Machine Learning faculty to Gopan sir, Python faculty to Jobi sir and DSA faculty to Karthik sir. "
+     "Also change Gen AI class timing to evening and German class timing to morning 9 AM.", 6, ["mohanan sir", "gopan sir", "jobi sir", "karthik sir", "evening", "9 am"]),
+    ("20 a single change stays one task", "Change the Gen AI faculty to Mohanan sir", 1, ["mohanan sir"]),
+]
+GENAI = "# Gen AI\n\nThe Gen AI faculty is Vinu sir and the class timing is morning.\nFees of gen ai course is 25000 rupees.\n"
+
+
+def task_suite(s) -> tuple[int, int]:
+    """Decomposition with the REAL impact model (the same chat the application uses), then two tasks applied in order to one sentence (the working copy)."""
+    impact = get_chat_model("impact", s)
+    passed = total = 0
+    for name, req, n, values in TASKS:
+        t0 = time.monotonic()
+        d = TK.decompose(req, impact)
+        dt = time.monotonic() - t0
+        carried = set().union(*(TK.values_in(t) for t in d.tasks)) if d.tasks else set()
+        ok = len(d.tasks) == n and all(v in carried for v in values)
+        print(f"\n[{name}] {req!r}\n  {dt:.1f}s source={d.source} tasks={len(d.tasks)}" + (f" note={d.note!r}" if d.note else ""))
+        for i, t in enumerate(d.tasks, 1):
+            print(f"    {i}. {t}")
+        print("  RESULT:", "PASS" if ok else "FAIL", f"(expected {n} task(s) carrying {values})")
+        passed += ok
+        total += 1
+    return passed, total
+
+
+def working_copy(chat, check, s) -> bool:
+    """[21] Two tasks on ONE sentence: the second reads the text the first produced, so both land (faculty AND timing)."""
+    doc = GENAI
+    print("\n[21 working copy] 'Change the Gen AI faculty to Mohanan sir' then 'Change Gen AI class timing to evening' on the same sentence")
+    for task in ("Change the Gen AI faculty to Mohanan sir", "Change Gen AI class timing to evening"):
+        J._CACHE.clear()
+        rd, sec, new, dt = read(chat, check, s, task, doc, "The Gen AI", title="Gen AI", quiet=True)
+        report(rd, dt)
+        doc = new
+    ok = "Mohanan sir" in doc and "evening" in doc and "Vinu" not in doc and "25000 rupees" in doc
+    print("  final:", doc.split("\n")[2], "\n  RESULT:", "PASS" if ok else "FAIL")
+    return ok
+
+
 def read(chat, check, s, desc, doc, at, title="Data Science", quiet=False):
     budget = C.Budget.from_settings(s)
     secs = C.sections_for(doc, [doc.index(at)], budget)
@@ -131,6 +176,7 @@ def main() -> int:
     ap.add_argument("--title", default="Document")
     ap.add_argument("--suite", action="store_true")
     ap.add_argument("--runs", type=int, default=1)
+    ap.add_argument("--tasks", action="store_true", help="final M6: multi-task decomposition (18-20) and the sequential working copy (21) with the real model")
     a = ap.parse_args()
     s = get_settings()
     if s.kb_ai_judge == "off":
@@ -140,6 +186,11 @@ def main() -> int:
         return 2
     chat, check = get_judge_chat(s), get_check_chat(s)
     print(f"model: {s.llm_model_impact or s.llm_model}  thinking={s.kb_ai_judge_thinking}  {C.Budget.from_settings(s).describe()}")
+    if a.tasks:
+        p, t = task_suite(s)
+        wc = working_copy(chat, check, s)
+        print(f"\n{p + wc}/{t + 1} task scenarios behaved as expected (model: {s.llm_model_impact or s.llm_model}).")
+        return 0
     if a.suite:
         J._CACHE.clear()
         passed = total = 0

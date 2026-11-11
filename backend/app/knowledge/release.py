@@ -107,6 +107,8 @@ def begin(db: Session, tenant_id: str, actor: str, s: Settings, request_id: str,
         _fail_request(db, tenant_id, request_id, attempt, "processing", actor,
                       {"stage": "validation", "message": "Some documents were published again after the change was prepared, so it no longer applies to the live text.", "documents": stale})
         return {"outcome": "failed", "attempt": attempt}
+    if (r.analysis or {}).get("kind") == "deletion":
+        return _delete_documents(db, tenant_id, actor, r, items, attempt)
     note = (r.description or "Change request")[:500]
     for it in items:
         ver = None
@@ -122,6 +124,26 @@ def begin(db: Session, tenant_id: str, actor: str, s: Settings, request_id: str,
                    .values(result_version=ver.version_no, process_status="pending", publish_status="pending", process_error=None).execution_options(synchronize_session=False))
     db.flush()
     return {"outcome": "started", "attempt": attempt}
+
+
+def _delete_documents(db: Session, tenant_id: str, actor: str, r: KbChangeRequest, items: list[KbChangeItem], attempt: int) -> dict:
+    """An APPROVED deletion request: archive the document(s) in this transaction (the stale check above already ran: the version is still the one the request named).
+    Archiving removes the live chunks (no retrieval), keeps every version and the audit. No new version is created and nothing is hard-deleted."""
+    gone = []
+    for it in items:
+        out = pipeline.archive_document(db, tenant_id, actor, it.doc_id)
+        gone.append(it.doc_id)
+        db.execute(update(KbChangeItem).where(KbChangeItem.tenant_id == tenant_id, KbChangeItem.request_id == r.request_id, KbChangeItem.doc_id == it.doc_id)
+                   .values(process_status="ready", publish_status="published", process_error=None).execution_options(synchronize_session=False))
+        audit.record(db, tenant_id, actor, "document_deletion_published", "document", it.doc_id, request_id=r.request_id, doc_id=it.doc_id, version_no=it.base_version,
+                     unchanged=out.get("unchanged", False))
+    now = store.now()
+    db.execute(update(KbChangeRequest).where(KbChangeRequest.tenant_id == tenant_id, KbChangeRequest.request_id == r.request_id, KbChangeRequest.release_attempt == attempt)
+               .values(status="published", published_by=actor[:64], published_at=now, phase_started_at=None, row_version=KbChangeRequest.row_version + 1, updated_at=now,
+                       release={"deleted": gone, "versions": {}, "previous": {it.doc_id: it.base_version for it in items}, "attempts": attempt, "published_at": store._iso(now)})
+               .execution_options(synchronize_session=False))
+    audit.record(db, tenant_id, actor, "change_release_published", "request", r.request_id, request_id=r.request_id, attempt=attempt, deleted=gone)
+    return {"outcome": "deleted", "attempt": attempt}
 
 
 # --------------------------------------------------------------------------------------------------------------------------------- steps 2-3

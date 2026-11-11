@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { DeletionRequest } from "./workspace/DeletionRequest";
 import type { KbAuditRow, KbDoc, KbFeedbackRow, KbMeta, KbVersionRow } from "@/lib/types";
 
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
@@ -10,9 +11,7 @@ const LABEL: Record<string, string> = { draft: "Draft", processing: "Processing"
 
 /** Knowledge store (M6), administrators only. A minimal console over the M6 API: the server enforces every rule (processing before publishing, approved proposals,
  *  versioned edits); this screen shows state and sends requests. Nothing here publishes by itself: every publish is a button an administrator presses. */
-export function KnowledgeAdmin({ folderId = null, folderName = null, openDoc = null, onChanged, onPlaced }: {
-  folderId?: string | null; folderName?: string | null; openDoc?: string | null; onChanged?: () => void; onPlaced?: (m: string) => void;
-} = {}) {
+export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string | null; onChanged?: () => void } = {}) {
   const { withToken } = useAuth();
   const [docs, setDocs] = useState<KbDoc[] | null>(null);
   const [meta, setMeta] = useState<KbMeta | null>(null);
@@ -44,29 +43,25 @@ export function KnowledgeAdmin({ folderId = null, folderName = null, openDoc = n
             <strong>{d.title}</strong> <span className="muted tiny">{d.category} · {LABEL[d.status] ?? d.status} · latest v{d.latest_version}{d.published_version ? ` · live v${d.published_version}` : ""}</span></button></li>))}</ul>
         {meta && meta.unmanaged_disk_documents.length > 0 && <p className="muted tiny" data-testid="unmanaged">{meta.unmanaged_disk_documents.length} article(s) come from files on disk and are not managed here yet.</p>}
       </section>
-      {meta && <NewDocument meta={meta} folderName={folderName} onDone={(id, rv) => {
-        setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load();
-        if (folderId) withToken((t) => api.kwMove(t, id, folderId, rv)).then(() => { onPlaced?.(`New document placed in “${folderName ?? "the folder"}”.`); }).catch((e) => setError(msg(e)));
-        else onChanged?.();
-      }} />}
+      {meta && <NewDocument meta={meta} onDone={(id) => { setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load(); onChanged?.(); }} />}
       {sel && <Detail key={sel} docId={sel} onChanged={(m) => { if (m) setNotice(m); load(); onChanged?.(); }} />}
       <Proposals onChanged={(m) => { if (m) setNotice(m); load(); onChanged?.(); }} categories={meta?.categories ?? []} />
     </div>
   );
 }
 
-function NewDocument({ meta, onDone, folderName = null }: { meta: KbMeta; onDone: (id: string, rowVersion: number) => void; folderName?: string | null }) {
+function NewDocument({ meta, onDone }: { meta: KbMeta; onDone: (id: string) => void }) {
   const { withToken } = useAuth();
   const [f, setF] = useState({ doc_id: "", title: "", category: meta.categories[0] ?? "faq", content: "" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setError(null);
-    withToken((t) => api.kbCreate(t, f)).then((r) => { setF({ ...f, doc_id: "", title: "", content: "" }); onDone(r.document.doc_id, r.document.row_version); }).catch((er) => setError(msg(er))).finally(() => setBusy(false));
+    withToken((t) => api.kbCreate(t, f)).then((r) => { setF({ ...f, doc_id: "", title: "", content: "" }); onDone(r.document.doc_id); }).catch((er) => setError(msg(er))).finally(() => setBusy(false));
   };
   return (
     <section className="card" aria-label="New document">
-      <h2>New document{folderName ? ` in “${folderName}”` : ""}</h2>
+      <h2>New document</h2>
       {error && <p role="alert" className="error">{error}</p>}
       <form className="form" onSubmit={submit}>
         <label>Id (lower-case letters, digits, dashes)<input value={f.doc_id} onChange={(e) => setF({ ...f, doc_id: e.target.value })} required maxLength={128} /></label>
@@ -89,6 +84,7 @@ function Detail({ docId, onChanged }: { docId: string; onChanged: (m?: string) =
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     withToken((t) => Promise.all([api.kbDoc(t, docId), api.kbVersions(t, docId), api.kbAudit(t, docId)])).then(([d, v, a]) => { setDoc(d); setVers(v.items); setAudit(a.items); }).catch((e) => setError(msg(e)));
@@ -115,9 +111,14 @@ function Detail({ docId, onChanged }: { docId: string; onChanged: (m?: string) =
         <p className="muted tiny">{doc.doc_id} · {doc.category} · {LABEL[doc.status]} · {doc.published_version ? `live version ${doc.published_version}` : "nothing live"}</p>
         <div className="actions">
           {doc.status === "published" && <button className="btn" disabled={busy} onClick={() => run((t) => api.kbDocAction(t, docId, "unpublish"), "Unpublished: the assistant no longer uses this document.")}>Unpublish</button>}
-          {doc.status !== "archived" && <button className="btn danger" disabled={busy} onClick={() => run((t) => api.kbDocAction(t, docId, "archive"), "Archived: history is kept, retrieval stopped.")}>Archive</button>}
+          {doc.status === "published" && doc.published_version != null &&
+            <button className="btn danger" disabled={busy} onClick={() => setDeleting(true)}>Request deletion</button>}
+          {doc.status !== "archived" && doc.status !== "published" && <button className="btn danger" disabled={busy} onClick={() => run((t) => api.kbDocAction(t, docId, "archive"), "Archived: history is kept, retrieval stopped.")}>Archive</button>}
           {doc.status === "archived" && <button className="btn" disabled={busy} onClick={() => run((t) => api.kbDocAction(t, docId, "unarchive"), "Restored to draft. Nothing is live until you publish a version.")}>Unarchive</button>}
         </div>
+        {deleting && doc.published_version != null && <DeletionRequest scope="admin" docId={docId} title={doc.title} version={doc.published_version}
+          onClose={() => setDeleting(false)} onDone={(m) => { setDeleting(false); onChanged(m); }} />}
+        <p className="muted tiny">A published document is deleted only through a deletion request that an administrator approves in Change requests (it is then archived; nothing is hard-deleted). Unpublish stops answers from it at once and can be undone by publishing again.</p>
         <h3>Versions</h3>
         <ul className="plain">{vers.map((v) => (
           <li key={v.version} className="tiny" data-testid={`version-${v.version}`}>

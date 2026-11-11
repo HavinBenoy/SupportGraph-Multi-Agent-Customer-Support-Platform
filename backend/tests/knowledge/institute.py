@@ -116,6 +116,9 @@ def seed(api, only=None, h=None):
         if only is not None and doc_id not in only:
             continue
         go_live(api, doc_id=doc_id, content=content, title=title, category="courses")
+        if not api.app.state.settings.kb_legacy_folders:              # final M6: no folders (the flat document workspace)
+            out[doc_id] = content
+            continue
         fid = folder(path)
         r = api.put(f"{BASE}/documents/{doc_id}/folder", json={"folder_id": fid}, headers=h)
         assert r.status_code == 200, r.text

@@ -57,13 +57,19 @@ def check_transition(frm: str, to: str) -> None:
 def included(it: KbChangeItem) -> bool:
     """Does this item take part in publication? An AI suggestion needs a staff decision to accept or edit it; a manual item always counts; an administrator can
     exclude any item. An item whose text equals the published text changes nothing and never counts."""
-    if it.admin_decision == "excluded" or it.proposed_checksum == it.base_checksum:
+    if it.admin_decision == "excluded":
+        return False
+    if (it.stats or {}).get("delete"):
+        return True                                                     # a deletion request: the "change" is the removal of the document
+    if it.proposed_checksum == it.base_checksum:
         return False
     return it.origin == "manual" or it.decision in ("accepted", "manual")
 
 
 def staff_included(it: KbChangeItem) -> bool:
     """As `included`, ignoring the administrator's own exclusion (what the staff member put forward)."""
+    if (it.stats or {}).get("delete"):
+        return True
     return it.proposed_checksum != it.base_checksum and (it.origin == "manual" or it.decision in ("accepted", "manual"))
 
 
@@ -114,7 +120,8 @@ def item_view(db: Session, it: KbChangeItem, *, detail: bool, overlaps: list | N
            "included": included(it), "staff_included": staff_included(it), "actionable": actionable(it), "process_status": it.process_status,
            "publish_status": it.publish_status, "process_error": it.process_error,
            "ai": {"reason": ai.get("reason"), "signals": ai.get("signals"), "uncertainty": ai.get("uncertainty"), "flags": ai.get("flags"), "path": ai.get("path"),
-                  "passages": ai.get("passages") if detail else None, "edits": ai.get("edits") if detail else None} if ai else None}
+                  "passages": ai.get("passages") if detail else None, "edits": ai.get("edits") if detail else None,
+                  "tasks": ai.get("tasks") if detail else None} if ai else None}
     if detail:
         out["diff"] = it.diff
         out["proposed_content"] = it.proposed_content
@@ -156,7 +163,10 @@ def request_view(db: Session, r: KbChangeRequest, *, detail: bool = False, admin
            "analysis": {"stage": (an.get("progress") or {}).get("stage"), "done": (an.get("progress") or {}).get("done"), "total": (an.get("progress") or {}).get("total"),
                         "summary": an.get("summary"), "questions": an.get("questions") or [], "answers": an.get("answers") or {}, "error": an.get("error"), "model": an.get("model"),
                         "spec": an.get("spec"), "completed_at": store._iso(r.analysis_completed_at), "started_at": store._iso(r.analysis_started_at),
-                        "attempt": r.analysis_attempt, "trace": an.get("trace") if detail else None} if (r.analysis or r.analysis_attempt) else None}
+                        "attempt": r.analysis_attempt, "trace": an.get("trace") if detail else None,
+                        "kind": an.get("kind", "change"), "deletion_reason": an.get("reason") if an.get("kind") == "deletion" else None,
+                        "intents": an.get("intents") or [], "decomposition": an.get("decomposition"), "final_check": an.get("final_check") or []}
+             if (r.analysis or r.analysis_attempt) else None}
     if detail:
         ov = _overlaps(db, r, items) if admin else {}
         out["items"] = [item_view(db, i, detail=True, overlaps=ov.get(i.doc_id)) for i in items]
@@ -246,6 +256,7 @@ def save_item(db: Session, tenant_id: str, actor: str, s: Settings, request_id: 
     """Save the owner's edit of one document (adds the document to the request on first save). The diff is recomputed from the immutable base version.
     `expected_row_version` is the item's token: a second browser tab holding an older copy gets 409 instead of silently overwriting this one."""
     r = get_request(db, tenant_id, request_id, owner=actor)
+    _no_edit_of_deletion(r)
     if r.status not in EDITABLE:
         raise Conflict(f"this request is {r.status.replace('_', ' ')}: it can no longer be edited")
     doc = store.get_doc(db, tenant_id, doc_id)
@@ -289,6 +300,7 @@ def save_item(db: Session, tenant_id: str, actor: str, s: Settings, request_id: 
 
 def remove_item(db: Session, tenant_id: str, actor: str, request_id: str, doc_id: str) -> dict:
     r = get_request(db, tenant_id, request_id, owner=actor)
+    _no_edit_of_deletion(r)
     if r.status not in EDITABLE:
         raise Conflict(f"this request is {r.status.replace('_', ' ')}: it can no longer be edited")
     cur = db.get(KbChangeItem, (tenant_id, request_id, doc_id))
@@ -313,6 +325,46 @@ def update_description(db: Session, tenant_id: str, actor: str, request_id: str,
 
 def get_for_owner(db: Session, tenant_id: str, actor: str, request_id: str) -> dict:
     return request_view(db, get_request(db, tenant_id, request_id, owner=actor), detail=True)
+
+
+def request_deletion(db: Session, tenant_id: str, actor: str, s: Settings, doc_id: str, *, reason: str, expected_version: int) -> dict:
+    """A request to DELETE a published document (staff or admin). Nothing is removed now: the request goes to the administrators' queue ("submitted") like any change; only
+    an administrator's approval and the publish step archive the document (it leaves retrieval; its versions and audit stay). The version is pinned: if the document is
+    published again before approval, the deletion is refused as stale and must be requested again. One open deletion per document."""
+    reason = " ".join((reason or "").split())
+    if len(reason) < 5:
+        raise Invalid("say why the document should be deleted (at least a few words)")
+    doc = store.get_doc(db, tenant_id, doc_id)
+    if doc.status != "published" or doc.published_version is None:
+        raise Conflict("only a published document can be proposed for deletion")
+    if doc.published_version != expected_version:
+        raise Conflict("the document was published again: reload it before requesting its deletion")
+    open_ids = db.execute(select(KbChangeRequest.request_id, KbChangeRequest.analysis).join(KbChangeItem, (KbChangeItem.tenant_id == KbChangeRequest.tenant_id)
+                                                                                           & (KbChangeItem.request_id == KbChangeRequest.request_id))
+                          .where(KbChangeRequest.tenant_id == tenant_id, KbChangeItem.doc_id == doc_id, KbChangeRequest.status.in_(ACTIVE_ELSEWHERE))).all()
+    if any((an or {}).get("kind") == "deletion" for _, an in open_ids):
+        raise Conflict("a deletion of this document is already waiting for an administrator")
+    now = store.now()
+    r = KbChangeRequest(tenant_id=tenant_id, request_id="cr_" + secrets.token_hex(8), status="submitted", source="manual",
+                        description=f"Delete “{doc.title}”: {reason}"[:1000], row_version=0, created_by=actor[:64], submitted_by=actor[:64], submitted_at=now, updated_at=now,
+                        analysis={"kind": "deletion", "reason": reason[:500], "doc_id": doc_id, "version": doc.published_version})
+    db.add(r)
+    db.flush()
+    it = _make_item(db, tenant_id, r, actor, s, doc, content=None, title=None)
+    it.decision, it.rationale, it.stats = "accepted", reason[:1000], {**(it.stats or {}), "delete": True}
+    db.add(it)
+    db.flush()
+    audit.record(db, tenant_id, actor, "document_deletion_requested", "request", r.request_id, request_id=r.request_id, doc_id=doc_id, version_no=doc.published_version)
+    return request_view(db, r, detail=True)
+
+
+def is_deletion(r: KbChangeRequest) -> bool:
+    return (r.analysis or {}).get("kind") == "deletion"
+
+
+def _no_edit_of_deletion(r: KbChangeRequest) -> None:
+    if is_deletion(r):
+        raise Conflict("this is a document-deletion request: it can be approved, rejected or cancelled, not edited")
 
 
 def _stale_docs(db: Session, tenant_id: str, items: list[KbChangeItem]) -> list[str]:
@@ -407,6 +459,7 @@ def begin_analysis(db: Session, tenant_id: str, actor: str, s: Settings, request
     so a retried, cancelled or superseded run can never overwrite newer work. An analysis that has been 'running' longer than `kb_ai_analysis_stale_s` (the worker
     died) may be taken over; a live one gets 409."""
     r = get_request(db, tenant_id, request_id, owner=actor)
+    _no_edit_of_deletion(r)
     if r.source != "ai_assisted":
         raise Conflict("this request is not an AI-assisted request")
     if expected_row_version is not None and r.row_version != expected_row_version:
@@ -503,6 +556,7 @@ def decide_item(db: Session, tenant_id: str, actor: str, s: Settings, request_id
     if decision not in ("accepted", "manual", "discarded"):
         raise Invalid("decision must be accepted, manual or discarded")
     r = get_request(db, tenant_id, request_id, owner=actor)
+    _no_edit_of_deletion(r)
     if r.status not in ("awaiting_decisions", "needs_revision"):
         raise Conflict(f"this request is {r.status.replace('_', ' ')}: decisions cannot be recorded now")
     it = db.get(KbChangeItem, (tenant_id, request_id, doc_id))
@@ -600,6 +654,7 @@ def admin_edit_item(db: Session, tenant_id: str, actor: str, s: Settings, reques
     """The administrator's final manual edit of one document before approval. The patch is rebuilt from the immutable base version; the item is marked admin-edited and
     confirmed. An administrator can only edit what staff put forward: a document staff discarded stays discarded."""
     r = _admin_request(db, tenant_id, request_id)
+    _no_edit_of_deletion(r)
     _reviewable(r)
     it = db.get(KbChangeItem, (tenant_id, request_id, doc_id))
     if it is None:
@@ -677,6 +732,8 @@ def review(db: Session, tenant_id: str, actor: str, s: Settings, request_id: str
     n = _note(note)
     if decision == "return" and not n:
         raise Invalid("say what needs to change when returning a request")
+    if decision == "return" and is_deletion(r):
+        raise Invalid("a deletion request cannot be returned for editing: approve or reject it")
     if decision == "approve":
         items = _items(db, tenant_id, request_id)
         inc = [i for i in items if included(i)]
@@ -704,6 +761,7 @@ def apply(db: Session, tenant_id: str, actor: str, s: Settings, request_id: str,
     """approved -> applied: create one ordinary DRAFT version per item (authored by the staff member who proposed it). All or nothing. The versions still have to be
     processed and published through the normal M6 pipeline; nothing becomes live here."""
     r = get_request(db, tenant_id, request_id)
+    _no_edit_of_deletion(r)
     if r.status != "approved":
         raise Conflict(f"this request is {r.status}: only an approved request can be applied")
     if expected_row_version is not None and r.row_version != expected_row_version:

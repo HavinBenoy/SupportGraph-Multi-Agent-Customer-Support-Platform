@@ -1,4 +1,7 @@
-"""Part 3 folder management: move (reparent) and safe delete, with cycles, depth, name clashes, concurrency, permissions, tenant isolation and audit."""
+"""Part 3 folder management: move (reparent) and safe delete, with cycles, depth, name clashes, concurrency, permissions, tenant isolation and audit.
+Retired in final M6 (the UI has no folders); kept as the legacy API behind SG_KB_LEGACY_FOLDERS=true."""
+
+import pytest
 
 from sqlalchemy import select
 
@@ -76,3 +79,9 @@ def test_staff_and_other_tenants_cannot_move_or_delete(api):  # noqa: F811
     assert api.delete(f"{BASE}/folders/{a['folder_id']}", headers=staff(api)).status_code == 403
     assert move(api, a["folder_id"], None, h=other_admin(api)).status_code == 404
     assert api.delete(f"{BASE}/folders/{a['folder_id']}", headers=other_admin(api)).status_code == 404
+
+
+@pytest.fixture(autouse=True)
+def _legacy_folders_on(api):  # noqa: F811
+    """These tests cover the retired (final M6) folder API, re-enabled with SG_KB_LEGACY_FOLDERS=true."""
+    api.app.state.settings.kb_legacy_folders = True

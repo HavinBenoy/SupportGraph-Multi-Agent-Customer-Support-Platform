@@ -9,7 +9,7 @@ from app.db.models import KbEvent
 ACTIONS = (
     "document_created", "metadata_updated", "version_created", "version_restored", "ingestion_started", "ingestion_completed", "ingestion_failed", "ingestion_superseded",
     "version_published", "version_unpublished", "document_archived", "document_unarchived", "proposal_created", "proposal_approved", "proposal_rejected",
-    "disk_import", "folder_created", "folder_renamed", "folder_moved", "folder_deleted", "document_moved", "change_request_created", "change_draft_saved", "change_request_submitted",
+    "disk_import", "document_deletion_requested", "document_deletion_published", "folder_created", "folder_renamed", "folder_moved", "folder_deleted", "document_moved", "change_request_created", "change_draft_saved", "change_request_submitted",
     "change_request_cancelled", "change_request_approved", "change_request_rejected", "change_request_applied",
     "change_analysis_started", "change_analysis_completed", "change_analysis_failed", "change_clarification_requested", "change_clarification_answered",
     "change_suggestions_generated", "change_decision_recorded", "change_request_review_started", "change_request_returned", "change_item_edited", "change_item_reviewed",

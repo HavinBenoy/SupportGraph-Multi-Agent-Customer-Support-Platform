@@ -112,3 +112,21 @@ describe("ChatWidget", () => {
     }
   });
 });
+
+describe("ChatWidget polish (final M6)", () => {
+  it("offers starter suggestions that fill the message box without sending, and shows a thinking indicator while waiting", async () => {
+    let release: () => void = () => {};
+    const f = mockApi({
+      "GET /api/config": () => ({ json: CONFIG }),
+      "POST /api/chat": () => new Promise<void>((r) => { release = r; }).then(() => ({ json: reply({ reply: "We offer Python.", citations: [] }) })),
+    });
+    renderWithAuth(<ChatWidget />);
+    await userEvent.click(await screen.findByRole("button", { name: "What courses do you offer?" }));
+    expect(screen.getByLabelText("Your message")).toHaveValue("What courses do you offer?");
+    expect(f.mock.calls.filter((c) => String(c[0]).includes("/api/chat")).length).toBe(0);
+    await userEvent.click(screen.getByRole("button", { name: /Send/ }));
+    expect(await screen.findByLabelText("Assistant is typing")).toHaveTextContent("Thinking…");
+    release();
+    expect(await screen.findByText("We offer Python.")).toBeInTheDocument();
+  });
+});

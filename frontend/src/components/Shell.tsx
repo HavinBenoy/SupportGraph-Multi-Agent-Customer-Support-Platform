@@ -11,7 +11,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [path]);
-  const staff = session?.role === "staff";
+  const staff = session?.role === "staff" || session?.role === "admin";            // administrators keep the full Staff console as well as Administration
   const link = (href: string, label: string) => (
     <Link href={href} aria-current={path === href || (href !== "/" && path?.startsWith(href + "/")) ? "page" : undefined}>{label}</Link>);
   return (

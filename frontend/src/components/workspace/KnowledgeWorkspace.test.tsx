@@ -9,10 +9,7 @@ import { render } from "@testing-library/react";
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const TREE: KwTree = {
-  folders: [
-    { folder_id: "f_1", parent_id: null, name: "Fees", path: "Fees", row_version: 0, document_count: 1 },
-    { folder_id: "f_2", parent_id: "f_1", name: "Instalments", path: "Fees/Instalments", row_version: 3, document_count: 0 },
-  ],
+  folders: [],
   documents: [
     { doc_id: "fee-rules", title: "Fee rules", category: "fees", folder_id: "f_1", status: "published", published_version: 2, latest_version: 2, updated_at: "2026-11-01T09:00:00Z" },
     { doc_id: "faq", title: "General FAQ", category: "faq", folder_id: null, status: "published", published_version: 1, latest_version: 1, updated_at: null },
@@ -47,30 +44,57 @@ function staffWorld(extra: Record<string, (b: any, u: string) => any> = {}) {
 const mountStaff = () => { signedIn("staff", "staff1"); return renderWithAuth(<KnowledgeWorkspace scope="staff" />); };
 
 describe("Knowledge workspace — reading", () => {
-  it("browses folders, opens a document read-only with breadcrumbs, version and last-updated info", async () => {
+  it("lists every document without folders, opens one read-only with version and last-updated info", async () => {
     staffWorld();
     mountStaff();
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Fees" }));
-    expect(screen.getByRole("heading", { name: "Fees" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument();
+    expect(screen.getByText("2 document(s)")).toBeInTheDocument();
+    expect(screen.queryByText(/folder/i)).toBeNull();                                               // no folder concept anywhere
     await userEvent.click(screen.getByRole("button", { name: "Open Fee rules" }));
     expect(await screen.findByRole("heading", { name: "Fee rules" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Knowledge base / Fees");
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
     expect(screen.getByText("Published v2")).toBeInTheDocument();
     expect(screen.getByText(/Last updated/)).toHaveTextContent("by admin1");
     expect(screen.getByLabelText("Published document (read only)")).toHaveTextContent("Fees can be paid in two instalments.");
     expect(screen.queryByRole("textbox", { name: "Document text" })).toBeNull();                    // the canonical text is never an editable field
     expect(screen.getByRole("button", { name: "Make changes" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Move to folder")).toBeNull();                                  // staff cannot reorganise
-    expect(screen.queryByText("Create folder")).toBeNull();
+    expect(screen.queryByLabelText("Move to folder")).toBeNull();
+  });
+
+  it("filters the list by category", async () => {
+    staffWorld();
+    mountStaff();
+    await screen.findByRole("button", { name: "Open Fee rules" });
+    await userEvent.selectOptions(screen.getByLabelText("Filter by category"), "faq");
+    expect(await screen.findByText("1 of 2 document(s)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Fee rules" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open General FAQ" })).toBeInTheDocument();
+  });
+
+  it("requests the deletion of a published document with a reason; nothing is deleted on the spot", async () => {
+    const f = staffWorld({ "POST /api/staff/knowledge/documents/fee-rules/deletion-request": () => ({ status: 201, json: req({ status: "submitted" }) }) });
+    mountStaff();
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Request deletion" }));
+    const dlg = screen.getByRole("dialog", { name: /Request deletion of/ });
+    expect(dlg).toHaveTextContent("not deleted now");
+    expect(within(dlg).getByRole("button", { name: "Send deletion request" })).toBeDisabled();       // a reason is required
+    await userEvent.type(within(dlg).getByLabelText("Why should it be deleted?"), "Course discontinued");
+    await userEvent.click(within(dlg).getByRole("button", { name: "Send deletion request" }));
+    await waitFor(() => expect(calls(f, "POST", "/api/staff/knowledge/documents/fee-rules/deletion-request")).toHaveLength(1));
+    expect(JSON.parse(String((calls(f, "POST", "/api/staff/knowledge/documents/fee-rules/deletion-request")[0][1] as RequestInit).body))).toEqual({ reason: "Course discontinued", expected_version: 2 });
+    expect(await screen.findByRole("status")).toHaveTextContent("stays live until an administrator approves");
   });
 
   it("searches by name and content through the server and opens a hit", async () => {
     const f = staffWorld();
     mountStaff();
-    await screen.findByRole("button", { name: "Open folder Fees" });
+    await screen.findByRole("button", { name: "Open Fee rules" });
     await userEvent.type(screen.getByRole("searchbox", { name: "Search knowledge" }), "instalment");
-    const hit = await screen.findByRole("button", { name: "Open Fee rules" }, { timeout: 2000 });
+    expect(await screen.findByText(/matching “instalment”/, {}, { timeout: 2000 })).toHaveTextContent("1 of 2 document(s)");
     expect(String(calls(f, "GET", "/api/staff/knowledge/documents").at(-1)![0])).toContain("q=instalment");
+    expect(screen.queryByRole("button", { name: "Open General FAQ" })).toBeNull();
+    const hit = screen.getByRole("button", { name: "Open Fee rules" });
     await userEvent.click(hit);
     expect(await screen.findByLabelText("Published document (read only)")).toBeInTheDocument();
   });
@@ -83,8 +107,7 @@ describe("Knowledge workspace — reading", () => {
       "GET /api/staff/knowledge/documents/fee-rules/compare": () => ({ json: { diff: DIFF } }),
     });
     mountStaff();
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Fees" }));
-    await userEvent.click(screen.getByRole("button", { name: "Open Fee rules" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
     await userEvent.click(await screen.findByRole("button", { name: "Version history" }));
     await userEvent.click(await screen.findByRole("button", { name: "Compare v1 with v2" }));
     const region = await screen.findByRole("region", { name: "Differences between v1 and v2" });
@@ -101,8 +124,7 @@ describe("Knowledge workspace — editing", () => {
   });
   async function openEditor() {
     mountStaff();
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Fees" }));
-    await userEvent.click(screen.getByRole("button", { name: "Open Fee rules" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
     await userEvent.click(await screen.findByRole("button", { name: "Make changes" }));
     return await screen.findByRole("textbox", { name: "Document text" });
   }
@@ -198,101 +220,49 @@ describe("Knowledge workspace — administrators", () => {
   });
   const mountAdmin = () => { signedIn("admin", "admin1"); return renderWithAuth(<KnowledgeWorkspace scope="admin" />); };
 
-  it("creates a folder in the current folder and renames it with the version token", async () => {
-    const f = adminWorld({
-      "POST /api/admin/knowledge/folders": () => ({ status: 201, json: {} }),
-      "PUT /api/admin/knowledge/folders/f_2": () => ({ json: {} }),
-    });
+  it("shows drafts and archived documents to administrators and filters by status", async () => {
+    adminWorld({ "GET /api/admin/knowledge/tree": () => ({ json: { ...TREE, documents: [...TREE.documents,
+      { doc_id: "old", title: "Old brochure", category: "faq", folder_id: null, status: "archived", published_version: null, latest_version: 3, updated_at: null }] } }) });
     mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Instalments" }));
-    await userEvent.click(screen.getByRole("button", { name: "New sub-folder" }));
-    await userEvent.type(screen.getByLabelText("New folder inside “Instalments”"), "Monthly");
-    await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
-    await waitFor(() => expect(calls(f, "POST", "/api/admin/knowledge/folders")).toHaveLength(1));
-    expect(JSON.parse(String((calls(f, "POST", "/api/admin/knowledge/folders")[0][1] as RequestInit).body))).toEqual({ name: "Monthly", parent_id: "f_2" });
-    await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
-    const rn = screen.getByLabelText("New name");
-    await userEvent.clear(rn);
-    await userEvent.type(rn, "Payment plans");
-    await userEvent.click(within(screen.getByRole("form", { name: "Rename folder" })).getByRole("button", { name: "Rename" }));
-    await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/folders/f_2")).toHaveLength(1));
-    expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/folders/f_2")[0][1] as RequestInit).body))).toEqual({ name: "Payment plans", expected_row_version: 3 });
+    expect(await screen.findByRole("button", { name: "Open Old brochure" })).toHaveTextContent("Archived");
+    await userEvent.selectOptions(screen.getByLabelText("Filter by status"), "live");
+    expect(await screen.findByText("2 of 3 document(s)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Old brochure" })).toBeNull();
   });
 
-  it("moves a folder (never into itself or its own sub-folders) with its version token", async () => {
-    const f = adminWorld({ "PUT /api/admin/knowledge/folders/f_1/parent": () => ({ json: {} }) });
-    mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Move" }));
-    const dest = screen.getByLabelText("Destination folder");
-    expect(within(dest).queryByRole("option", { name: "Fees/Instalments" })).toBeNull();               // its own sub-folder is not offered
-    expect(within(dest).getByRole("option", { name: "Knowledge base (top level)" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Move here" }));
-    await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/folders/f_1/parent")).toHaveLength(1));
-    expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/folders/f_1/parent")[0][1] as RequestInit).body))).toEqual({ parent_id: null, expected_row_version: 0 });
-  });
-
-  it("deletes only an empty folder, after a confirmation", async () => {
-    const f = adminWorld({ "DELETE /api/admin/knowledge/folders/f_2": () => ({ json: { folder_id: "f_2", deleted: true } }) });
-    mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
-    const full = screen.getByRole("alertdialog");
-    expect(full).toHaveTextContent("still contains 1 folder(s) and 1 document(s)");
-    expect(within(full).getByRole("button", { name: "Delete folder" })).toBeDisabled();
-    await userEvent.click(within(full).getByRole("button", { name: "Cancel" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Instalments" }));
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete folder" }));
-    await waitFor(() => expect(calls(f, "DELETE", "/api/admin/knowledge/folders/f_2")).toHaveLength(1));
-    expect(String(calls(f, "DELETE", "/api/admin/knowledge/folders/f_2")[0][0])).toContain("expected_row_version=3");
-  });
-
-  it("keeps the view in the URL: Back returns from a document to its folder and from a folder to the top level", async () => {
+  it("keeps the view in the URL: Back returns from a document to the list", async () => {
     adminWorld();
     mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
-    expect(window.location.search).toContain("f=f_1");
     await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
-    expect(window.location.search).toContain("kb=doc") ;
-    await userEvent.click(await screen.findByRole("button", { name: "Back" }));
-    expect(await screen.findByRole("heading", { name: "Fees" })).toBeInTheDocument();
-    window.history.back();
+    expect(window.location.search).toContain("kb=doc");
+    await userEvent.click(await screen.findByRole("button", { name: "All documents" }));
     expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument();
   });
 
-  it("offers a new document inside the current folder and the document administration view", async () => {
+  it("offers a new document and the document administration view", async () => {
     adminWorld({
       "GET /api/admin/knowledge/documents": () => ({ json: { items: [], total: 0, page: 1, page_size: 50 } }),
       "GET /api/admin/knowledge/meta": () => ({ json: { categories: ["fees"], limits: { max_bytes: 200000, max_chunks: 300 }, embedding_model: "x", unmanaged_disk_documents: [] } }),
       "GET /api/admin/knowledge/feedback": () => ({ json: { items: [], total: 0 } }),
     });
     mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Folder Fees" }));
-    await userEvent.click(screen.getByRole("button", { name: "New document here" }));
-    expect(await screen.findByRole("heading", { name: "New document in “Fees”" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Drafts & document administration");
+    await userEvent.click(await screen.findByRole("button", { name: "New document" }));
+    expect(await screen.findByRole("heading", { name: "New document" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Drafts & document administration" })).toBeInTheDocument();
   });
 
-  it("surfaces a duplicate-folder conflict from the server", async () => {
-    adminWorld({ "POST /api/admin/knowledge/folders": () => ({ status: 409, json: { detail: "a folder with this name already exists here" } }) });
+  it("an administrator's deletion request needs an explicit confirmation and still goes to review", async () => {
+    const f = adminWorld({ "POST /api/admin/knowledge/documents/fee-rules/deletion-request": () => ({ status: 201, json: req({ status: "submitted" }) }) });
     mountAdmin();
-    await screen.findByRole("button", { name: "Open folder Fees" });
-    await userEvent.click(screen.getByRole("button", { name: "New folder" }));
-    await userEvent.type(screen.getByLabelText("New top-level folder"), "Fees");
-    await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
-  });
-
-  it("moves a document to another folder with the document's version token", async () => {
-    const f = adminWorld({ "PUT /api/admin/knowledge/documents/fee-rules/folder": () => ({ json: { doc_id: "fee-rules", folder_id: "f_2", row_version: 6 } }) });
-    mountAdmin();
-    await userEvent.click(await screen.findByRole("button", { name: "Open folder Fees" }));
-    await userEvent.click(screen.getByRole("button", { name: "Open Fee rules" }));
-    await userEvent.selectOptions(await screen.findByLabelText("Move to folder"), "f_2");
-    await waitFor(() => expect(calls(f, "PUT", "/api/admin/knowledge/documents/fee-rules/folder")).toHaveLength(1));
-    expect(JSON.parse(String((calls(f, "PUT", "/api/admin/knowledge/documents/fee-rules/folder")[0][1] as RequestInit).body))).toEqual({ folder_id: "f_2", expected_row_version: 5 });
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Request deletion" }));
+    const dlg = screen.getByRole("dialog");
+    await userEvent.type(within(dlg).getByLabelText("Why should it be deleted?"), "Merged into FAQ");
+    expect(within(dlg).getByRole("button", { name: "Send deletion request" })).toBeDisabled();
+    await userEvent.click(within(dlg).getByRole("checkbox"));
+    await userEvent.click(within(dlg).getByRole("button", { name: "Send deletion request" }));
+    await waitFor(() => expect(calls(f, "POST", "/api/admin/knowledge/documents/fee-rules/deletion-request")).toHaveLength(1));
+    expect(JSON.parse(String((calls(f, "POST", "/api/admin/knowledge/documents/fee-rules/deletion-request")[0][1] as RequestInit).body))).toEqual({ reason: "Merged into FAQ", expected_version: 2, confirm: true });
   });
 });
 

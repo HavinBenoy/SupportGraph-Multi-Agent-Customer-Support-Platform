@@ -297,7 +297,7 @@ def split_intents(description: str) -> list[str]:
         return [text]
     out: list[str] = []
     for p in parts:
-        p = p.replace("\u2024", ".")
+        p = re.sub(r"^(?:also|and also|and)\s+", "", p.replace("\u2024", "."), flags=re.I)
         if out and _ANAPHOR.match(p):
             attr = attribute_terms_from(out[0])
             if attr:

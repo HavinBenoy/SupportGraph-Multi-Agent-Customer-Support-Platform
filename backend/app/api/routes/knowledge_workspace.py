@@ -2,8 +2,7 @@
 
 Administrators (/api/admin/knowledge, tenant from the token):
   GET  /tree                                   folders + a light row per document (everything)
-  POST /folders                                create a folder             PUT /folders/{folder_id}   rename (expected_row_version)
-  PUT  /documents/{doc_id}/folder              move a document (folder_id null = root); content and versions are never touched
+  (retired in final M6, 410 unless SG_KB_LEGACY_FOLDERS=true) POST /folders, PUT /folders/{id}, PUT /folders/{id}/parent, DELETE /folders/{id}, PUT /documents/{id}/folder
   GET  /documents ?folder_id&unfiled&include_subfolders   (extension of the M6 listing)
   POST /diff-preview                           structured diff of proposed text against the PUBLISHED version (writes nothing)
   GET  /changes ?status                        submitted/approved/rejected/applied/cancelled requests (drafts are private to their author)
@@ -26,6 +25,7 @@ Staff (/api/staff/knowledge): read-only knowledge plus their OWN change requests
   PUT  /changes/{id}/items/{doc_id}            save my edit of one document (expected_row_version = the item's token)
   POST /changes/{id}/items/{doc_id}/remove     drop a document from my draft
   POST /changes/{id}/submit | /cancel
+  POST /documents/{doc_id}/deletion-request {reason, expected_version}   ask the administrators to delete a published document (also on /api/admin/..., with confirm)
   Part 2: POST /ai-changes {description, reference_doc_id?, request_id?}   start an AI-assisted request (or turn my draft into one)
           POST /changes/{id}/analyse {answers?}  202: run (or re-run) the impact analysis in the background; poll GET /changes/{id}
           POST /changes/{id}/items/{doc_id}/decision {decision: accepted|manual|discarded, replacements?, content?, reason?}     GET /changes/{id}/audit
@@ -71,6 +71,13 @@ class MoveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     folder_id: str | None = Field(max_length=32, pattern=r"^f_[0-9a-f]+$")          # required, but may be null (the root)
     expected_row_version: StrictInt | None = Field(default=None, ge=0)
+
+
+class DeletionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=5, max_length=500)
+    expected_version: StrictInt = Field(ge=1)
+    confirm: bool = False                     # administrators must confirm explicitly (their request still goes through approval)
 
 
 class PreviewIn(BaseModel):
@@ -168,18 +175,27 @@ def _status(v: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------------------------------------------------------- admin: folders
+# Final M6: the knowledge base is a flat, searchable document workspace; folders are no longer part of the UI or the workflows. The write routes below answer 410
+# unless SG_KB_LEGACY_FOLDERS=true. Nothing was migrated or deleted: kb_folders / kb_doc_placement rows stay as they were (reversible).
+def _legacy_folders(request: Request) -> None:
+    if not request.app.state.settings.kb_legacy_folders:
+        raise HTTPException(410, "folders were retired: the knowledge base is a flat, searchable list of documents")
+
+
 @admin_router.get("/tree")
 async def admin_tree(p: Principal = Depends(require_admin)) -> dict:
     return await asyncio.to_thread(_guard, lambda db: workspace.tree(db, p.tenant_id, published_only=False))
 
 
 @admin_router.post("/folders", status_code=201)
-async def create_folder(body: FolderIn, p: Principal = Depends(require_admin)) -> dict:
+async def create_folder(request: Request, body: FolderIn, p: Principal = Depends(require_admin)) -> dict:
+    _legacy_folders(request)
     return await asyncio.to_thread(_guard, lambda db: workspace.create_folder(db, p.tenant_id, p.subject, body.name, body.parent_id))
 
 
 @admin_router.put("/folders/{folder_id}")
-async def rename_folder(folder_id: FOLDER, body: FolderRenameIn, p: Principal = Depends(require_admin)) -> dict:
+async def rename_folder(request: Request, folder_id: FOLDER, body: FolderRenameIn, p: Principal = Depends(require_admin)) -> dict:
+    _legacy_folders(request)
     return await asyncio.to_thread(_guard, lambda db: workspace.rename_folder(db, p.tenant_id, p.subject, folder_id, body.name, expected_row_version=body.expected_row_version))
 
 
@@ -190,17 +206,20 @@ class FolderMoveIn(BaseModel):
 
 
 @admin_router.put("/folders/{folder_id}/parent")
-async def move_folder(folder_id: FOLDER, body: FolderMoveIn, p: Principal = Depends(require_admin)) -> dict:
+async def move_folder(request: Request, folder_id: FOLDER, body: FolderMoveIn, p: Principal = Depends(require_admin)) -> dict:
+    _legacy_folders(request)
     return await asyncio.to_thread(_guard, lambda db: workspace.move_folder(db, p.tenant_id, p.subject, folder_id, body.parent_id, expected_row_version=body.expected_row_version))
 
 
 @admin_router.delete("/folders/{folder_id}")
-async def delete_folder(folder_id: FOLDER, expected_row_version: Annotated[int | None, Query(ge=0)] = None, p: Principal = Depends(require_admin)) -> dict:
+async def delete_folder(request: Request, folder_id: FOLDER, expected_row_version: Annotated[int | None, Query(ge=0)] = None, p: Principal = Depends(require_admin)) -> dict:
+    _legacy_folders(request)
     return await asyncio.to_thread(_guard, lambda db: workspace.delete_folder(db, p.tenant_id, p.subject, folder_id, expected_row_version=expected_row_version))
 
 
 @admin_router.put("/documents/{doc_id}/folder")
-async def move_document(doc_id: DOC, body: MoveIn, p: Principal = Depends(require_admin)) -> dict:
+async def move_document(request: Request, doc_id: DOC, body: MoveIn, p: Principal = Depends(require_admin)) -> dict:
+    _legacy_folders(request)
     return await asyncio.to_thread(_guard, lambda db: workspace.move_document(db, p.tenant_id, p.subject, doc_id, body.folder_id, expected_row_version=body.expected_row_version))
 
 
@@ -414,6 +433,24 @@ async def staff_cancel(request_id: REQ, p: Principal = Depends(require_staff)) -
 @staff_router.get("/changes/{request_id}/audit")
 async def staff_request_audit(request_id: REQ, p: Principal = Depends(require_staff)) -> dict:
     return await asyncio.to_thread(_guard, lambda db: changes.request_audit(db, p.tenant_id, request_id, admin=False, owner=p.subject))
+
+
+@staff_router.post("/documents/{doc_id}/deletion-request", status_code=201)
+async def staff_request_deletion(doc_id: DOC, body: DeletionIn, request: Request, p: Principal = Depends(require_staff)) -> dict:
+    """Ask the administrators to delete (archive) a published document. Nothing is removed until an administrator approves and publishes the request."""
+    s = request.app.state.settings
+    if p.role == "admin" and not body.confirm:
+        raise HTTPException(422, "confirm the deletion request (confirm: true)")
+    return await asyncio.to_thread(_guard, lambda db: changes.request_deletion(db, p.tenant_id, p.subject, s, doc_id, reason=body.reason, expected_version=body.expected_version))
+
+
+@admin_router.post("/documents/{doc_id}/deletion-request", status_code=201)
+async def admin_request_deletion(doc_id: DOC, body: DeletionIn, request: Request, p: Principal = Depends(require_admin)) -> dict:
+    """An administrator's own deletion request: explicit confirmation, then the same queue, approval and audit as anyone's (no bypass)."""
+    if not body.confirm:
+        raise HTTPException(422, "confirm the deletion request (confirm: true)")
+    s = request.app.state.settings
+    return await asyncio.to_thread(_guard, lambda db: changes.request_deletion(db, p.tenant_id, p.subject, s, doc_id, reason=body.reason, expected_version=body.expected_version))
 
 
 @staff_router.post("/ai-changes", status_code=201)

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { api } from "@/lib/api";
@@ -15,13 +16,15 @@ const when = (iso: string) => new Date(iso).toLocaleString();
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
 
 export function StaffConsole() {
+  const { session } = useAuth();
   const [t, setT] = useUrlParam("tab", "escalations");
   const tab = (["escalations", "approvals", "calls", "feedback", "knowledge"].includes(t ?? "") ? t : "escalations") as Tab;
   const setTab = (v: Tab) => setT(v);
   return (
     <div className="console">
       <header className="page-head"><div><p className="eyebrow">Staff</p><h1 className="page-title">Staff console</h1>
-        <p>Escalations, approvals, live calls and the knowledge base in one place.</p></div></header>
+        <p>Escalations, approvals, live calls and the knowledge base in one place.</p></div>
+        {session?.role === "admin" && <Link className="btn small" href="/admin">Go to Administration →</Link>}</header>
       <div role="tablist" aria-label="Queues" className="tabs">
         <button role="tab" aria-selected={tab === "escalations"} onClick={() => setTab("escalations")}>Escalations</button>
         <button role="tab" aria-selected={tab === "approvals"} onClick={() => setTab("approvals")}>Make-up approvals</button>

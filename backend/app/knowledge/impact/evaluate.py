@@ -252,6 +252,7 @@ class LlmImpactModel:
 
     def __init__(self, chat, *, name: str, judge_chat=None, check_chat=None) -> None:
         self.name = name
+        self._chat = chat                                                       # also used for the task decomposition of a multi-change request (tasks.decompose)
         self._spec_chain = chat.with_structured_output(ChangeSpec)
         self._eval_chain = chat.with_structured_output(Evaluation)
         self._rules = RuleImpactModel()

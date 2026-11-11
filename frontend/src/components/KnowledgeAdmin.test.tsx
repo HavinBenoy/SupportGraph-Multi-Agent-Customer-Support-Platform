@@ -116,14 +116,16 @@ describe("Knowledge admin", () => {
     expect(within(screen.getByTestId("version-2")).queryByRole("button", { name: "Restore v2" })).not.toBeNull();
   });
 
-  it("the published version has no restore or process button, and archive/unpublish are offered for a live document", async () => {
+  it("the published version has no restore or process button; a live document offers Unpublish and a deletion REQUEST, never a one-click archive", async () => {
     world({ doc: doc({ status: "published", published_version: 1 }), versions: [ver({ lifecycle: "published", status: "published" })] });
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
     const v1 = await screen.findByTestId("version-1");
     expect(within(v1).queryByRole("button", { name: /Restore|Process|Publish/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Unpublish" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Request deletion" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("not deleted now");
   });
 
   it("an archived document offers only unarchive and no new-version form", async () => {

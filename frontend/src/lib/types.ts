@@ -26,7 +26,22 @@ export interface Analytics {
                  by_reason: Record<string, number>; median_hours_to_resolve: number | null; sla_breaches_open: number; oldest_open_hours: number | null };
   approvals: { pending: number; approved: number; rejected: number; median_hours_to_decide: number | null; [k: string]: unknown };
   tickets_by_status: Record<string, number>;
+  support?: { conversations: number; ai_resolved: number; escalated: number; ai_resolution_rate: number | null; calls: number; calls_taken_over: number; takeover_rate: number | null;
+    calls_failed: number; escalation_resolution_rate: number | null; median_reply_ms: number | null; median_hours_to_resolve: number | null; unresolved: number; qa_blocked: number;
+    definitions: Record<string, string> };
   notes: string[];
+}
+export interface KnowledgeAnalytics {
+  tenant_id: string; days: number; generated_at: string; definitions: Record<string, string>;
+  knowledge: {
+    requests: number; by_kind: Record<string, number>; by_status: Record<string, number>; documents_examined: number; ai_proposals: number; documents_affected: number;
+    staff: { accepted: number; edited: number; discarded: number; pending: number; acceptance_rate: number | null; manual_edit_rate: number | null };
+    admin: { submitted: number; approved: number; rejected: number; approval_rate: number | null; median_hours_to_review: number | null };
+    published: number; published_items: { ai_unmodified: number; human_modified: number }; median_hours_to_publication: number | null; failed: number; incomplete: number;
+    funnel: { step: string; count: number }[]; per_day: { date: string; turns: number }[];
+    contributions: { staff: string; requests: number; accepted: number; edited: number; submitted: number; approved: number; rejected: number; published: number;
+      approval_rate: number | null; median_hours_to_review: number | null }[];
+  };
 }
 
 /** M4/M4.1: one call as the staff API describes it. `ticket_ref` is a short reference, never the ticket id; `student_id` only comes for admins.
@@ -149,7 +164,7 @@ export interface KwAiEdit extends KwPatch { heading: string; verdict: string; co
 export interface KwAiPassage { n: number; start: number; end: number; text: string; heading: string; verdict: string; confidence: number; reason: string; replacement: string | null; kind?: string; evidence?: string; model_note?: string; hunk?: number; change?: { kind: KwEditKind; removed: string[]; added: string[]; flags: string[]; notes: string[] }; judge?: "agrees" | "disagrees" | "only" | "unusable" | "unavailable" }
 export interface KwAi {
   reason: string | null; signals: Record<string, unknown> | null; uncertainty: string[] | null; flags: Record<string, number> | null; path: string | null;
-  passages: KwAiPassage[] | null; edits: KwAiEdit[] | null;
+  passages: KwAiPassage[] | null; edits: KwAiEdit[] | null; tasks?: KwTaskTrail[] | null;
 }
 export interface KwItem {
   doc_id: string; doc_title: string; base_version: number; current_published_version: number | null; base_stale: boolean; proposed_title: string; stats: KwStats; origin: string;
@@ -168,7 +183,12 @@ export interface KwAnalysis {
     flags: { unsupported: number; historical: number; scope: number }; kinds?: Record<string, number>; rounds?: number; learned?: string[] } | null;
   spec: { summary: string; facts: { attribute: string; old_value: string | null; new_value: string | null; effective: string | null }[]; entity_terms: string[] } | null;
   trace?: KwTrace | null;
+  kind?: "change" | "deletion"; deletion_reason?: string | null;
+  intents?: KwTask[]; decomposition?: { source: string; tasks: string[]; uncovered?: string[]; duplicates?: number[][]; note?: string } | null; final_check?: string[];
 }
+export type KwTaskStatus = "completed" | "confirm" | "no_document" | "clarify" | "failed";
+export interface KwTask { intent: number; text: string; status?: KwTaskStatus; status_label?: string; definite?: number; potential?: number; documents?: string[]; edited?: string[]; [k: string]: unknown }
+export interface KwTaskTrail { task: number; classification: string; reason: string; edits: number }
 export interface KwTraceEvent { n: number; ms: number; stage: string; outcome: string; doc?: string; text?: Record<string, string>; [k: string]: unknown }
 export interface KwTrace { events: KwTraceEvent[]; dropped: number; content: boolean; outcomes?: Record<string, string> }
 export interface KwCounts { accepted: number; edited: number; discarded: number; pending: number; manual_items: number; related: number; included: number; excluded_by_admin: number }

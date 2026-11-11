@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ChatEvent, Escalation, MakeupRequest, Ticket
+from app.db.models import Call, ChatEvent, Escalation, MakeupRequest, Ticket
 from app.tenants.schema import TenantConfig
 
 MAX_ROWS = 100_000  # safety cap on rows read per query
@@ -73,7 +73,38 @@ def compute(db: Session, cfg: TenantConfig, *, days: int, now: datetime | None =
         "median_hours_to_decide": round(decided_hours[len(decided_hours) // 2], 2) if decided_hours else None,
     }
     tickets = Counter(t.status for t in db.execute(select(Ticket).where(Ticket.tenant_id == tid).limit(MAX_ROWS)).scalars())
-    return {"tenant_id": tid, "days": days, "generated_at": now.isoformat(), "chat": chat, "escalations": escalations,
+
+    # Support operations (final M6): per CONVERSATION (ticket), not per turn. A conversation is "resolved by the AI" when none of its turns in the period needed a
+    # person; "escalated" when at least one did. Voice: a call is "taken over" when a staff member took it (takeover_at set).
+    convs: dict[str, list] = {}
+    for e in events:
+        convs.setdefault(e.ticket_id, []).append(e)
+    escalated_c = sum(any(x.needs_human or x.awaiting == "staff" for x in v) for v in convs.values())
+    calls = [c for c in db.execute(select(Call).where(Call.tenant_id == tid).limit(MAX_ROWS)).scalars() if _aware(c.created_at) >= since]
+    taken = sum(c.takeover_at is not None for c in calls)
+    support = {
+        "conversations": len(convs), "ai_resolved": len(convs) - escalated_c, "escalated": escalated_c,
+        "ai_resolution_rate": round((len(convs) - escalated_c) / len(convs), 4) if convs else None,
+        "calls": len(calls), "calls_taken_over": taken, "takeover_rate": round(taken / len(calls), 4) if calls else None,
+        "calls_failed": sum(c.status == "failed" for c in calls),
+        "escalation_resolution_rate": round(escalations["resolved"] / escalations["created"], 4) if escalations["created"] else None,
+        "median_reply_ms": chat["latency_ms"]["p50"], "median_hours_to_resolve": escalations["median_hours_to_resolve"],
+        "unresolved": escalations["open"] + escalations["claimed"], "qa_blocked": chat["qa_blocked"],
+        "definitions": {
+            "conversations": "Distinct conversations (ticket ids) with at least one chat or voice turn in the period (chat_events).",
+            "ai_resolved": "Conversations in which no turn needed a person (no escalation, no staff approval waiting).",
+            "escalated": "Conversations with at least one turn that needed a person.",
+            "ai_resolution_rate": "ai_resolved / conversations.",
+            "takeover_rate": "Voice calls a staff member took over (calls.takeover_at set) / voice calls started in the period.",
+            "calls_failed": "Voice calls that ended in status failed.",
+            "escalation_resolution_rate": "Escalations created in the period that are resolved / escalations created in the period.",
+            "median_reply_ms": "Median time the API took to answer a turn (chat_events.latency_ms).",
+            "median_hours_to_resolve": "Median of resolved_at − created_at for escalations created in the period.",
+            "unresolved": "Escalations open or claimed now (any age).",
+            "qa_blocked": "Answers the quality gate stopped before they reached the person.",
+        },
+    }
+    return {"tenant_id": tid, "days": days, "generated_at": now.isoformat(), "chat": chat, "escalations": escalations, "support": support,
             "approvals": approvals, "tickets_by_status": dict(sorted(tickets.items())),
             "notes": ["Counts what the system did; answer quality is measured by `make eval-routing`, not here.",
                       "Data comes from chat_events written by the API: turns made before step 5 are not included."]}

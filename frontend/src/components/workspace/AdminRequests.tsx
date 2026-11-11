@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { KwAuditEvent, KwItem, KwRequest, KwStatus } from "@/lib/types";
-import { DiffLegend, DiffView } from "./DiffView";
 import { PatchLegend, PatchView, baseText } from "./PatchView";
+import { CompareView, applyPatches } from "./Compare";
+import { TaskStatus } from "./Decisions";
 import { ClassChip, DecisionChip, LABEL, Badge, msg, pct, when, STEP_STATUS } from "./ui";
 
 const POLL_MS = 1500;
@@ -17,7 +18,7 @@ const ACTION_WORDS: Record<string, string> = { change_request_created: "Request 
   change_request_submitted: "Submitted for review", change_request_review_started: "Review started", change_item_edited: "Administrator edited a document", change_item_reviewed: "Administrator reviewed a document",
   change_request_approved: "Approved (nothing published)", change_request_rejected: "Rejected", change_request_returned: "Returned for revision", change_request_cancelled: "Cancelled",
   change_release_started: "Processing and publication started", change_item_processed: "Document processed", change_release_failed: "Publication failed — nothing published", change_release_published: "Published",
-  change_release_retried: "Retry started", version_created: "Draft version created", version_published: "Version published", change_request_applied: "Draft versions created" };
+  change_release_retried: "Retry started", document_deletion_requested: "Deletion requested", document_deletion_published: "Document archived (deletion approved)", document_archived: "Document archived", version_created: "Draft version created", version_published: "Version published", change_request_applied: "Draft versions created" };
 
 const statusLine = (it: KwItem) => {
   if (!it.included) return "Not part of publication";
@@ -61,7 +62,7 @@ export function ChangeRequests() {
             <li key={r.request_id}>
               <button className={`kw-row${selId === r.request_id ? " sel" : ""}`} aria-current={selId === r.request_id ? "true" : undefined} onClick={() => setSelId(r.request_id)}
                 aria-label={`Open request ${r.request_id}`}>
-                <span className="kw-row-top"><Badge s={r.status} /> <span className="kw-sub">{r.request_id.slice(0, 8)} · {when(r.submitted_at)}</span></span>
+                <span className="kw-row-top"><Badge s={r.status} />{r.analysis?.kind === "deletion" && <span className="kw-chip st-failed">Deletion</span>} <span className="kw-sub">{r.request_id.slice(0, 8)} · {when(r.submitted_at)}</span></span>
                 <b>{r.description}</b>
                 <span className="kw-sub">by {r.submitted_by ?? r.created_by} · {r.counts?.included ?? r.document_count} document(s) · {r.counts?.accepted ?? 0} accepted · {r.counts?.edited ?? 0} edited · {r.counts?.discarded ?? 0} discarded</span>
               </button>
@@ -90,6 +91,7 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
   const [info, setInfo] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [audit, setAudit] = useState<KwAuditEvent[] | null>(null);
+  const [openDoc, setOpenDoc] = useState<string | null>(null);
 
   const reload = useCallback(() => withToken((t) => api.kwRequest(t, initial.request_id)).then(setReq).catch((e) => setError(msg(e))), [withToken, initial.request_id]);
   useEffect(() => {
@@ -114,6 +116,10 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
   const progress = ["processing", "publishing", "published", "failed"].includes(s);
   const stale = items.filter((i) => i.included && i.base_stale);
   const idx = STEP_STATUS.indexOf(s);
+  const deletion = req.analysis?.kind === "deletion";
+  const hasChange = (i: KwItem) => !!(i.stats as { delete?: boolean } | undefined)?.delete || i.origin === "manual" || !!i.ai?.edits?.length || i.decision === "manual" || i.admin_edited;
+  const changed = items.filter(hasChange);
+  const unchanged = items.filter((i) => !hasChange(i));
 
   return (
     <section aria-label="Request detail">
@@ -132,6 +138,8 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "overview" && (
           <div>
+            {deletion && <p className="kw-banner warn" role="note"><b>Deletion request.</b> {req.analysis?.deletion_reason ? `Reason: ${req.analysis.deletion_reason}. ` : ""}
+              Approving and publishing archives the document: it stops being used in answers, and its versions and audit history are kept. If it was published again since the request, approval is refused.</p>}
             <p>{c?.included ?? 0} document(s) go forward · <b>{c?.accepted ?? 0}</b> accepted · <b>{c?.edited ?? 0}</b> edited by staff · <b>{c?.discarded ?? 0}</b> discarded by staff{c?.excluded_by_admin ? ` · ${c.excluded_by_admin} excluded by an administrator` : ""}</p>
             {req.review_note && <p className="kw-banner">Reviewer note: {req.review_note}</p>}
             {stale.length > 0 && <p className="kw-banner warn" role="alert">Published again since this was prepared: {stale.map((i) => i.doc_title).join(", ")}. Exclude them or return the request.</p>}
@@ -150,7 +158,8 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
             {s === "failed" && req.failure && (
               <div className="kw-failbox" role="alert"><p><b>Publication failed at “{req.failure.stage}”. Nothing was published; the live knowledge is unchanged.</b></p><p>{req.failure.message}</p>
                 {!!req.failure.documents?.length && <p className="kw-muted">Affected: {req.failure.documents.join(", ")}</p>}</div>)}
-            {s === "published" && (
+            {s === "published" && deletion && <p className="kw-banner ok" role="status"><b>Deleted (archived)</b> by {req.published_by} on {when(req.published_at)}. It no longer answers questions; its versions and audit history are kept.</p>}
+            {s === "published" && !deletion && (
               <div className="kw-banner ok" role="status"><p><b>Published</b> by {req.published_by} on {when(req.published_at)}. Every document went live together.</p>
                 <ul>{Object.entries(req.release?.versions ?? {}).map(([d, v]) => <li key={d}>{items.find((i) => i.doc_id === d)?.doc_title ?? d}: v{req.release?.previous?.[d] ?? "—"} → <b>v{v}</b></li>)}</ul>
                 <Verification req={req} onRun={() => act((t) => api.kwVerify(t, req.request_id), "Checked the live knowledge again.")} busy={busy} /></div>)}
@@ -163,23 +172,33 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
                 {s === "submitted" && <button className="kw-btn" disabled={busy} onClick={() => act((t) => api.kwStartReview(t, req.request_id), "Review started.")}>Start review</button>}
                 {reviewable && <>
                   <button className="kw-btn primary" disabled={busy || inc.length === 0} onClick={() => act((t) => api.kwReview(t, req.request_id, "approve", note.trim() || undefined), "Approved. Nothing has been published.")}>Approve</button>
-                  <button className="kw-btn" disabled={busy} onClick={() => act((t) => api.kwReview(t, req.request_id, "return", note.trim()), "Returned to the author.")}>Return for revision</button>
+                  {!deletion && <button className="kw-btn" disabled={busy} onClick={() => act((t) => api.kwReview(t, req.request_id, "return", note.trim()), "Returned to the author.")}>Return for revision</button>}
                   <button className="kw-btn" disabled={busy} onClick={() => act((t) => api.kwReview(t, req.request_id, "reject", note.trim() || undefined), "Rejected. Nothing was changed.")}>Reject</button></>}
-                {s === "approved" && !confirm && <button className="kw-btn primary" disabled={busy} onClick={() => setConfirm(true)}>Process and Publish Approved Changes</button>}
+                {s === "approved" && !confirm && <button className="kw-btn primary" disabled={busy} onClick={() => setConfirm(true)}>{deletion ? "Archive the document now" : "Process and Publish Approved Changes"}</button>}
                 {s === "failed" && <><button className="kw-btn primary" disabled={busy} onClick={() => act((t) => api.kwPublish(t, req.request_id), "Retry started.")}>Retry publication</button>
                   <button className="kw-btn" disabled={busy} onClick={() => act((t) => api.kwReopen(t, req.request_id), "Reopened for review.")}>Reopen for review</button></>}
                 {["submitted", "under_review", "approved", "failed"].includes(s) && <button className="kw-btn ghost" disabled={busy} onClick={() => act((t) => api.kwAdminCancel(t, req.request_id), "Cancelled. The record is kept.")}>Cancel request</button>}
               </div>
               {confirm && s === "approved" && (
-                <div role="group" aria-label="Confirm publication"><p><b>Publish {inc.length} document(s) to the live knowledge base?</b> Each is processed and checked first; they only go live together, and if anything fails nothing goes live.</p>
-                  <div className="kw-actions"><button className="kw-btn primary" disabled={busy} onClick={() => act((t) => api.kwPublish(t, req.request_id), "Processing started.")}>Confirm — process and publish</button><button className="kw-btn" onClick={() => setConfirm(false)}>Not yet</button></div></div>)}
+                <div role="group" aria-label="Confirm publication">{deletion ? <p><b>Archive {inc.map((i) => `“${i.doc_title}”`).join(", ")}?</b> It stops being used in answers at once. Every version and the audit history are kept.</p>
+                  : <p><b>Publish {inc.length} document(s) to the live knowledge base?</b> Each is processed and checked first; they only go live together, and if anything fails nothing goes live.</p>}
+                  <div className="kw-actions"><button className="kw-btn primary" disabled={busy} onClick={() => act((t) => api.kwPublish(t, req.request_id), deletion ? "Archived. The document no longer answers questions; its history is kept." : "Processing started.")}>{deletion ? "Confirm — archive" : "Confirm — process and publish"}</button><button className="kw-btn" onClick={() => setConfirm(false)}>Not yet</button></div></div>)}
             </div>
           </div>)}
 
         {tab === "documents" && (
           <div>
-            {items.length === 0 && <p className="kw-muted">No documents.</p>}
-            {items.map((it) => <AdminDoc key={`${it.doc_id}:${it.row_version}`} req={req} it={it} editable={reviewable} onItem={(n) => setReq((r) => ({ ...r, items: r.items?.map((x) => (x.doc_id === n.doc_id ? n : x)) }))} onDone={reload} />)}
+            <TaskStatus req={req} />
+            {changed.length === 0 && <p className="kw-muted">No documents.</p>}
+            <div className="kw-acc-list">
+              {changed.map((it) => <AdminDoc key={`${it.doc_id}:${it.row_version}`} req={req} it={it} editable={reviewable} open={openDoc === it.doc_id}
+                onToggle={() => setOpenDoc((o) => (o === it.doc_id ? null : it.doc_id))}
+                onItem={(n) => setReq((r) => ({ ...r, items: r.items?.map((x) => (x.doc_id === n.doc_id ? n : x)) }))} onDone={reload} />)}
+            </div>
+            {(unchanged.length > 0 || !!req.analysis?.summary?.not_relevant?.length) && (
+              <details className="kw-details kw-diag"><summary>Examined, no change proposed ({unchanged.length + (req.analysis?.summary?.not_relevant?.length ?? 0)})</summary>
+                <ul>{unchanged.map((it) => <li key={it.doc_id}><b>{it.doc_title}</b> — <span className="kw-muted">{it.ai?.reason ?? "No change needed."}</span></li>)}
+                  {req.analysis?.summary?.not_relevant?.map((n) => <li key={n.doc_id}>{n.title} — <span className="kw-muted">{n.reason}</span></li>)}</ul></details>)}
           </div>)}
 
         {tab === "audit" && (
@@ -192,9 +211,8 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
   );
 }
 
-function AdminDoc({ req, it, editable, onItem, onDone }: { req: KwRequest; it: KwItem; editable: boolean; onItem: (i: KwItem) => void; onDone: () => void }) {
+function AdminDoc({ req, it, editable, open, onToggle, onItem, onDone }: { req: KwRequest; it: KwItem; editable: boolean; open: boolean; onToggle: () => void; onItem: (i: KwItem) => void; onDone: () => void }) {
   const { withToken } = useAuth();
-  const [view, setView] = useState<"compare" | "original" | "proposed">("compare");
   const [mode, setMode] = useState<"none" | "edit" | "exclude">("none");
   const [texts, setTexts] = useState<string[]>([]);
   const [full, setFull] = useState("");
@@ -204,48 +222,65 @@ function AdminDoc({ req, it, editable, onItem, onDone }: { req: KwRequest; it: K
   const base = baseText(it.diff?.body);
   const edits = it.final_edits?.length ? it.final_edits : [];
   const discarded = it.decision === "discarded";
+  const deletion = !!(it.stats as { delete?: boolean } | undefined)?.delete;
   const call = (fn: (t: string) => Promise<KwItem>) => { setBusy(true); setError(null); withToken(fn).then((n) => { onItem(n); setMode("none"); onDone(); }).catch((e) => setError(msg(e))).finally(() => setBusy(false)); };
+  const preview = mode === "edit" ? (edits.length ? applyPatches(base, edits.map((e, i) => ({ ...e, replacement: texts[i] ?? e.replacement }))) : full) : undefined;
+  const needs = editable && !discarded && it.included !== false && !it.admin_decision;
+  const bodyId = `adoc-${it.doc_id}`;
+  const trail = (it.ai?.tasks ?? []).filter((t) => t.edits > 0).map((t) => `Task ${t.task}`).join(", ");
 
   return (
-    <article className="kw-card" aria-label={`Document ${it.doc_title}`}>
-      <header className="kw-card-head">
-        <div><h3>{it.doc_title}</h3><p className="kw-sub">{it.ai?.path ?? ""} · based on v{it.base_version}{it.base_stale ? ` — now v${it.current_published_version}` : ""}</p></div>
-        <div>{it.origin === "ai" ? <ClassChip c={it.classification} /> : <span className="kw-chip">Staff edit</span>} {it.origin === "ai" && <span className="kw-chip">Confidence {pct(it.confidence)}</span>} <DecisionChip d={it.origin === "manual" && !it.decision ? "manual" : it.decision} />
+    <article className={`kw-acc${open ? " open" : ""}${needs ? " needs" : ""}`} aria-label={`Document ${it.doc_title}`}>
+      <button className="kw-acc-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+        <span className="kw-acc-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span className="kw-acc-main"><b>{it.doc_title}</b>
+          <span className="kw-sub">{deletion ? "Deletion: the document will be archived" : discarded ? `Discarded by staff${it.rationale ? `: ${it.rationale}` : ""}` : trail || (it.ai?.reason ? (it.ai.reason.length > 110 ? `${it.ai.reason.slice(0, 110)}…` : it.ai.reason) : "Staff edit")}</span></span>
+        <span className="kw-acc-chips">
+          {deletion ? <span className="kw-chip st-failed">Delete</span> : it.origin === "ai" ? <ClassChip c={it.classification} /> : <span className="kw-chip">Staff edit</span>}{" "}
+          {!deletion && <DecisionChip d={it.origin === "manual" && !it.decision ? "manual" : it.decision} />}
           {it.admin_decision && <span className={`kw-chip ${it.admin_decision === "excluded" ? "dc-discarded" : "dc-accepted"}`}>{it.admin_decision === "excluded" ? "✕ Excluded by admin" : "✓ Confirmed"}</span>}
-          {it.admin_edited && <span className="kw-chip dc-manual">✎ Edited by admin</span>}</div>
-      </header>
-      {it.base_stale && <p className="kw-banner warn" role="alert">This document was published again after the change was prepared. It cannot be published as it stands.</p>}
-      {it.overlapping_requests?.map((o) => <p key={o.request_id} className="kw-banner warn">Also in request {o.request_id.slice(0, 8)} ({LABEL[o.status]}, by {o.created_by}).</p>)}
-      {it.ai?.reason && <p className="kw-why"><b>AI explanation:</b> {it.ai.reason}</p>}
-      {discarded && <p className="kw-banner">Staff discarded this suggestion{it.decided_by ? ` (${it.decided_by}, ${when(it.decided_at)})` : ""}. Reason: {it.rationale || "none given"}.</p>}
-      {it.admin_note && <p className="kw-muted tiny">Admin note ({it.admin_by}): {it.admin_note}</p>}
-      {!discarded && (
-        <>
-          <div className="kw-seg" role="tablist" aria-label={`View for ${it.doc_title}`}>
-            {(["compare", "original", "proposed"] as const).map((v) => <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}>{v === "compare" ? "Compare" : v === "original" ? "Original" : "Proposed"}</button>)}
-          </div>
-          {view === "compare" && (edits.length ? <><PatchLegend /><PatchView base={base} edits={edits.map((e, i) => ({ ...e, heading: it.ai?.edits?.[i]?.heading }))} label={`Changes to ${it.doc_title}`} /></> : it.diff ? <><DiffLegend /><DiffView segs={it.diff.body} label={`Changes to ${it.doc_title}`} /></> : null)}
-          {view === "original" && <pre className="kw-patch" role="region" tabIndex={0} aria-label="Original published text">{base}</pre>}
-          {view === "proposed" && <pre className="kw-patch" role="region" tabIndex={0} aria-label="Proposed text">{it.proposed_content}</pre>}
-        </>)}
-      {mode === "edit" && (
-        <div className="kw-ask">
-          {edits.length ? edits.map((e, i) => <label key={i}>Final wording {edits.length > 1 ? i + 1 : ""}<textarea rows={3} value={texts[i] ?? ""} onChange={(ev) => setTexts((p) => p.map((x, j) => (j === i ? ev.target.value : x)))} /></label>)
-            : <label>Final document text<textarea rows={10} value={full} onChange={(ev) => setFull(ev.target.value)} /></label>}
-          <label>Why (optional)<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
-          <div className="kw-actions"><button className="kw-btn primary" disabled={busy} onClick={() => call((t) => api.kwAdminEdit(t, req.request_id, it.doc_id, { ...(edits.length ? { replacements: texts.map((replacement, index) => ({ index, replacement })) } : { content: full }), note: note.trim() || undefined, expected_row_version: it.row_version }))}>Save final edit</button><button className="kw-btn" onClick={() => setMode("none")}>Cancel</button></div>
+          {it.admin_edited && <span className="kw-chip dc-manual">✎ Edited by admin</span>}
+          {it.base_stale && <span className="kw-chip st-failed">Out of date</span>}
+          {needs && <span className="kw-chip kw-need">Action required</span>}</span>
+      </button>
+      {open && (
+        <div className="kw-acc-body" id={bodyId}>
+          <p className="kw-sub">{it.ai?.path ?? ""} · based on v{it.base_version}{it.base_stale ? ` — now v${it.current_published_version}` : ""}{it.origin === "ai" ? ` · confidence ${pct(it.confidence)}` : ""}</p>
+          {it.base_stale && <p className="kw-banner warn" role="alert">This document was published again after the change was prepared. It cannot be published as it stands.</p>}
+          {it.overlapping_requests?.map((o) => <p key={o.request_id} className="kw-banner warn">Also in request {o.request_id.slice(0, 8)} ({LABEL[o.status]}, by {o.created_by}).</p>)}
+          {it.ai?.reason && <p className="kw-why"><b>AI explanation:</b> {it.ai.reason}</p>}
+          {!!it.ai?.tasks?.length && (req.analysis?.intents?.length ?? 0) > 1 && (
+            <ul className="kw-unsure" aria-label="Tasks applied to this document">{it.ai.tasks.map((t) => <li key={t.task}>Task {t.task}: {t.edits ? `${t.edits} change(s)` : "no change"} — {t.reason}</li>)}</ul>)}
+          {discarded && <p className="kw-banner">Staff discarded this suggestion{it.decided_by ? ` (${it.decided_by}, ${when(it.decided_at)})` : ""}. Reason: {it.rationale || "none given"}.</p>}
+          {it.admin_note && <p className="kw-muted tiny">Admin note ({it.admin_by}): {it.admin_note}</p>}
+          {deletion ? (
+            <div className="kw-banner warn"><p><b>Approving and publishing this request archives “{it.doc_title}”.</b> It stops being used in answers; every version and the audit history are kept, and it can be unarchived later.</p>
+              <p className="kw-muted tiny">Reason given: {it.rationale}</p>
+              <details className="kw-details"><summary>Text that will be removed from answers</summary><pre className="kw-cmp-text" tabIndex={0} aria-label={`Published text of ${it.doc_title}`}>{base}</pre></details></div>
+          ) : !discarded && <CompareView it={it} preview={preview} />}
+          {!deletion && !discarded && edits.length > 0 && mode === "none" && (
+            <details className="kw-details"><summary>Passages and replacements</summary><PatchLegend />
+              <PatchView base={base} edits={edits.map((e, i) => ({ ...e, heading: it.ai?.edits?.[i]?.heading }))} label={`Changes to ${it.doc_title}`} /></details>)}
+          {mode === "edit" && (
+            <div className="kw-ask">
+              {edits.length ? edits.map((e, i) => <label key={i}>Final wording {edits.length > 1 ? i + 1 : ""}<textarea rows={3} value={texts[i] ?? ""} onChange={(ev) => setTexts((p) => p.map((x, j) => (j === i ? ev.target.value : x)))} /></label>)
+                : <label>Final document text<textarea rows={10} value={full} onChange={(ev) => setFull(ev.target.value)} /></label>}
+              <label>Why (optional)<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
+              <div className="kw-actions"><button className="kw-btn primary" disabled={busy} onClick={() => call((t) => api.kwAdminEdit(t, req.request_id, it.doc_id, { ...(edits.length ? { replacements: texts.map((replacement, index) => ({ index, replacement })) } : { content: full }), note: note.trim() || undefined, expected_row_version: it.row_version }))}>Save final edit</button><button className="kw-btn" onClick={() => setMode("none")}>Cancel</button></div>
+            </div>)}
+          {mode === "exclude" && (
+            <div className="kw-ask"><label>Reason for excluding (required)<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
+              <div className="kw-actions"><button className="kw-btn primary" disabled={busy || !note.trim()} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "excluded", note.trim(), it.row_version))}>Exclude from publication</button><button className="kw-btn" onClick={() => setMode("none")}>Cancel</button></div></div>)}
+          {error && <p role="alert" className="kw-error">{error}</p>}
+          {editable && !discarded && it.included !== false && mode === "none" && (
+            <div className="kw-actions" role="group" aria-label={`Actions for ${it.doc_title}`}>
+              {it.admin_decision === "confirmed" ? <span className="kw-done" role="status">✓ Confirmed for publication</span>
+                : <button className="kw-btn" disabled={busy} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "confirmed", undefined, it.row_version))}>Confirm</button>}
+              {!deletion && <button className="kw-btn" disabled={busy} onClick={() => { setTexts(edits.map((e) => e.replacement)); setFull(it.proposed_content ?? ""); setNote(""); setMode("edit"); }}>Edit final wording</button>}
+              <button className="kw-btn" disabled={busy} onClick={() => { setNote(""); setMode("exclude"); }}>Exclude</button>
+            </div>)}
+          {editable && it.admin_decision === "excluded" && mode === "none" && <div className="kw-actions"><button className="kw-btn" disabled={busy} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "confirmed", undefined, it.row_version))}>Include again</button></div>}
         </div>)}
-      {mode === "exclude" && (
-        <div className="kw-ask"><label>Reason for excluding (required)<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
-          <div className="kw-actions"><button className="kw-btn primary" disabled={busy || !note.trim()} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "excluded", note.trim(), it.row_version))}>Exclude from publication</button><button className="kw-btn" onClick={() => setMode("none")}>Cancel</button></div></div>)}
-      {error && <p role="alert" className="kw-error">{error}</p>}
-      {editable && !discarded && it.included !== false && mode === "none" && (
-        <div className="kw-actions" role="group" aria-label={`Actions for ${it.doc_title}`}>
-          <button className="kw-btn" disabled={busy || it.admin_decision === "confirmed"} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "confirmed", undefined, it.row_version))}>Confirm</button>
-          <button className="kw-btn" disabled={busy} onClick={() => { setTexts(edits.map((e) => e.replacement)); setFull(it.proposed_content ?? ""); setNote(""); setMode("edit"); }}>Edit final wording</button>
-          <button className="kw-btn" disabled={busy} onClick={() => { setNote(""); setMode("exclude"); }}>Exclude</button>
-        </div>)}
-      {editable && it.admin_decision === "excluded" && mode === "none" && <div className="kw-actions"><button className="kw-btn" disabled={busy} onClick={() => call((t) => api.kwItemReview(t, req.request_id, it.doc_id, "confirmed", undefined, it.row_version))}>Include again</button></div>}
     </article>
   );
 }

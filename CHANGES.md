@@ -1,3 +1,61 @@
+# M6 — FINAL COMPLETION (`supportgraph-m6-final.zip`, 2026-11-11)
+
+Apply over the project with `unzip -o supportgraph-m6-final.zip`. This is the one consolidated M6 delivery: Part 2, the patch-ups, Part 3, the add-on, and this final round.
+**No migration** (alembic 0012), **no new dependency**, and no `.env`, secrets or data. Full report: **docs/M6_FINAL.md**.
+
+- **Multi-task requests.** The model returns a schema-validated, grounded task list; the rules are the fallback and anything uncovered is reported. Tasks run in order on
+  an unpublished working copy, so two tasks on one sentence both land. Each document keeps task-level provenance. A final cross-task check catches overwrites, conflicts
+  and duplicates. Every task shows its status: Completed / Needs confirmation / No document / Clarification / Failed. Also fixed: the impact model never exposed its chat,
+  so the model-based split could not run.
+- **Diffs.** A word-level diff in fixed-height, full-text panels marks only the changes. It shows Original | AI proposal | Manual revision; the third panel appears only
+  after a human edit and marks only AI → manual differences. The AI proposal is never overwritten.
+- **Review list.** Compact rows that expand one at a time; unchanged documents sit in a separate summary. After Accept there is no second Accept; the row offers Submit
+  for review, Edit manually and Discard. Staff and admins see the same view.
+- **Admins keep the Staff console**, with links between it and Administration.
+- **No folders.** The knowledge base is a flat, searchable, filterable document list. The folder write API returns 410 unless `SG_KB_LEGACY_FOLDERS=true`. No folder data
+  was deleted.
+- **Deletion needs approval.** Staff or admins request it with a reason and the current version. An administrator approves (version rechecked), then archives. The
+  document leaves RAG, its versions and audit are kept, and nothing is hard-deleted. Requests can be rejected or cancelled, and staleness is protected. The one-click
+  archive of a published document now returns 409 unless `SG_KB_DIRECT_ARCHIVE=true`.
+- **Chat and Voice polish.** Bubbles, avatars, source chips, a thinking indicator, suggestions, and a call orb with listening, speaking and thinking states. Behaviour is
+  unchanged.
+- **Analytics.** Support operations: conversations, AI resolution, escalations, takeover rate, resolution time and more. Knowledge governance: funnel, staff and admin
+  rates, manual-edit rate, time to publication, AI vs human-modified, and staff contributions. Each metric has a definition, empty values show n/a, and no text is exposed.
+- **Mobile.** A layout overflow at 390 px in the knowledge workspace was found and fixed.
+
+| Suite (this sandbox; scripted model; mocked UI) | Result |
+|---|---|
+| backend knowledge + rag + eval regression | 728 passed, 3 skipped |
+| rest of the backend | 1362 passed, 77 skipped (external services) |
+| PostgreSQL 16 | 127 passed |
+| `make eval-impact` | precision 1.000 · recall 1.000 · 16/16 exact · 0 wrong edits |
+| frontend tsc / vitest / next build | clean / 252 passed / built (no warnings) |
+
+**No real Qwen was run** (there is no Ollama here). Run these on your machine:
+
+    cd backend
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:1.7b ../.venv/bin/python scripts/judge_probe.py --tasks
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b-instruct-2507-q4_K_M ../.venv/bin/python scripts/judge_probe.py --tasks
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:1.7b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b-instruct-2507-q4_K_M ../.venv/bin/python scripts/judge_probe.py --suite --runs 2
+
+**Files in this round:**
+- backend:
+  - `app/knowledge/impact/{tasks (new), analyse, evaluate, spec}.py`
+  - `app/knowledge/{changes, release, audit}.py`
+  - `app/api/{analytics, governance (new)}.py`
+  - `app/api/routes/{admin, knowledge, knowledge_workspace}.py`
+  - `app/config.py`, `scripts/judge_probe.py`
+  - tests: `tests/knowledge/{test_m6_tasks, test_m6_deletion, test_m6_governance}.py`, `tests/db/test_postgres_m6_final.py`, plus small updates to the folder and
+    publication tests and `institute.py`
+- frontend:
+  - `src/components/workspace/{Compare (new), DeletionRequest (new), Decisions, AdminRequests, Requests, KnowledgeWorkspace}.tsx`
+  - `src/components/{AdminDashboard, Bars, ChatWidget, VoiceCall, KnowledgeAdmin, Shell, StaffConsole, AdminConsole}.tsx`, `src/app/agent/page.tsx`
+  - `src/lib/{api, types}.ts`, the CSS files and their tests
+- docs: `M6_FINAL.md`, `.env.example`, three screenshots.
+
+---
+
 # M6 — FINAL + add-on (`supportgraph-m6-final.zip`, updated 2026-11-11)
 
 Apply over the project: `unzip -o supportgraph-m6-final.zip`. It is the consolidated M6 delivery: Part 2, its patch-ups, Part 3, and this add-on. No migration (alembic 0012), no new dependency, no `.env`/data.

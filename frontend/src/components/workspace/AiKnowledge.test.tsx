@@ -27,6 +27,13 @@ const req = (o: Partial<KwRequest> = {}): KwRequest => ({
   analysis: { stage: null, done: null, total: null, error: null, model: "rules", attempt: 1, started_at: null, completed_at: null, questions: [], answers: {},
     summary: { discovered: 2, definite: 1, potential: 0, related_no_change: 1, not_relevant: [], flags: { unsupported: 0, historical: 0, scope: 0 } }, spec: null }, ...o,
 });
+/** Documents are listed collapsed (final M6): open one to see its comparison and decisions. */
+const expand = async (name: string) => {
+  const card = await screen.findByRole("article", { name }, { timeout: 5000 });
+  const head = within(card).getAllByRole("button")[0];
+  if (head.getAttribute("aria-expanded") !== "true") await userEvent.click(head);
+  return screen.getByRole("article", { name });
+};
 const decided = (d: "accepted" | "manual" | "discarded", extra: Partial<KwItem> = {}) => item({ decision: d, row_version: 1, included: d !== "discarded", final_edits: d === "discarded" ? [] : [EDIT], ...extra });
 const body = (f: ReturnType<typeof mockApi>, method: string, path: string, n = 0) => JSON.parse(String((f.mock.calls.filter((c) => ((c[1] as RequestInit | undefined)?.method ?? "GET") === method && String(c[0]).split("?")[0] === path)[n][1] as RequestInit).body));
 const count = (f: ReturnType<typeof mockApi>, method: string, path: string) => f.mock.calls.filter((c) => ((c[1] as RequestInit | undefined)?.method ?? "GET") === method && String(c[0]).split("?")[0] === path).length;
@@ -65,9 +72,10 @@ describe("AI-assisted change (staff)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Analyse" }));
     const bar = await screen.findByRole("progressbar", { name: "Analysis progress" });
     expect(bar).toHaveAttribute("aria-valuemax", "4");
-    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" }, { timeout: 5000 });
+    const card = await expand("Suggestion for Python fees");
+    expect(within(card).getByRole("button", { expanded: true })).toBeInTheDocument();
     expect(card).toHaveTextContent("States the old fee.");
-    expect(card).toHaveTextContent("Confidence 92%");
+    expect(card).toHaveTextContent("confidence 92%");
     expect(card).toHaveTextContent("Fees/Courses");
     expect(card).toHaveTextContent("Definitely affected");
     expect(within(card).getByText(LINE).closest("mark")).toHaveClass("kw-old");
@@ -82,7 +90,7 @@ describe("AI-assisted change (staff)", () => {
       { n: 1, start: 6, end: 9, text: "Until 2023 he had 3 years.", heading: "Faculty", verdict: "no_change", confidence: 0.8, reason: "Historical or explicitly dated record: left unchanged.", replacement: null, kind: "historical" }] } });
     mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [withPassages] }) }) });
     mount({ requestId: "cr_ai1" });
-    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" }, { timeout: 5000 });
+    const card = await expand("Suggestion for Python fees");
     expect(card).toHaveTextContent("How each passage was judged (2)");
     expect(card).toHaveTextContent("Potentially affected");
     expect(card).toHaveTextContent("Historical — keep");
@@ -101,7 +109,7 @@ describe("AI-assisted change (staff)", () => {
         replacement: "x", kind: "potential", judge: "agrees", hunk: 0, change: { kind: "add", removed: [], added: ["He holds an MTech in AI."], flags: ["it uses names that are in neither the document nor the request (MTech)"], notes: [] } }] } });
     mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [generalItem] }) }) });
     mount({ requestId: "cr_ai1" });
-    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" }, { timeout: 5000 });
+    const card = await expand("Suggestion for Python fees");
     expect(card).toHaveTextContent("Removed");
     expect(card).toHaveTextContent("Added");
     expect(card).toHaveTextContent("Proposed: add information — adds 1 line");
@@ -138,10 +146,16 @@ describe("AI-assisted change (staff)", () => {
     const submit = await screen.findByRole("button", { name: /Submit for administrator review/ });
     expect(submit).toBeDisabled();
     expect(screen.getByText("2 document(s) still need a decision.")).toBeInTheDocument();
-    await userEvent.click(within(screen.getByRole("article", { name: "Suggestion for Python fees" })).getByRole("button", { name: "Accept" }));
-    await waitFor(() => expect(within(screen.getByRole("article", { name: "Suggestion for Python fees" })).getByText(/Accepted/)).toBeInTheDocument());
+    expect(screen.getByRole("article", { name: "Suggestion for Python fees" })).toHaveTextContent("Action required");
+    await userEvent.click(within(await expand("Suggestion for Python fees")).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(within(screen.getByRole("article", { name: "Suggestion for Python fees" })).getByText(/Accepted — this proposal is part of the request/)).toBeInTheDocument());
+    const accepted = screen.getByRole("article", { name: "Suggestion for Python fees" });
+    expect(within(accepted).queryByRole("button", { name: "Accept" })).toBeNull();                  // no second Accept
+    expect(within(accepted).getByRole("button", { name: "Edit manually" })).toBeInTheDocument();
+    expect(within(accepted).getByRole("button", { name: "Discard" })).toBeInTheDocument();
     expect(body(f, "POST", "/api/staff/knowledge/changes/cr_ai1/items/python-fees/decision")).toEqual({ decision: "accepted", expected_row_version: 0 });
-    const c2 = screen.getByRole("article", { name: "Suggestion for Brochure" });
+    const c2 = await expand("Suggestion for Brochure");
+    expect(screen.getByRole("article", { name: "Suggestion for Python fees" }).querySelector("[aria-expanded=true]")).toBeNull();   // one open at a time
     await userEvent.click(within(c2).getByRole("button", { name: "Discard" }));
     await userEvent.type(within(c2).getByLabelText("Reason (optional)"), "historical");
     await userEvent.click(within(c2).getByRole("button", { name: "Confirm discard" }));
@@ -158,7 +172,7 @@ describe("AI-assisted change (staff)", () => {
       "POST /api/staff/knowledge/changes/cr_ai1/items/python-fees/decision": () => ({ json: decided("manual") }),
     });
     mount({ requestId: "cr_ai1" });
-    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" });
+    const card = await expand("Suggestion for Python fees");
     await userEvent.click(within(card).getByRole("button", { name: "Edit manually" }));
     const ta = within(card).getByLabelText(/Replacement for/);
     await userEvent.clear(ta);
@@ -171,11 +185,41 @@ describe("AI-assisted change (staff)", () => {
   it("does not let a stale suggestion be accepted or edited, but still allows discarding", async () => {
     mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [item({ base_stale: true, current_published_version: 2 })] }) }) });
     mount({ requestId: "cr_ai1" });
-    const card = await screen.findByRole("article", { name: "Suggestion for Python fees" });
+    const card = await expand("Suggestion for Python fees");
     expect(within(card).getByRole("alert")).toHaveTextContent("published again");
     expect(within(card).getByRole("button", { name: "Accept" })).toBeDisabled();
     expect(within(card).getByRole("button", { name: "Edit manually" })).toBeDisabled();
     expect(within(card).getByRole("button", { name: "Discard" })).toBeEnabled();
+  });
+
+  it("shows the original, the AI proposal and the manual revision; the third view marks only what the person changed", async () => {
+    const manual = BASE.replace("INR 45000", "INR 49000");
+    mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ items: [decided("manual", { proposed_content: manual })] }) }) });
+    mount({ requestId: "cr_ai1" });
+    const card = await expand("Suggestion for Python fees");
+    const orig = within(card).getByRole("region", { name: "Original text of Python fees" });
+    const ai = within(card).getByRole("region", { name: "AI proposal for Python fees" });
+    const man = within(card).getByRole("region", { name: /Manual revision of Python fees/ });
+    expect(orig).toHaveTextContent("Java Full Stack fee is INR 50000.");                                  // complete context, not a snippet
+    expect(within(orig).getByText("45000").tagName).toBe("DEL");
+    expect(within(ai).getByText("48000").tagName).toBe("INS");
+    expect(man.querySelectorAll("ins")).toHaveLength(1);
+    expect(within(man).getByText("49000").tagName).toBe("INS");                                           // AI → manual only
+    expect(within(card).getByRole("button", { name: "Use the AI proposal instead" })).toBeInTheDocument();
+  });
+
+  it("lists every task of a multi-task request with its status, the decomposition note and the final check", async () => {
+    const tasks = [{ intent: 1, text: "Change the Gen AI faculty to Mohanan sir", status: "completed" as const, status_label: "Completed proposal" },
+      { intent: 2, text: "Change the Quantum faculty to Ravi sir", status: "no_document" as const, status_label: "No relevant document found" }];
+    mockApi({ "GET /api/staff/knowledge/changes/cr_ai1": () => ({ json: req({ analysis: { ...req().analysis!, intents: tasks, decomposition: { source: "rules", tasks: [], note: "" },
+      final_check: ["Task 1 (“Change the Gen AI faculty”): its new value “Mohanan sir” is not in the final proposal for genai — a later task may have overwritten it."] },
+      items: [item({ ai: { ...item().ai!, tasks: [{ task: 1, classification: "definite", reason: "faculty line", edits: 1 }] } })] }) }) });
+    mount({ requestId: "cr_ai1" });
+    const list = await screen.findByRole("region", { name: "Tasks in this request" });
+    expect(list).toHaveTextContent("Completed proposal");
+    expect(list).toHaveTextContent("No relevant document found");
+    expect(within(list).getByRole("alert")).toHaveTextContent("overwritten");
+    expect(screen.getByRole("article", { name: "Suggestion for Python fees" })).toHaveTextContent("Task 1: Change the Gen AI faculty to Mohanan sir");
   });
 
   it("shows an analysis failure with a retry instead of an empty result", async () => {
@@ -231,7 +275,8 @@ describe("Administrator change requests (integrated approve → process → publ
     await userEvent.click(await screen.findByRole("tab", { name: /Documents/ }));
     expect(await screen.findByRole("article", { name: "Document Python fees" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Document FAQ" })).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "Document Brochure" })).toHaveTextContent("Reason: historical brochure");
+    expect(screen.getByRole("article", { name: "Document Brochure" })).toHaveTextContent("Discarded by staff: historical brochure");
+    expect(await expand("Document Brochure")).toHaveTextContent("Reason: historical brochure");
     await userEvent.click(screen.getByRole("tab", { name: "Audit history" }));
     const log = await screen.findByRole("list", { name: "Audit history" });
     expect(log).toHaveTextContent("Staff decision");
@@ -316,11 +361,36 @@ describe("Administrator change requests (integrated approve → process → publ
     await userEvent.click(screen.getByRole("button", { name: "Return for revision" }));
     await waitFor(() => expect(body(f, "POST", "/api/admin/knowledge/changes/cr_ai1/review")).toEqual({ decision: "return", note: "Please recheck the fee" }));
     await userEvent.click(screen.getByRole("tab", { name: /Documents/ }));
-    const faq = await screen.findByRole("article", { name: "Document FAQ" });
+    const faq = await expand("Document FAQ");
     await userEvent.click(within(faq).getByRole("button", { name: "Exclude" }));
     expect(within(faq).getByRole("button", { name: "Exclude from publication" })).toBeDisabled();
     await userEvent.type(within(faq).getByLabelText(/Reason for excluding/), "not ready");
     await userEvent.click(within(faq).getByRole("button", { name: "Exclude from publication" }));
     await waitFor(() => expect(body(f, "POST", "/api/admin/knowledge/changes/cr_ai1/items/faq/review")).toEqual({ decision: "excluded", note: "not ready", expected_row_version: 1 }));
+  });
+});
+
+describe("Deletion requests (administrator)", () => {
+  const del = (o: Partial<KwRequest> = {}) => req({ status: "submitted", description: "Delete “Python fees”: course closed", submitted_by: "staff1", submitted_at: "2026-11-03T09:00:00Z",
+    items: [item({ decision: "accepted", included: true, rationale: "course closed", stats: { added_chars: 0, deleted_chars: 0, changed_blocks: 0, delete: true } as KwItem["stats"], ai: null, origin: "manual" })],
+    analysis: { ...req().analysis!, kind: "deletion", deletion_reason: "course closed", summary: null }, counts: { ...req().counts!, included: 1, pending: 0 }, ...o });
+  it("labels the request, explains what approval does, offers no 'return', and archives only after confirmation", async () => {
+    const st = { r: del({ status: "approved" }) };
+    const f = mockApi({
+      "GET /api/admin/knowledge/changes": () => ({ json: { items: [st.r], total: 1, page: 1, page_size: 50 } }),
+      "GET /api/admin/knowledge/changes/cr_ai1": () => ({ json: st.r }),
+      "POST /api/admin/knowledge/changes/cr_ai1/publish": () => { st.r = del({ status: "published", published_by: "admin1", published_at: "2026-11-03T10:00:00Z" }); return { status: 202, json: { outcome: "deleted", attempt: 1, request: st.r } }; },
+    });
+    signedIn("admin", "admin1"); renderWithAuth(<ChangeRequests />);
+    const row = await screen.findByRole("button", { name: /Open request cr_ai1/ });
+    expect(row).toHaveTextContent("Deletion");
+    await userEvent.click(row);
+    expect(await screen.findByRole("note")).toHaveTextContent("archives the document");
+    expect(screen.queryByRole("button", { name: "Return for revision" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Archive the document now" }));
+    expect(count(f, "POST", "/api/admin/knowledge/changes/cr_ai1/publish")).toBe(0);
+    await userEvent.click(screen.getByRole("button", { name: "Confirm — archive" }));
+    await waitFor(() => expect(count(f, "POST", "/api/admin/knowledge/changes/cr_ai1/publish")).toBe(1));
+    expect(await screen.findByText(/Deleted \(archived\)/)).toBeInTheDocument();
   });
 });

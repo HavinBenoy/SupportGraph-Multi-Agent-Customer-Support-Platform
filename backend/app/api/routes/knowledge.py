@@ -266,9 +266,17 @@ async def unpublish(doc_id: DOC, body: ExpectIn | None = None, p: Principal = De
 
 
 @admin_router.post("/documents/{doc_id}/archive")
-async def archive(doc_id: DOC, body: ExpectIn | None = None, p: Principal = Depends(require_admin)) -> dict:
+async def archive(doc_id: DOC, request: Request, body: ExpectIn | None = None, p: Principal = Depends(require_admin)) -> dict:
+    """Archive a draft / unpublished document. A PUBLISHED document is not archived here (final M6): it is deleted through a deletion request that an administrator
+    approves (POST /documents/{id}/deletion-request), unless SG_KB_DIRECT_ARCHIVE=true."""
     exp = body.expected_row_version if body else None
-    return await asyncio.to_thread(_guard, lambda db: pipeline.archive_document(db, p.tenant_id, p.subject, doc_id, expected_row_version=exp))
+    direct = request.app.state.settings.kb_direct_archive
+
+    def work(db):
+        if not direct and store.get_doc(db, p.tenant_id, doc_id).status == "published":
+            raise store.Conflict("a published document is deleted through a deletion request that an administrator approves: use “Request deletion”")
+        return pipeline.archive_document(db, p.tenant_id, p.subject, doc_id, expected_row_version=exp)
+    return await asyncio.to_thread(_guard, work)
 
 
 @admin_router.post("/documents/{doc_id}/unarchive")

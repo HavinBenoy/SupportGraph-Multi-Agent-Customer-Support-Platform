@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbDoc, KwAuditEvent, KwDecision, KwFolder, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbDoc, KnowledgeAnalytics, KwAuditEvent, KwDecision, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -63,6 +63,7 @@ export const api = {
   calls: (token: string) => call<LiveCall[]>("/staff/calls", { token }),
   callAction: (token: string, id: string, action: CallAction) => call<LiveCall>(`/staff/calls/${encodeURIComponent(id)}/${action}`, { method: "POST", token }),
   analytics: (token: string, days: number) => call<Analytics>(`/admin/analytics?days=${days}`, { token }),
+  knowledgeAnalytics: (token: string, days: number) => call<KnowledgeAnalytics>(`/admin/analytics/knowledge?days=${days}`, { token }),
   // M4.1: transcript and intervention feedback (the server decides who may read or write them: the call's intervention owner alone writes)
   transcript: (token: string, id: string) => call<Transcript>(`/staff/calls/${encodeURIComponent(id)}/transcript`, { token }),
   feedback: (token: string, id: string) => call<Feedback>(`/staff/calls/${encodeURIComponent(id)}/feedback`, { token }),
@@ -89,20 +90,14 @@ export const api = {
   kbReview: (token: string, call_id: string, decision: "approve" | "reject", note?: string) =>
     call<KbProposalRow>(`/admin/knowledge/proposals/${encodeURIComponent(call_id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
   kbAudit: (token: string, docId?: string) => call<{ items: KbAuditRow[]; next_before_id: number | null }>(`/admin/knowledge/audit?${new URLSearchParams({ limit: "20", ...(docId ? { doc_id: docId } : {}) })}`, { token }),
-  // Knowledge workspace (Part 1). Staff routes also accept administrators; folder and review routes are administrators only.
+  // Knowledge workspace. Staff routes also accept administrators; review routes are administrators only. (Folders were retired in final M6.)
   kwTree: (token: string, scope: "admin" | "staff") => call<KwTree>(`/${scope}/knowledge/tree`, { token }),
   kwRead: (token: string, id: string) => call<KwReadDoc>(`/staff/knowledge/documents/${encodeURIComponent(id)}`, { token }),
   kwSearch: (token: string, q: string, scope: "admin" | "staff") => call<{ items: { doc_id: string; title: string; category: string }[]; total: number }>(`/${scope}/knowledge/documents?${new URLSearchParams({ q, page_size: "30" })}`, { token }),
   kwHistory: (token: string, id: string) => call<{ items: KwHistoryRow[]; total: number }>(`/staff/knowledge/documents/${encodeURIComponent(id)}/versions`, { token }),
   kwVersion: (token: string, id: string, n: number) => call<KwHistoryRow & { content: string }>(`/staff/knowledge/documents/${encodeURIComponent(id)}/versions/${n}`, { token }),
-  kwCreateFolder: (token: string, name: string, parent_id: string | null) => call<KwFolder>("/admin/knowledge/folders", { method: "POST", token, body: { name, ...(parent_id ? { parent_id } : {}) } }),
-  kwRenameFolder: (token: string, id: string, name: string, expected_row_version: number) => call<KwFolder>(`/admin/knowledge/folders/${encodeURIComponent(id)}`, { method: "PUT", token, body: { name, expected_row_version } }),
-  kwMoveFolder: (token: string, id: string, parent_id: string | null, expected_row_version: number) =>
-    call<KwFolder>(`/admin/knowledge/folders/${encodeURIComponent(id)}/parent`, { method: "PUT", token, body: { parent_id, expected_row_version } }),
-  kwDeleteFolder: (token: string, id: string, expected_row_version: number) =>
-    call<{ folder_id: string; deleted: boolean }>(`/admin/knowledge/folders/${encodeURIComponent(id)}?expected_row_version=${expected_row_version}`, { method: "DELETE", token }),
-  kwMove: (token: string, docId: string, folder_id: string | null, expected_row_version: number) =>
-    call<{ doc_id: string; folder_id: string | null; row_version: number }>(`/admin/knowledge/documents/${encodeURIComponent(docId)}/folder`, { method: "PUT", token, body: { folder_id, expected_row_version } }),
+  kwRequestDeletion: (token: string, scope: "admin" | "staff", docId: string, body: { reason: string; expected_version: number; confirm?: boolean }) =>
+    call<KwRequest>(`/${scope}/knowledge/documents/${encodeURIComponent(docId)}/deletion-request`, { method: "POST", token, body }),
   kwPreview: (token: string, docId: string, content: string, title?: string) => call<KwPreview>("/staff/knowledge/diff-preview", { method: "POST", token, body: { doc_id: docId, content, ...(title ? { title } : {}) } }),
   kwStart: (token: string, docId: string) => call<{ request: KwRequest; existing: boolean }>("/staff/knowledge/changes", { method: "POST", token, body: { doc_id: docId } }),
   kwMine: (token: string) => call<KwRequestList>("/staff/knowledge/changes?page_size=50", { token }),

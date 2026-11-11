@@ -240,6 +240,10 @@ class Settings(BaseSettings):
     impact_max_output_tokens: int = Field(default=900, ge=64, le=4096)         # the impact role writes replacement text, so it gets a larger output cap than 400
     kb_release_stale_s: int = Field(default=900, ge=30, le=86400)              # a request stuck in processing/publishing this long (crash) may be retried
     kb_require_separate_reviewer: bool = False                                 # true: the administrator who proposed a feedback-based change cannot review it
+    kb_direct_archive: bool = False                                            # final M6: a PUBLISHED document is deleted only through an approved deletion request;
+                                                                               # true restores the old one-click archive of a published document (not recommended)
+    kb_legacy_folders: bool = False                                            # final M6: the folder-management API is retired (410). true re-enables it (legacy only;
+                                                                               # folder rows and placements were never deleted, so this is fully reversible)
 
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.

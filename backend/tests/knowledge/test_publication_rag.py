@@ -215,6 +215,8 @@ def test_unpublish_removes_retrieval_but_keeps_all_history(api):  # noqa: F811
 
 def test_archive_removes_retrieval_retains_history_and_blocks_new_publication_until_unarchived(api):  # noqa: F811
     go_live(api)
+    assert api.post(f"{BASE}/documents/fees-test/archive", headers=admin(api)).status_code == 409    # final M6: a published document needs a deletion request ...
+    api.app.state.settings.kb_direct_archive = True                                                   # ... unless the old one-click archive is switched back on
     add_version(api, "fees-test", FEES_V3, "four")
     process(api, "fees-test", 2)
     assert api.post(f"{BASE}/documents/fees-test/archive", headers=admin(api)).json()["status"] == "archived"
@@ -356,6 +358,7 @@ def test_a_version_being_processed_right_now_is_refused_but_a_stale_claim_can_be
 
 def test_an_archived_document_cannot_be_processed(api):  # noqa: F811
     go_live(api)
+    api.app.state.settings.kb_direct_archive = True
     api.post(f"{BASE}/documents/fees-test/archive", headers=admin(api))
     assert api.post(f"{BASE}/documents/fees-test/versions/1/process", headers=admin(api)).status_code == 409
 

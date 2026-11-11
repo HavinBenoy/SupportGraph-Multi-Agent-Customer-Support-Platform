@@ -174,6 +174,10 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
 
       {blocked && <div className="banner escalated" role="status"><strong>Voice is not ready on this server.</strong><ul>{problems!.map((p) => <li key={p}>{p}</li>)}</ul></div>}
 
+      <div className={`voice-stage phase-${phase}${muted ? " muted" : ""}`} aria-hidden="true">
+        <span className="voice-orb"><span className="ring" /><span className="ring" /><span className="core">{live ? (muted ? "🔇" : "🎙") : "☎"}</span></span>
+        <span className="voice-bars">{[0, 1, 2, 3, 4].map((i) => <i key={i} />)}</span>
+      </div>
       <div className="callbar">
         {!live
           ? <button className="btn primary" onClick={() => void startCall()} disabled={!ready || blocked}>Start call</button>
@@ -184,10 +188,13 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       <div className="log" role="log" aria-live="polite" aria-label="Call transcript">
         {lines.length === 0 && <p className="muted empty">Press “Start call”, allow the microphone, then ask your question. Everything said appears here as text too.</p>}
         {lines.map((m) => (
-          <div key={m.id} className={`msg ${m.role}${m.partial ? " partial" : ""}`}>
-            <span className="sr-only">{m.role === "user" ? "You" : "Assistant"}: </span><p>{m.text}</p>
-            {m.stale && <p className="muted tiny">Not spoken: you had already asked something newer.</p>}
-            {m.citations && m.citations.length > 0 && <ul className="cites" aria-label="Sources">{m.citations.map((c) => <li key={c.id}>{c.heading || c.id}</li>)}</ul>}
+          <div key={m.id} className={`msg-row ${m.role}`}>
+            <span className="avatar" aria-hidden="true">{m.role === "user" ? "You" : "SG"}</span>
+            <div className={`msg ${m.role}${m.partial ? " partial" : ""}`}>
+              <span className="sr-only">{m.role === "user" ? "You" : "Assistant"}: </span><p>{m.text}</p>
+              {m.stale && <p className="muted tiny">Not spoken: you had already asked something newer.</p>}
+              {m.citations && m.citations.length > 0 && <ul className="cites chips" aria-label="Sources">{m.citations.map((c) => <li key={c.id}><span aria-hidden="true">❖ </span><span>{c.heading || c.id}</span></li>)}</ul>}
+            </div>
           </div>
         ))}
         <div ref={endRef} />
@@ -217,7 +224,7 @@ export function VoiceCall({ tenant, deps = realDeps }: { tenant?: string; deps?:
       {notice && <p className="muted tiny" role="status">{notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
 
-      <form className="composer" onSubmit={send}>
+      <form className="composer modern" onSubmit={send}>
         <label className="sr-only" htmlFor="voice-text">Type instead</label>
         <input id="voice-text" value={text} maxLength={1000} placeholder={!live ? "Start a call to type or speak" : withStaff ? "A staff member is on the call" : "Or type your question"} disabled={!live || withStaff} onChange={(e) => setText(e.target.value)} />
         <button className="btn" disabled={!live || withStaff || !text.trim()}>Send</button>

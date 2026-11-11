@@ -32,7 +32,7 @@ describe("Part 3", () => {
     expect(screen.queryByRole("tab", { name: "Publishing" })).toBeNull();
   });
 
-  it("staff see Chat and the Staff console; administrators see Chat and Administration but no Staff console", () => {
+  it("staff see Chat and the Staff console; administrators see Chat, the Staff console and Administration", () => {
     signedIn("staff", "staff1");
     const { unmount } = renderWithAuth(<Shell><p>x</p></Shell>);
     let nav = screen.getByRole("navigation", { name: "Main" });
@@ -42,7 +42,7 @@ describe("Part 3", () => {
     signedIn("admin", "admin1");
     renderWithAuth(<Shell><p>x</p></Shell>);
     nav = screen.getByRole("navigation", { name: "Main" });
-    expect(nav).toHaveTextContent("Chat"); expect(nav).toHaveTextContent("Administration"); expect(nav).not.toHaveTextContent("Staff console");
+    expect(nav).toHaveTextContent("Chat"); expect(nav).toHaveTextContent("Administration"); expect(nav).toHaveTextContent("Staff console");
   });
 
   it("the hero heading animates by line and the stylesheet turns every animation off under reduced motion", async () => {

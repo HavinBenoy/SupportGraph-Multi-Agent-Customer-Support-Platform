@@ -8,6 +8,7 @@ import { LoginForm } from "./LoginForm";
 interface Msg { id: number; role: "user" | "assistant"; content: string; citations?: Citation[]; status?: ChatStatus }
 
 export const POLL_MS = 4000;
+const SUGGESTIONS = ["What courses do you offer?", "How much is the Python course fee?", "What is the refund policy?"];
 const MAX_LEN = 1000;
 let nextId = 1;
 
@@ -38,7 +39,12 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
   const endRef = useRef<HTMLDivElement>(null);
   const tenantArg = tenant ?? cfg?.tenant_id;
 
-  useEffect(() => { api.config(tenant).then(setCfg).catch(() => setError("The support service is not reachable right now.")); }, [tenant]);
+  const [offline, setOffline] = useState(false);
+  const loadConfig = useCallback(() => {
+    setOffline(false);
+    api.config(tenant).then((c) => { setCfg(c); setError(null); }).catch(() => { setOffline(true); setError("The support service is not reachable right now."); });
+  }, [tenant]);
+  useEffect(loadConfig, [loadConfig]);
 
   // Restore the saved conversation for this identity (guest or student); switching identity starts clean.
   useEffect(() => {
@@ -121,32 +127,44 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
       {!student && !member && showLogin && <LoginForm heading="Student sign in" onDone={() => setShowLogin(false)} />}
 
       <div className="log" role="log" aria-live="polite" aria-label="Conversation">
-        {msgs.length === 0 && <p className="muted empty">Hi! How can I help today?</p>}
+        {msgs.length === 0 && (
+          <div className="chat-empty">
+            <span className="chat-orb" aria-hidden="true" />
+            <p className="empty">Hi! How can I help today?</p>
+            <div className="chat-suggest" role="group" aria-label="Suggestions">
+              {SUGGESTIONS.map((q) => <button key={q} type="button" className="chip" onClick={() => setText(q)}>{q}</button>)}
+            </div>
+          </div>)}
         {msgs.map((m) => (
-          <div key={m.id} className={`msg ${m.role}`}>
-            <span className="sr-only">{m.role === "user" ? "You" : "Assistant"}: </span>
-            <p>{m.content}</p>
-            {m.citations && m.citations.length > 0 && (
-              <ul className="cites" aria-label="Sources">{m.citations.map((c) => <li key={c.id}>{c.heading || c.id}</li>)}</ul>
-            )}
+          <div key={m.id} className={`msg-row ${m.role}`}>
+            <span className="avatar" aria-hidden="true">{m.role === "user" ? "You" : "SG"}</span>
+            <div className={`msg ${m.role}`}>
+              <span className="sr-only">{m.role === "user" ? "You" : "Assistant"}: </span>
+              <p>{m.content}</p>
+              {m.citations && m.citations.length > 0 && (
+                <ul className="cites chips" aria-label="Sources">{m.citations.map((c) => <li key={c.id}><span aria-hidden="true">❖ </span><span>{c.heading || c.id}</span></li>)}</ul>
+              )}
+            </div>
           </div>
         ))}
-        {busy && <div className="msg assistant typing" aria-label="Assistant is typing">…</div>}
+        {busy && (
+          <div className="msg-row assistant"><span className="avatar" aria-hidden="true">SG</span>
+            <div className="msg assistant typing" aria-label="Assistant is typing"><span className="dots" aria-hidden="true"><i /><i /><i /></span><span className="tiny muted">Thinking…</span></div></div>)}
         <div ref={endRef} />
       </div>
 
       {status && BANNERS[status] && <p className={`banner ${status}`} role="status">{BANNERS[status]}</p>}
       {notice && <p className="banner done" role="status">{notice}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <p className="error" role="alert">{error}{offline && <> <button className="btn small" onClick={loadConfig}>Try again</button></>}</p>}
 
-      <form className="composer" onSubmit={send}>
+      <form className="composer modern" onSubmit={send}>
         <label className="sr-only" htmlFor="chat-text">Your message</label>
         <textarea id="chat-text" value={text} maxLength={MAX_LEN} rows={2} placeholder={locked ? "Waiting for staff…" : "Type your question"}
           disabled={locked} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
-        <button className="btn primary" disabled={busy || locked || !text.trim()}>Send</button>
+        <button className="btn primary send" disabled={busy || locked || !text.trim()}><span aria-hidden="true">↑ </span>Send</button>
       </form>
-      <p className="muted tiny">{text.length}/{MAX_LEN}</p>
+      <p className="muted tiny composer-meta"><span>Enter to send · Shift+Enter for a new line</span><span>{text.length}/{MAX_LEN}</span></p>
     </section>
   );
 }
