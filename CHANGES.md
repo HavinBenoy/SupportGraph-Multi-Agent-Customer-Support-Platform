@@ -1,3 +1,39 @@
+# M6 — FINAL + add-on (`supportgraph-m6-final.zip`, updated 2026-11-11)
+
+Apply over the project: `unzip -o supportgraph-m6-final.zip`. It is the consolidated M6 delivery: Part 2, its patch-ups, Part 3, and this add-on. No migration (alembic 0012), no new dependency, no `.env`/data.
+**This add-on: docs/M6_ADDON.md.**
+
+- **Case A** ("change the gen ai course fees to 20000 rupees and machine learning course fees to 12000 rupees"). The request was never split into two intents, and the two amounts were read as 20000 → 12000. Now the splitter cuts at every clause boundary and re-glues pieces that have no value of their own (keeping the original separators), a verb-less piece borrows the first verb, and two "to <amount>" are never old → new. Each intent is discovered, validated, traced and verified with its own values only.
+- **Case B** ("Change the work experience of santhosh sir to Mechanical industry", semantic 0.59 vs 0.60). A model parse named the new value as the subject. Now the description's subject words are always searched, and values and time words are excluded. `SG_KB_AI_SEMANTIC_ADMIT` is now **0.45** and an independent path; sibling subjects need `SG_KB_AI_SEMANTIC_ADMIT_UNKEYED` (0.70). Work-experience/career requests may correct "Previously he worked in …", flagged for review.
+- **Chat for staff and admins.** Real RBAC change in `/api/chat`: they chat as a visitor of their own tenant, with no student identity and no access to students' tickets. The voice line is unchanged (students/visitors). Admins no longer see or land on the Staff console.
+- **Change requests in a master-detail layout** (admin and staff). The list sits left and the detail right; the selection is kept in the URL; phones show one at a time with "Back to the list".
+- **Hero "s".** The italic overhang was clipped by `background-clip:text`; padding plus a matching negative margin fixes it. Checked at 1366/820/390 px.
+- **Motion.** CSS-only, transform/opacity: page/hero/section/detail/dialog/menu transitions and a loading pulse. All of it is off under `prefers-reduced-motion`.
+
+Verification: Run in this sandbox. Every run uses a scripted model or a mocked UI; **no real Qwen was run**, because there is no Ollama here.
+
+| Suite | Result |
+|---|---|
+| backend knowledge + rag + eval regression | 706 passed, 3 skipped |
+| rest of the backend (api, security, step4, calls, voice, graph, db, …) | 1362 passed, 75 skipped (the skips need external services) |
+| PostgreSQL (db + folders + M6 regressions + trace + chat) | 124 passed |
+| impact eval | precision 1.000, recall 1.000, 16/16 exact replacements, 0 wrong edits |
+| frontend `tsc` / `vitest` / `next build` | clean / 244 passed / built |
+| Playwright (production build, API mocked) | hero "s" overhang room 9.6 / 6.9 / 5.0 px at 1366 / 820 / 390 px; change-request list and detail side by side on desktop, one at a time at 820 and 390 px, Back returns to the list; animation durations 1e-05s under reduced motion |
+
+Real Qwen on your machine (17 scenarios; 16 = Case A's ML intent, 17 = Case B):
+
+    cd backend
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:1.7b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2 2>&1 | tee /tmp/sg-qwen-1.7b.txt
+    SG_LLM_PROVIDER=ollama SG_LLM_MODEL_IMPACT=qwen3:4b-instruct-2507-q4_K_M ../.venv/bin/python scripts/judge_probe.py --suite --runs 2 2>&1 | tee /tmp/sg-qwen-4b.txt
+
+In the app, run these and read the Processing log:
+1. Case A, the exact sentence: expect two "intent discovered" steps, and items for course (25000 → 20000) and Data-Science (9999 → 12000).
+2. Case B: expect Data-Science "nominated", a model call on its section, and a flagged proposal.
+3. As staff, then as admin: open Chat, then open your own area.
+
+---
+
 # M6 — FINAL: Part 2 patch-up + Part 3 (one consolidated ZIP: `supportgraph-m6-final.zip`)
 
 Supersedes every earlier Part 2 zip. **No migration** (alembic stays at 0012). **No new dependency.** Your `.env`, secrets and data are not included.

@@ -4,7 +4,7 @@ One request on your own text:
     cd backend
     ../.venv/bin/python scripts/judge_probe.py -d "remove the age restriction from eligibility" --file section.md
     ../.venv/bin/python scripts/judge_probe.py -d "..." --text $'Machine Learning faculty is Santhosh sir\\nHe has a work experience of 3 years.'
-The fifteen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
+The seventeen realistic scenarios (incl. the three reported Santhosh-sir cases) (replace a value, add a qualification, online -> hybrid, remove a restriction, add a course, several statements, history kept, unrelated text unchanged,
 ambiguous request, tables / headings / lists preserved), against the real model, with the real validator:
     ../.venv/bin/python scripts/judge_probe.py --suite
     SG_LLM_MODEL_IMPACT=qwen3:4b ../.venv/bin/python scripts/judge_probe.py --suite --runs 2          # another model; SG_KB_AI_JUDGE_THINKING=false to compare without thinking
@@ -77,6 +77,12 @@ SUITE = [
      "Fcaulty", lambda st, new, old: st == "revised" and "20000" in new and "25000" not in new and "vinu sir" in new, "25000 -> 20000, the rest unchanged"),
     ("15 (reported) ML fee, intent 2 of 2", "fees for machine learning is 12000 rs", ONE.replace("Data Science.\n", "Data Science. Fee for Machine learning course is 9999 rupees.\n"),
      "Machine Learning", lambda st, new, old: st == "revised" and "12000" in new and "9999" not in new and "M.Tech" in new, "9999 -> 12000 only"),
+    ("16 (add-on A) ML fee, 2nd intent of the new wording", "change machine learning course fees to 12000 rupees",
+     "# Data-Science\n\nMachine Learning faculty is Santhosh sir.\nHe has a work experience of 3 years.\nPreviously he worked in IT.\nHe do have a M.Tech in Data Science.\nFee for Machine learning course is 9999 rupees.\n",
+     "Machine Learning", lambda st, new, old: st == "revised" and "12000" in new and "9999" not in new and "20000" not in new, "9999 -> 12000, nothing about 20000"),
+    ("17 (add-on B) work experience -> Mechanical industry", "Change the work experience of santhosh sir to Mechanical industry.",
+     "# Data-Science\n\nMachine Learning faculty is Santhosh sir.\nHe has a work experience of 3 years.\nPreviously he worked in IT.\nHe do have a M.Tech in Data Science.\n",
+     "Machine Learning", lambda st, new, old: st == "revised" and "echanical" in new and "M.Tech" in new, "the work history now says Mechanical (flagged for review)"),
     ("10 structure preserved", "change online classes to hybrid classes", DS, "- Online", lambda st, new, old: st == "revised" and new.count("## ") == 3 and "| Course | Fee |\n|---|---|" in new, "headings, list, table intact"),
 ]
 

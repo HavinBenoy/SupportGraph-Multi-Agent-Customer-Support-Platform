@@ -32,8 +32,19 @@ def test_student_cannot_use_another_students_ticket(api):
     assert api.get(f"/api/chat/{t}", headers=ha).status_code == 200
 
 
-def test_staff_cannot_use_customer_chat(api):
-    assert api.post("/api/chat", json={"text": "hi"}, headers=auth(api, "staff1")).status_code == 403
+def test_staff_and_admins_use_the_customer_chat_as_visitors_of_their_own_tenant(api):
+    """M6 add-on: staff and administrators may use the chat. They get a visitor's conversation in THEIR tenant (from the token): no student identity, so no student
+    records; a student's conversation stays the student's; the tenant in the body is ignored for them."""
+    for user in ("staff1", "admin1"):
+        h = auth(api, user)
+        r = api.post("/api/chat", json={"text": "what courses do you offer?", "tenant": "someone_else"}, headers=h)
+        assert r.status_code == 200, (user, r.text)
+        t = r.json()["ticket_id"]
+        assert api.get(f"/api/chat/{t}", headers=h).status_code == 200
+        assert api.get(f"/api/chat/{t}", headers=auth(api, "asha")).status_code == 404          # not a student's ticket
+    student_ticket = api.post("/api/chat", json={"text": "what batches do I have?"}, headers=auth(api, "asha")).json()["ticket_id"]
+    assert api.get(f"/api/chat/{student_ticket}", headers=auth(api, "staff1")).status_code == 404    # staff cannot open a student's conversation through the chat
+    assert api.post("/api/chat", json={"text": "what is my attendance?", "ticket_id": student_ticket}, headers=auth(api, "admin1")).status_code == 404
 
 
 def test_body_cannot_smuggle_identity(api):

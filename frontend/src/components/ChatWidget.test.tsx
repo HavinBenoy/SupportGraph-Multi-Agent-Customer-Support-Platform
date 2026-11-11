@@ -95,11 +95,20 @@ describe("ChatWidget", () => {
     expect(sessionStorage.getItem("sg.ticket.guest")).toBeNull();
   });
 
-  it("tells staff to use the console instead of the student chat", async () => {
-    signedIn("staff", "s1");
-    mockApi({ "GET /api/config": () => ({ json: CONFIG }) });
-    renderWithAuth(<ChatWidget />);
-    expect(await screen.findByText(/signed in as staff/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Your message")).not.toBeInTheDocument();
+  it("lets staff and administrators chat as a visitor of their own tenant, with their own token", async () => {
+    for (const role of ["staff", "admin"] as const) {
+      signedIn(role, `${role}1`);
+      const f = mockApi({ "GET /api/config": () => ({ json: CONFIG }), "POST /api/chat": () => ({ json: { ticket_id: "t1", reply: "We offer Python.", citations: [], status: "answered" } }) });
+      const { unmount } = renderWithAuth(<ChatWidget />);
+      expect(await screen.findByText(new RegExp(`signed in as ${role}1 \\(${role}\\): you see exactly what a visitor sees`, "i"))).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Student sign in" })).toBeNull();
+      await userEvent.type(screen.getByLabelText("Your message"), "what courses?");
+      await userEvent.click(screen.getByRole("button", { name: "Send" }));
+      expect(await screen.findByText("We offer Python.")).toBeInTheDocument();
+      const call = f.mock.calls.find((c) => String(c[0]).includes("/api/chat"))!;
+      expect(new Headers((call[1] as RequestInit).headers).get("Authorization")).toBe(`Bearer tok-${role}1`);
+      unmount();
+      sessionStorage.clear();
+    }
   });
 });

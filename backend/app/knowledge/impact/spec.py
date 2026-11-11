@@ -140,6 +140,8 @@ def _tail_effective(text: str, today: date | None = None) -> tuple[str | None, s
 
 def _pair_values(text: str) -> tuple[str, str] | None:
     """Two values of the same kind in the text (two amounts, or two time ranges): the first is the old one, the second the new one."""
+    if len(re.findall(r"\b(?:to|is|are|as|be|at|now)\s+(?:rs\.?\s*|₹\s*|inr\s*)?\d", text, re.I)) >= 2:
+        return None                         # "X to 20000 and Y to 12000": two NEW values of two intents, never "20000 -> 12000"
     for rx, ok in ((_MONEY, lambda m: m.group("cur") or m.group("k") or len(m.group("num").replace(",", "")) >= 4), (_TIME, lambda m: True)):
         found = [m.group(0).strip() for m in rx.finditer(text) if ok(m)]
         found = [f for f in found if kind_of(f) != "text"]
@@ -249,15 +251,49 @@ _ANAPHOR = re.compile(r"^\s*(?:and\s+)?(?:that|those|the same|the one|it)\s+(?=f
 _CLAUSE_SPLIT = re.compile(r"\s*(?:;|\.\s+(?=[A-Za-z])|,?\s+and\s+also\s+|,\s+also\s+|,?\s+and\s+(?=(?:that|those|the|for|in|of|add|remove|delete|drop|change|update|replace|set|mention|include|[A-Z0-9])\b)|,?\s+while\s+|,?\s+whereas\s+)\s*")
 
 
+_FINE_SPLIT = re.compile(r"\s*(?:;|\.\s+(?=[A-Za-z])|,?\s+and\s+also\s+|,\s+also\s+|,?\s+while\s+|,?\s+whereas\s+|,?\s+and\s+|,\s+)\s*", re.I)
+_CONTENT = re.compile(r"\b(?!(?:rs|rupees?|inr|and|or|the|a|an|to|is|are|now)\b)[A-Za-z]{3,}\b", re.I)
+_LEAD_VERB = re.compile(r"^(?:please\s+)?(change|update|set|make|revise|modify|increase|reduce|correct)\b", re.I)
+
+
 def split_intents(description: str) -> list[str]:
-    """Independent change intents in one request: "The fees for gen ai is 20000 rs and that for machine learning is 12000 rs" -> ["The fees for gen ai is 20000 rs",
-    "fees for machine learning is 12000 rs"]. A clause is split off only when BOTH sides state a value / target of their own (a number, "to X", "now ..."), so a single change
-    that merely mentions two things ("Python and Java fees are now 9000") stays one intent. An anaphoric second clause ("that for ...") borrows the attribute words of the
-    first. Returns [description] when there is nothing to split."""
+    """Independent change intents in one request.
+        "The fees for gen ai is 20000 rs and that for machine learning is 12000 rs"  -> ["The fees for gen ai is 20000 rs", "fees for machine learning is 12000 rs"]
+        "change the gen ai course fees to 20000 rupees and machine learning course fees to 12000 rupees"
+                                                                                 -> ["change the gen ai course fees to 20000 rupees", "change machine learning course fees to 12000 rupees"]
+    The text is cut at every clause boundary ("and", ",", ";", ".", "also", "while"); a piece that states no value / target / action of its own is glued back to the piece after it
+    ("Python and Java fees are now 9000" stays ONE intent). A piece that refers back ("that for ...") borrows the first piece's attribute words, and a piece without a verb borrows
+    the first piece's verb ("change"), so every intent can be read on its own. Returns [description] when there is nothing to split."""
     text = " ".join((description or "").split())
     protected = _TITLES.sub(lambda m: m.group(1) + "\u2024", text)
-    parts = [p.strip(" ,.") for p in _CLAUSE_SPLIT.split(protected) if p and p.strip(" ,.")]
-    if len(parts) < 2 or not all(_HAS_VALUE.search(p) or _ACTION_START.match(p) for p in parts):
+    # split keeping each separator, so a piece glued back gets its ORIGINAL separator ("From today onwards, Machine Learning ..." stays exactly that)
+    bits = re.split(f"({_FINE_SPLIT.pattern})", protected, flags=re.I)
+    pieces: list[tuple[str, str]] = []                                    # (separator before the piece, piece)
+    sep = ""
+    for k, bit in enumerate(bits):
+        if k % 2 == 1:
+            sep = bit
+        elif bit.strip(" ,."):
+            pieces.append((sep, bit.strip()))
+            sep = ""
+    parts: list[str] = []
+    carry = ""
+    for sep, p in pieces:
+        if parts and not carry and not _CONTENT.search(re.sub(r"\d[\d,.]*", " ", p)):
+            parts[-1] = parts[-1] + sep + p                  # a bare value ("8000") belongs to the list before it ("... are now 9000, 8000 and 7000")
+            continue
+        p = (carry + sep + p) if carry else p
+        if _HAS_VALUE.search(p) or _ACTION_START.match(p):
+            parts.append(p.strip(" ,."))
+            carry = ""
+        else:
+            carry = p
+    if carry:
+        if parts:
+            parts[-1] = parts[-1] + " " + carry
+        else:
+            parts.append(carry)
+    if len(parts) < 2:
         return [text]
     out: list[str] = []
     for p in parts:
@@ -266,6 +302,9 @@ def split_intents(description: str) -> list[str]:
             attr = attribute_terms_from(out[0])
             if attr:
                 p = _ANAPHOR.sub(attr[0] + " ", p, count=1)
+        lead = _LEAD_VERB.match(out[0]) if out else None
+        if out and lead and not _LEAD_VERB.match(p) and not _ACTION_START.match(p) and re.search(r"\bto\b", p):
+            p = f"{lead.group(1)} {p}"
         out.append(p)
     return out[:6]
 

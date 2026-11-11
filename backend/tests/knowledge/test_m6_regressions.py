@@ -33,7 +33,7 @@ def test_a_request_with_two_fee_changes_is_two_intents_not_an_old_to_new_pair():
     f1, f2 = parse_rules(parts[0]), parse_rules(parts[1])
     assert (f1.facts[0].old_value, f1.facts[0].new_value, f1.entity_terms) == (None, "20000 rs", ["gen", "ai"])
     assert (f2.facts[0].old_value, f2.facts[0].new_value, f2.entity_terms) == (None, "12000 rs", ["machine", "learning"])
-    assert parse_rules(FEES).facts[0].old_value == "20000"              # the old single-spec reading: 20000 -> 12000, which found nothing
+    assert parse_rules(FEES).facts[0].old_value is None                 # even unsplit: two amounts after "is" are two NEW values (it used to read 20000 -> 12000)
 
 
 def test_each_intent_discovers_its_own_document_without_any_old_value():
@@ -153,3 +153,91 @@ def test_the_second_look_cannot_turn_an_unrelated_document_into_a_proposal(api, 
     req = analysed(api, "Change online classes to hybrid classes")
     assert not [i for i in req["items"] if (i["ai"] or {}).get("edits")]
     assert "offline" in A.live_text("web")
+
+
+# ================================================================================================ add-on (2026-11-11 04:52): the two new real failures
+FEES2 = "change the gen ai course fees to 20000 rupees and machine learning course fees to 12000 rupees"
+DS2 = ("Machine Learning faculty is Santhosh sir.\nHe has a work experience of 3 years.\nPreviously he worked in IT.\nHe do have a M.Tech in Data Science.\n"
+       "Fee for Machine learning course is 9999 rupees.\n")
+COURSE2 = "Faculty of gen ai is vinu sir.\nHe does have Bsc in Data science.\nFees of gen ai course is 25000 rupees.\n"
+
+
+def test_case_A_each_fee_is_its_own_intent_with_its_own_new_value_and_no_borrowed_old_value():
+    parts = split_intents(FEES2)
+    assert parts == ["change the gen ai course fees to 20000 rupees", "change machine learning course fees to 12000 rupees"]
+    a, b = (parse_rules(p) for p in parts)
+    assert (a.facts[0].old_value, a.facts[0].new_value) == (None, "20000 rupees") and (b.facts[0].old_value, b.facts[0].new_value) == (None, "12000 rupees")
+    assert parse_rules(FEES2).facts[0].old_value is None                        # even unsplit, two "to <amount>" are two new values, never 20000 -> 12000
+
+
+def test_case_A_through_the_application_both_fees_are_proposed_and_separately_reviewable(api, monkeypatch):  # noqa: F811
+    chat = Model(sub(("25000 rupees", "20000 rupees"), ("9999 rupees", "12000 rupees")))
+    use(monkeypatch, chat)
+    seed(api, course=("course", COURSE2), ds=("Data-Science", DS2))
+    req = analysed(api, FEES2)
+    items = {i["doc_id"]: i for i in req["items"] if (i["ai"] or {}).get("edits")}
+    assert set(items) == {"course", "ds"}
+    assert "Fees of gen ai course is 20000 rupees." in items["course"]["proposed_content"]
+    assert "Fee for Machine learning course is 12000 rupees." in items["ds"]["proposed_content"] and "9999" not in items["ds"]["proposed_content"]
+    assert not events(req, "validation", "rejected")                            # the ML proposal is never checked against 20000
+    ml_prompts = [c for c in chat.calls if "Machine Learning faculty" in c]
+    assert ml_prompts and all("20000" not in c.split("<section>")[0] for c in ml_prompts)    # each section is asked about its OWN intent only
+    rid = req["request_id"]
+    A.decide(api, rid, "course", "accepted")
+    A.decide(api, rid, "ds", "discarded")                                       # independently reviewable
+    assert {i["doc_id"]: i["decision"] for i in A.get(api, rid)["items"] if i["doc_id"] in ("course", "ds")} == {"course": "accepted", "ds": "discarded"}
+
+
+def test_case_A_one_intent_failing_at_the_model_does_not_block_the_other(api, monkeypatch):  # noqa: F811
+    good = sub(("25000 rupees", "20000 rupees"))
+    chat = Model(lambda sec: good(sec) if "gen ai" in sec else "half")         # the ML section gets an unusable answer
+    chat_invoke = chat.invoke
+    chat.invoke = lambda msgs: chat_invoke(msgs) if "gen ai" in msgs[0].content.split("<section>")[-1] else __import__("langchain_core.messages", fromlist=["AIMessage"]).AIMessage("```text\nhalf")
+    use(monkeypatch, chat)
+    seed(api, course=("course", COURSE2), ds=("Data-Science", DS2))
+    req = analysed(api, FEES2)
+    with_edits = [i["doc_id"] for i in req["items"] if (i["ai"] or {}).get("edits")]
+    assert "course" in with_edits
+    ds = A.item(req, "ds")
+    assert ds is not None                                                        # the ML document is still listed (the rules' own proposal or a stated failure)
+
+
+class _WrongSubjectParse:
+    """A language-model parse that names the NEW value as the subject (what Qwen did for case B)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    def __getattr__(self, k):
+        return getattr(self.inner, k)
+
+    def parse(self, description):
+        from app.knowledge.impact.spec import ChangeSpec, Fact
+        return ChangeSpec(summary=description, facts=[Fact(attribute="work experience", old_value=None, new_value="Mechanical industry")], entity_terms=["mechanical", "industry"])
+
+
+def test_case_B_subject_words_of_the_description_survive_a_bad_model_parse():
+    from app.knowledge.impact.analyse import Input, build_spec
+    spec = build_spec(Input(description="Change the work experience of santhosh sir to Mechanical industry.", answers={}, reference=None),
+                      _WrongSubjectParse(None))
+    assert "santhosh" in spec.entity_terms and "mechanical" not in spec.entity_terms and "industry" not in spec.entity_terms
+
+
+def test_case_B_a_semantic_score_of_0_59_with_zero_subject_words_reaches_the_model():
+    s = Settings(kb_ai_discovery="v2")
+    spec = parse_rules("the industry of the ML trainer is now Mechanical").model_copy(update={"entity_terms": ["trainer"]})
+    ds = cand("ds", DS2, "Data-Science", "Data-Science")
+    cands, _ = D.rank([ds], s, spec, groups={}, sem={"ds": 0.59})
+    assert [c.doc_id for c in cands] == ["ds"] and ds.signals["lexical"] == 0 and "semantically close" in ds.signals["why"]
+    assert not D.rank([cand("ds", DS2)], Settings(kb_ai_discovery="v2", kb_ai_semantic_admit=0.6), spec, groups={}, sem={"ds": 0.59})[0]     # configurable
+
+
+def test_case_B_through_the_application_the_section_reaches_the_model_and_a_correction_is_reviewable(api, monkeypatch):  # noqa: F811
+    chat = Model(sub(("Previously he worked in IT.", "Previously he worked in the Mechanical industry.")))
+    use(monkeypatch, chat)
+    seed(api, ds=("Data-Science", DS2), course=("course", COURSE2))
+    req = analysed(api, "Change the work experience of santhosh sir to Mechanical industry.")
+    it = A.item(req, "ds")
+    assert any("Machine Learning faculty" in c for c in chat.calls)            # the relevant section was sent
+    assert it["ai"]["edits"] and it["classification"] == "potential" and "Mechanical industry" in it["proposed_content"]
+    assert any("explicitly corrects" in f for e in it["ai"]["edits"] for f in e.get("flags", []))     # a past statement changed: flagged for the reviewer

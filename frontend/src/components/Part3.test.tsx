@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AdminConsole } from "./AdminConsole";
 import { Landing } from "./Landing";
+import { Shell } from "./Shell";
 import { mockApi, renderWithAuth, signedIn } from "@/test/helpers";
 
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -29,5 +30,27 @@ describe("Part 3", () => {
     expect(views).toHaveTextContent("Workspace");
     expect(views).toHaveTextContent("Change requests");
     expect(screen.queryByRole("tab", { name: "Publishing" })).toBeNull();
+  });
+
+  it("staff see Chat and the Staff console; administrators see Chat and Administration but no Staff console", () => {
+    signedIn("staff", "staff1");
+    const { unmount } = renderWithAuth(<Shell><p>x</p></Shell>);
+    let nav = screen.getByRole("navigation", { name: "Main" });
+    expect(nav).toHaveTextContent("Chat"); expect(nav).toHaveTextContent("Staff console"); expect(nav).not.toHaveTextContent("Administration");
+    unmount();
+    sessionStorage.clear();
+    signedIn("admin", "admin1");
+    renderWithAuth(<Shell><p>x</p></Shell>);
+    nav = screen.getByRole("navigation", { name: "Main" });
+    expect(nav).toHaveTextContent("Chat"); expect(nav).toHaveTextContent("Administration"); expect(nav).not.toHaveTextContent("Staff console");
+  });
+
+  it("the hero heading animates by line and the stylesheet turns every animation off under reduced motion", async () => {
+    renderWithAuth(<Landing />);
+    const lines = screen.getByRole("heading", { level: 1 }).querySelectorAll(".line");
+    expect(lines).toHaveLength(3);
+    const css = (await import("node:fs")).readFileSync("src/app/globals.css", "utf8");
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[^]*animation-duration: \.01ms !important/);
+    expect(css).toMatch(/\.hero h1 em \{[^}]*padding: 0 \.12em[^}]*margin: 0 -\.12em/);                      // room for the italic "s" overhang, spacing unchanged
   });
 });

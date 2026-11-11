@@ -26,7 +26,7 @@ from app.knowledge.impact import discover as disc
 from app.knowledge.impact.discover import Candidate
 from app.knowledge.impact.aliases import expand
 from app.knowledge.impact.evaluate import (DocResult, Evaluation, ImpactModel, apply_edits, context_of, gather, validate)
-from app.knowledge.impact.spec import split_intents, ChangeSpec, Question, are_siblings, entity_terms_from, spec_from_edit
+from app.knowledge.impact.spec import words, split_intents, ChangeSpec, Question, are_siblings, entity_terms_from, spec_from_edit
 
 log = logging.getLogger(__name__)
 ALL = "All of them"
@@ -117,6 +117,10 @@ def build_intents(inp: Input, model: ImpactModel) -> list[ChangeSpec]:
     return out
 
 
+_TIME_WORDS = {"today", "tomorrow", "yesterday", "onwards", "now", "currently", "immediately", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+               "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "week", "month", "year"}
+
+
 def build_spec(inp: Input, model: ImpactModel) -> ChangeSpec:
     """Workflow A derives the facts from the staff member's own edit (what they actually changed); workflow B from the description. Answers to 'restate' refine it."""
     spec: ChangeSpec | None = None
@@ -131,6 +135,11 @@ def build_spec(inp: Input, model: ImpactModel) -> ChangeSpec:
             spec = ChangeSpec(summary=summary[:300], facts=facts[:5], entity_terms=list(dict.fromkeys(terms))[:12], wants_all=wants_all)
     if spec is None:
         spec = model.parse(inp.description)
+        # The subject words of the description itself are always part of the search, whatever a language-model parse made of it: a model parse of "Change the work
+        # experience of santhosh sir to Mechanical industry" named only "mechanical industry" (the NEW value) as the subject, so the document about Santhosh scored 0%.
+        new_words = {w for f in spec.facts for w in words(f.new_value or "") + words(f.old_value or "")}      # values are not the subject
+        own = [t for t in entity_terms_from(inp.description) if t not in new_words and t not in _TIME_WORDS]
+        spec = spec.model_copy(update={"entity_terms": list(dict.fromkeys([t for t in spec.entity_terms if t not in new_words] + own))[:12]})
     restated = inp.answers.get(RESTATE)
     if restated and not spec.actionable():
         again = model.parse(restated)

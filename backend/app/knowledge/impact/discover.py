@@ -158,7 +158,9 @@ def rank(corpus: list[Candidate], s: Settings, spec: ChangeSpec, *, groups: dict
         c.score = round(W_VALUE * (1.0 if occ else 0.0) + W_SCOPE * scope + W_LEX * lex + W_SEM * sm + (0.1 if strong else 0.0) + (0.05 if c.hits else 0.0), 4)
         # Independent signals (any one qualifies): discovery is for RECALL - the model and two human reviews decide whether the document really changes.
         keyed = not spec.key_terms or any(k in doc_words for k in spec.key_terms)       # the word that tells this subject apart ("python" vs "java") is there
-        strong_sem = sm >= s.kb_ai_semantic_admit and keyed          # a sibling subject ("Java" for a "Python" change) is similar in meaning, not affected
+        # Semantic similarity is an INDEPENDENT path (no subject word needed). Only when the document lacks the word that tells this subject apart from its siblings ("python"
+        # for a Python change, taken from titles) does it need the higher SG_KB_AI_SEMANTIC_ADMIT_UNKEYED: a Java page is close in meaning to a Python fee change, not affected.
+        strong_sem = sm >= (s.kb_ai_semantic_admit if keyed else max(s.kb_ai_semantic_admit, s.kb_ai_semantic_admit_unkeyed))
         why = ("the old value occurs in it" if occ else "evidence lines were found" if c.hits else "the reference document" if c.doc_id in include else
                "it names most of what the change is about" if (lex >= 0.5 and keyed) else
                f"it is semantically close to the change ({sm:.2f})" if strong_sem else

@@ -20,8 +20,11 @@ const BANNERS: Partial<Record<ChatStatus, string>> = {
 export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; pollMs?: number }) {
   const { session, ready } = useAuth();
   const student = session?.role === "student" ? session : null;
-  const token = student?.token ?? null;
-  const storeKey = `sg.ticket.${student ? `${student.tenantId}.${student.username}` : "guest"}`;
+  // Staff and administrators use the chat as a visitor of their own tenant (the server takes the tenant from their token and gives them no student identity).
+  const member = session && (session.role === "staff" || session.role === "admin") ? session : null;
+  const token = student?.token ?? member?.token ?? null;
+  const who = student ?? member;
+  const storeKey = `sg.ticket.${who ? `${who.tenantId}.${who.username}` : "guest"}`;
 
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -43,7 +46,7 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
     setMsgs([]); setStatus(null); setNotice(null); setError(null); setTicket(null);
     let saved: string | null = null;
     try { saved = sessionStorage.getItem(storeKey); } catch { /* ignore */ }
-    if (!saved || (!student && !tenantArg)) return;
+    if (!saved || (!who && !tenantArg)) return;
     api.history(saved, { token, tenant: tenantArg })
       .then((h) => {
         setTicket(h.ticket_id);
@@ -51,7 +54,7 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
         setStatus(h.awaiting === "staff" ? "awaiting_staff" : h.awaiting === "student" ? "awaiting_confirmation" : null);
       })
       .catch(() => { try { sessionStorage.removeItem(storeKey); } catch { /* ignore */ } });
-  }, [ready, storeKey, token, tenantArg, student]);
+  }, [ready, storeKey, token, tenantArg, who]);
 
   useEffect(() => { endRef.current?.scrollIntoView?.({ block: "end" }); }, [msgs, status]);
 
@@ -98,7 +101,6 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
     setTicket(null); setMsgs([]); setStatus(null); setNotice(null); setError(null);
   }
 
-  if (session && !student) return <div className="card narrow"><p>You are signed in as {session.role}. Use the staff console to handle requests; the student chat is for students and visitors.</p></div>;
   const locked = status === "awaiting_staff";
 
   return (
@@ -106,15 +108,17 @@ export function ChatWidget({ tenant, pollMs = POLL_MS }: { tenant?: string; poll
       <div className="chat-head">
         <div>
           <h1>{cfg ? cfg.tenant_name : "Support"}</h1>
-          <p className="muted">{student ? `Signed in as ${student.username}: I can answer about your batches, attendance and scores.` : "Ask about courses, fees and policies. Sign in for questions about your own records."}</p>
+          <p className="muted">{student ? `Signed in as ${student.username}: I can answer about your batches, attendance and scores.`
+            : member ? `Signed in as ${member.username} (${member.role}): you see exactly what a visitor sees, with no student records.`
+            : "Ask about courses, fees and policies. Sign in for questions about your own records."}</p>
           {cfg?.is_sample && <p className="pill warn">Sample data: not a real institute</p>}
         </div>
         <div className="actions">
-          {!student && <button className="btn small" onClick={() => setShowLogin((v) => !v)}>{showLogin ? "Hide sign in" : "Student sign in"}</button>}
+          {!student && !member && <button className="btn small" onClick={() => setShowLogin((v) => !v)}>{showLogin ? "Hide sign in" : "Student sign in"}</button>}
           {msgs.length > 0 && <button className="btn small" onClick={reset}>New conversation</button>}
         </div>
       </div>
-      {!student && showLogin && <LoginForm heading="Student sign in" onDone={() => setShowLogin(false)} />}
+      {!student && !member && showLogin && <LoginForm heading="Student sign in" onDone={() => setShowLogin(false)} />}
 
       <div className="log" role="log" aria-live="polite" aria-label="Conversation">
         {msgs.length === 0 && <p className="muted empty">Hi! How can I help today?</p>}

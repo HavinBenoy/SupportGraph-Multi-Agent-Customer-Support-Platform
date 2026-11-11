@@ -35,7 +35,7 @@ export function Landing() {
     <div className="landing" ref={root}>
       <section className="hero" aria-labelledby="hero-title">
         <span className="badge-line"><span className="dot" aria-hidden="true" />Multi-agent support for training institutes</span>
-        <h1 id="hero-title">Support that <em>answers</em>, escalates and keeps learning.</h1>
+        <h1 id="hero-title"><span className="line">Support that</span> <span className="line"><em>answers</em>, escalates</span> <span className="line">and keeps learning.</span></h1>
         <p className="lead">SupportGraph handles student questions by chat and voice, hands the hard ones to your staff, and keeps the institute&apos;s knowledge correct — with people approving every change.</p>
         <div className="actions">
           <Link className="btn primary lg" href="/chat">Ask the assistant</Link>

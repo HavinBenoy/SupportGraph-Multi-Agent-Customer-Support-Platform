@@ -1,4 +1,5 @@
 "use client";
+import { useUrlParam } from "@/lib/nav";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -34,14 +35,19 @@ export function ChangeRequests() {
   const [rows, setRows] = useState<KwRequest[] | null>(null);
   const [sel, setSel] = useState<KwRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selId, setSelId] = useUrlParam("cr", null);                     // master-detail: the list stays, the selection is in the URL (Back works, also on phones)
   const load = useCallback(() => { withToken((t) => api.kwRequests(t, status || undefined)).then((r) => { setRows(r.items); setError(null); }).catch((e) => setError(msg(e))); }, [withToken, status]);
   useEffect(() => { setRows(null); load(); }, [load]);
-  const open = (id: string) => withToken((t) => api.kwRequest(t, id)).then((r) => { setSel(r); setError(null); }).catch((e) => setError(msg(e)));
+  useEffect(() => {
+    if (!selId) { setSel(null); return; }
+    let live = true;
+    withToken((t) => api.kwRequest(t, selId)).then((r) => { if (live) { setSel(r); setError(null); } }).catch((e) => live && setError(msg(e)));
+    return () => { live = false; };
+  }, [selId, withToken]);
 
-  if (sel) return <div className="kw"><div className="kw-requests-admin"><RequestDetail initial={sel} onBack={() => { setSel(null); load(); }} onChanged={load} /></div></div>;
   return (
-    <div className="kw"><div className="kw-requests-admin">
-      <section aria-label="Change requests">
+    <div className="kw"><div className={`kw-requests-admin kw-md${selId ? " has-sel" : ""}`}>
+      <section aria-label="Change requests" className="kw-md-list">
         <h1 className="kw-title">Change requests</h1>
         <p className="kw-muted">Review, approve, process and publish — everything happens here.</p>
         <label className="kw-inline">Status
@@ -50,16 +56,25 @@ export function ChangeRequests() {
         {error && <p role="alert" className="kw-error">{error} <button className="kw-btn small" onClick={load}>Retry</button></p>}
         {rows === null && !error && <p className="kw-muted" aria-busy="true">Loading…</p>}
         {rows?.length === 0 && <p className="kw-muted">No requests with this status.</p>}
-        {!!rows?.length && (
-          <div className="kw-tablewrap"><table className="kw-table">
-            <caption className="sr-only">Change requests</caption>
-            <thead><tr><th scope="col">ID</th><th scope="col">Description</th><th scope="col">Submitted by</th><th scope="col">Submitted</th><th scope="col">Docs</th><th scope="col">Accepted</th><th scope="col">Edited</th><th scope="col">Discarded</th><th scope="col">Status</th></tr></thead>
-            <tbody>{rows.map((r) => (
-              <tr key={r.request_id}>
-                <th scope="row"><button className="kw-btn small" onClick={() => open(r.request_id)} aria-label={`Open request ${r.request_id}`}>{r.request_id.slice(0, 8)}</button></th>
-                <td>{r.description}</td><td>{r.submitted_by ?? r.created_by}</td><td>{when(r.submitted_at)}</td><td>{r.counts?.included ?? r.document_count}</td>
-                <td>{r.counts?.accepted ?? 0}</td><td>{r.counts?.edited ?? 0}</td><td>{r.counts?.discarded ?? 0}</td><td><Badge s={r.status} /></td>
-              </tr>))}</tbody></table></div>)}
+        <ul className="kw-list" aria-label="Requests">
+          {rows?.map((r) => (
+            <li key={r.request_id}>
+              <button className={`kw-row${selId === r.request_id ? " sel" : ""}`} aria-current={selId === r.request_id ? "true" : undefined} onClick={() => setSelId(r.request_id)}
+                aria-label={`Open request ${r.request_id}`}>
+                <span className="kw-row-top"><Badge s={r.status} /> <span className="kw-sub">{r.request_id.slice(0, 8)} · {when(r.submitted_at)}</span></span>
+                <b>{r.description}</b>
+                <span className="kw-sub">by {r.submitted_by ?? r.created_by} · {r.counts?.included ?? r.document_count} document(s) · {r.counts?.accepted ?? 0} accepted · {r.counts?.edited ?? 0} edited · {r.counts?.discarded ?? 0} discarded</span>
+              </button>
+            </li>))}
+        </ul>
+      </section>
+      <section className="kw-md-detail" aria-label="Request details">
+        {!selId && <p className="kw-muted kw-md-hint">Select a request to review it here: status, author, affected documents, proposals and the approval controls.</p>}
+        {selId && !sel && !error && <p className="kw-muted" aria-busy="true">Loading…</p>}
+        {sel && sel.request_id === selId && (
+          <div className="kw-enter" key={sel.request_id}>
+            <RequestDetail initial={sel} onBack={() => { setSelId(null); load(); }} onChanged={load} />
+          </div>)}
       </section>
     </div></div>
   );
@@ -102,7 +117,7 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
 
   return (
     <section aria-label="Request detail">
-      <button className="kw-btn small" onClick={onBack}>← All requests</button>
+      <button className="kw-btn small kw-md-backbtn" onClick={onBack}>← Back to the list</button>
       <h1 className="kw-title">{req.description} </h1>
       <p><Badge s={s} /> <span className="kw-muted">Request {req.request_id.slice(0, 8)} · by {req.submitted_by ?? req.created_by} · {when(req.submitted_at)}</span></p>
       <ol className="kw-steps" aria-label="Progress of this request">

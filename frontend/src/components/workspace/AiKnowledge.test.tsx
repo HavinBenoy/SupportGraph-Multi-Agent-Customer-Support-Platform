@@ -202,12 +202,26 @@ describe("Administrator change requests (integrated approve → process → publ
   it("lists id, description, submitter, time, document count and accepted / edited / discarded counts", async () => {
     world({ r: submitted() });
     mount();
-    const row = (await screen.findByRole("button", { name: /Open request cr_ai1/ })).closest("tr")!;
+    const row = await screen.findByRole("button", { name: /Open request cr_ai1/ });
     expect(row).toHaveTextContent("Python fee to 48000");
-    expect(row).toHaveTextContent("staff1");
-    const cells = within(row).getAllByRole("cell").map((c) => c.textContent);
-    expect(cells.slice(3, 7)).toEqual(["2", "1", "1", "1"]);
+    expect(row).toHaveTextContent("by staff1");
+    expect(row).toHaveTextContent("2 document(s) · 1 accepted · 1 edited · 1 discarded");
     expect(row).toHaveTextContent("Awaiting review");
+  });
+
+  it("opens the details beside the list, marks the selection and keeps it in the URL", async () => {
+    world({ r: submitted() });
+    mount();
+    const row = await screen.findByRole("button", { name: /Open request cr_ai1/ });
+    await userEvent.click(row);
+    const detail = await screen.findByRole("region", { name: "Request details" });
+    expect(screen.getByRole("region", { name: "Change requests" })).toBeInTheDocument();          // the list is still there
+    expect(row).toHaveAttribute("aria-current", "true");
+    expect(window.location.search).toContain("cr=cr_ai1");
+    expect(detail).toHaveTextContent("Python fee to 48000");
+    expect(row.closest(".kw-md")).toHaveClass("has-sel");                                       // on phones the list hides and "Back to the list" shows (CSS)
+    await userEvent.click(within(detail).getByRole("button", { name: /Back to the list/ }));
+    expect(window.location.search).not.toContain("cr=");
   });
 
   it("shows accepted, edited AND discarded documents with the staff reason, and the audit history", async () => {

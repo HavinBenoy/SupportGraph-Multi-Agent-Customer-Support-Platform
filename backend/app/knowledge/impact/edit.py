@@ -38,6 +38,7 @@ _CAP = re.compile(r"(?<![.!?:|]\s)(?<!^)(?<!\n)\b([A-Z][a-z]{2,})\b")
 
 # ------------------------------------------------------------------------------------------------------------------------------------ prompt
 PAST_CUES = re.compile(r"\b(?:previous(?:ly)?|formerly|former|earlier|before|used to|in the past|past|prior|worked|was|were|had|actually|in fact|correct(?:ion|ed|ly)?|"
+                       r"(?:work\s+)?experience|career|background|employment|employer|work history|"
                        r"wrong(?:ly)?|incorrect(?:ly)?|mistaken(?:ly)?|mistake|should (?:be|read|say)|instead)\b", re.I)
 
 
@@ -248,8 +249,9 @@ def targets_past(sentence: str, description: str, value_change: bool = False) ->
     cues = CORRECTION_CUES if value_change else PAST_CUES        # "from 10000 (previously) to 12000" describes the old value; only an explicit correction rewrites history
     if not cues.search(description or ""):
         return False
-    mine = {stem(w) for w in words(sentence) if w not in _STOP and len(w) >= 3 and w not in _GENERIC_PAST}
-    return bool(mine & request_stems(description))
+    mine = {w[:4] for w in words(sentence) if w not in _STOP and len(w) >= 3 and w not in _GENERIC_PAST}
+    theirs = {w[:4] for w in words(description) if w not in _STOP and len(w) >= 3}
+    return bool(mine & theirs)                                   # 4-letter stems: "worked" in the text, "work experience" in the request
 
 
 _GENERIC_PAST = {"previously", "formerly", "earlier", "before", "past", "prior", "was", "were", "had", "until", "since"}
