@@ -107,11 +107,38 @@ def _published(db: Session, tenant_id: str, doc: KbDocument) -> KbVersion:
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------- views
+_EDIT_ACTIONS = ("change_draft_saved", "change_decision_recorded", "change_item_edited")
+
+
+def edit_history(db: Session, tenant_id: str, request_id: str, doc_id: str) -> list[dict]:
+    """Who edited this item's text, oldest first, from the append-only audit trail (never from the viewer's identity): a staff "Edit manually" (decision manual),
+    a hand-written draft save, or an administrator's final-wording edit. Only actor names, roles and times; no text."""
+    rows = db.execute(select(KbEvent).where(KbEvent.tenant_id == tenant_id, KbEvent.resource_type == "request", KbEvent.resource_id == request_id,
+                                            KbEvent.doc_id == doc_id, KbEvent.action.in_(_EDIT_ACTIONS)).order_by(KbEvent.id)).scalars()
+    out = []
+    for e in rows:
+        sm = e.summary or {}
+        if e.action == "change_decision_recorded" and sm.get("decision") != "manual":
+            continue
+        if e.action == "change_draft_saved" and sm.get("status") == "item_removed":
+            continue
+        out.append({"by": e.actor, "at": store._iso(e.created_at), "role": "admin" if e.action == "change_item_edited" else "author"})
+    return out
+
+
 def item_view(db: Session, it: KbChangeItem, *, detail: bool, overlaps: list | None = None) -> dict:
     doc = db.get(KbDocument, (it.tenant_id, it.doc_id))
     cur = doc.published_version if doc is not None and doc.status == "published" else None
     ai = it.ai_suggestion or {}
+    edits = edit_history(db, it.tenant_id, it.request_id, it.doc_id) if detail else []
+    # The LATEST human edit decides the attribution. A later "Use the AI proposal instead" (decision accepted) clears it: the text is the AI's again.
+    human = bool(it.admin_edited) or it.decision == "manual" or (it.origin == "manual" and it.decision != "discarded")
+    last = edits[-1] if edits and human else None
     out = {"doc_id": it.doc_id, "doc_title": doc.title if doc else it.doc_id, "base_version": it.base_version, "current_published_version": cur,
+           "last_edited_by": last["by"] if last else None, "last_edited_at": last["at"] if last else None, "last_edit_role": last["role"] if last else None,
+           "editors": sorted({e["by"] for e in edits}) if human else [],
+           "staff_edited_by": next((e["by"] for e in reversed(edits) if e["role"] == "author"), None) if (it.decision == "manual" or it.origin == "manual") else None,
+           "admin_edited_by": next((e["by"] for e in reversed(edits) if e["role"] == "admin"), None) if it.admin_edited else None,
            "base_stale": cur != it.base_version, "proposed_title": it.proposed_title, "stats": it.stats, "origin": it.origin, "decision": it.decision,
            "rationale": it.rationale, "row_version": it.row_version, "updated_at": store._iso(it.updated_at or it.created_at), "result_version": it.result_version,
            "base_checksum": it.base_checksum[:16], "proposed_checksum": it.proposed_checksum[:16],

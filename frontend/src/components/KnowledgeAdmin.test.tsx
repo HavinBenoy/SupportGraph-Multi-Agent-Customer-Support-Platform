@@ -25,6 +25,7 @@ function world(o: { doc?: KbDoc; versions?: KbVersionRow[]; feedback?: unknown[]
     "GET /api/admin/knowledge/documents/fees/versions": () => ({ json: { items: w.versions, total: w.versions.length } }),
     "GET /api/admin/knowledge/audit": () => ({ json: { items: [{ id: 1, at: "2026-11-01T09:00:00Z", actor: "admin1", action: "document_created", resource_id: "fees", doc_id: "fees", version: 1 }], next_before_id: null } }),
     "GET /api/admin/knowledge/feedback": () => ({ json: { items: w.feedback, total: w.feedback.length } }),
+    "GET /api/admin/knowledge/proposals": () => ({ json: { items: [], total: 0 } }),
     ...extra,
   });
   return { w, f };
@@ -156,6 +157,7 @@ describe("Knowledge admin", () => {
       "POST /api/admin/knowledge/proposals/c1/review": () => ({ json: {} }),
     });
     mount();
+    await userEvent.click(await screen.findByRole("tab", { name: "Review queue" }));               // M7: the review queue has its own tab
     const card = await screen.findByTestId("fb-c1");
     expect(within(card).getByText("Wrong instalment rule.")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "Start a knowledge change" }));

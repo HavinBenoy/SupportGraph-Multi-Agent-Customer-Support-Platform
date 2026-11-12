@@ -9,11 +9,12 @@ import { AiChange } from "./AiChange";
 import { MyRequests } from "./Requests";
 import { KnowledgeAdmin } from "../KnowledgeAdmin";
 import { DeletionRequest } from "./DeletionRequest";
-import { setUrlParams, useUrlParam } from "@/lib/nav";
+import { goBack, setUrlParams, useUrlParam } from "@/lib/nav";
 
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong.");
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
+const STATUS_FILTERS = ["live", "all", "not_live", "archived"];
 const LIVE: Record<string, string> = { published: "Live", draft: "Draft", archived: "Archived", processing: "Processing", ready_for_review: "Ready", failed: "Failed" };
 
 /** The knowledge base as one flat, searchable list of documents (final M6: no folders). Staff read published documents, request changes and deletions; administrators
@@ -27,7 +28,9 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   const [docParam] = useUrlParam("d", null);
   const [reqParam] = useUrlParam("r", null);
   const [cat] = useUrlParam("cat", "");
-  const [st] = useUrlParam("st", "");
+  // Administrators: the status filter defaults to Live (the URL keeps only a non-default choice, so a reload or Back restores it); "all" = every status.
+  const [stParam] = useUrlParam("st", null);
+  const st = isAdmin ? (stParam && STATUS_FILTERS.includes(stParam) ? stParam : "live") : "";
   const open = view === "doc" || view === "edit" ? docParam : null;
   const mine = view === "mine";
   const [q, setQ] = useState("");
@@ -57,16 +60,21 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   const shown = useMemo(() => {
     const all = tree?.documents ?? [];
     const base = hits ? hits.map((h) => all.find((d) => d.doc_id === h.doc_id) ?? { ...h, folder_id: null, status: "published", published_version: null, latest_version: 0, updated_at: null }) : all;
-    return base.filter((d) => (!cat || d.category === cat) && (!st || (st === "live" ? d.published_version != null : st === "not_live" ? d.published_version == null && d.status !== "archived" : d.status === st)))
+    return base.filter((d) => (!cat || d.category === cat) && (!st || st === "all" || (st === "live" ? d.published_version != null : st === "not_live" ? d.published_version == null && d.status !== "archived" : d.status === st)))
       .sort((a, b) => (hits ? 0 : a.title.localeCompare(b.title)));
   }, [tree, hits, cat, st]);
 
-  const nav = (v: string, d: string | null = null, r: string | null = null) => { setNotice(null); setUrlParams({ kb: v === "list" ? null : v, d, r }); setNavOpen(false); };
+  // Every view change made here marks the new history entry with the view it was opened FROM ("kb:<view>"); the in-app Back button uses history.back() only
+  // for such entries, and otherwise (a document URL opened directly, from a bookmark or after another part of the app pushed an entry) returns to the list.
+  const nav = (v: string, d: string | null = null, r: string | null = null) => {
+    setNotice(null); setUrlParams({ kb: v === "list" ? null : v, d, r }, "push", `kb:${view ?? "list"}`); setNavOpen(false);
+  };
   const goList = () => { setAiState(null); nav("list"); };
+  const toListFallback = () => { setAiState(null); setNotice(null); setUrlParams({ kb: null, d: null, r: null }, "replace"); };
   const goDoc = (d: { doc_id: string }) => { setAiState(null); nav("doc", d.doc_id); };
   const goAi = (st: NonNullable<typeof aiState>) => { setAiState(st); nav("ai", null, st.requestId ?? null); };
-  const back = () => { if (window.history.length > 1) window.history.back(); else goList(); };
-  const filtered = Boolean(cat || st || hits);
+  const back = () => goBack("kb:", toListFallback);
+  const filtered = Boolean(cat || (st && st !== "all") || hits);
 
   return (
     <div className="kw">
@@ -78,8 +86,8 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
           <div className="kw-filters" role="group" aria-label="Filters">
             <label>Category<select value={cat ?? ""} onChange={(e) => setUrlParams({ cat: e.target.value || null, kb: null, d: null })} aria-label="Filter by category">
               <option value="">All categories</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
-            {isAdmin && <label>Status<select value={st ?? ""} onChange={(e) => setUrlParams({ st: e.target.value || null, kb: null, d: null })} aria-label="Filter by status">
-              <option value="">Every status</option><option value="live">Live</option><option value="not_live">Not live (drafts)</option><option value="archived">Archived</option></select></label>}
+            {isAdmin && <label>Status<select value={st} onChange={(e) => setUrlParams({ st: e.target.value === "live" ? null : e.target.value, kb: null, d: null })} aria-label="Filter by status">
+              <option value="live">Live</option><option value="all">Every status</option><option value="not_live">Not live (drafts)</option><option value="archived">Archived</option></select></label>}
           </div>
           <div className="kw-side-foot">
             <button className={`kw-node${view === "list" ? " sel" : ""}`} onClick={goList}><span aria-hidden="true">≡</span> All documents <span className="kw-count">{tree?.documents.length ?? ""}</span></button>

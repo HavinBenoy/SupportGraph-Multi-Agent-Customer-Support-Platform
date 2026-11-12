@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.config import Settings
 from app.db.models import KbDocument
 from app.db.session import session_scope
+from app.knowledge.purge import is_purged, purged_ids
 from app.knowledge import audit, pipeline, store
 from app.knowledge.errors import KbError
 from app.rag.documents import load_public_documents
@@ -33,7 +34,7 @@ def unmanaged_disk_docs(tenant_id: str, tenants_dir: Path = TENANTS_DIR) -> list
     except Exception:  # noqa: BLE001 - e.g. no docs folder
         return []
     with session_scope() as db:
-        managed = set(db.execute(select(KbDocument.doc_id).where(KbDocument.tenant_id == tenant_id)).scalars())
+        managed = set(db.execute(select(KbDocument.doc_id).where(KbDocument.tenant_id == tenant_id)).scalars()) | purged_ids(db, tenant_id)
     return [d.doc_id for d in docs if d.doc_id not in managed]
 
 
@@ -42,8 +43,8 @@ def import_from_disk(tenant_id: str, actor: str, embedder, s: Settings, tenants_
     imported, skipped, failed = [], [], []
     for d in docs:
         with session_scope() as db:
-            if db.get(KbDocument, (tenant_id, d.doc_id)) is not None:
-                skipped.append(d.doc_id)
+            if db.get(KbDocument, (tenant_id, d.doc_id)) is not None or is_purged(db, tenant_id, d.doc_id):
+                skipped.append(d.doc_id)                                  # already managed, or permanently deleted (never re-imported)
                 continue
             try:
                 store.create_document(db, tenant_id, actor, s, doc_id=d.doc_id, title=d.title, category=guess_category(d.doc_id), content=d.body.strip("\n") + "\n",

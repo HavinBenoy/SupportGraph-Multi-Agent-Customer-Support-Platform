@@ -628,6 +628,11 @@ class KbDocument(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     archived_by: Mapped[str | None] = mapped_column(String(64))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Migration 0013: a legal hold forbids PERMANENT deletion (app/knowledge/purge.py). Archive, unpublish and every other lifecycle step are unaffected.
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    legal_hold_reason: Mapped[str | None] = mapped_column(String(300))
+    legal_hold_by: Mapped[str | None] = mapped_column(String(64))
+    legal_hold_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class KbVersion(Base):

@@ -1,3 +1,94 @@
+# M6 ACCEPTANCE REFINEMENTS + M7 (`supportgraph-m6r-m7.zip`, 2026-11-12)
+
+Delta ZIP. Apply it from the project root with `unzip -o supportgraph-m6r-m7.zip`, then run `make db-migrate` (one additive migration, **0013**). There are no new
+dependencies, and the ZIP contains no `.env`, data, recordings or build output. Details: **docs/M6_REFINEMENTS.md**, **docs/M7.md**, **TEST_REPORT.md**.
+
+## What changed
+
+**2.1 Back navigation from a document** (`frontend/src/lib/nav.ts`, `workspace/KnowledgeWorkspace.tsx`)
+- **Cause.** The back arrow called `history.back()` unconditionally. A document that was *restored* rather than opened from the list returned to whatever came
+  before it, often Change requests. "Restored" means the open document came back after switching sub-tabs, or from a bookmark or a reload.
+- **Fix.** Entries the workspace pushes carry `history.state.sgOrigin`, and Back uses `history.back()` only for those. Anything else falls back to the document list
+  with `replaceState`, so earlier history is untouched. Opening from *My change requests* returns there.
+- **Checked.** Unit tests, plus a Playwright run of the exact repro on the production build.
+
+**2.2 Live is the default status filter for administrators.** The URL stores only a non-default choice, so reload and Back restore it. *Every status* is an explicit
+option. Staff are unchanged: they have no status filter.
+
+**2.3 Real editor attribution** (`app/knowledge/changes.py`, `workspace/ui.tsx`, `AdminRequests.tsx`, `Decisions.tsx`)
+- The attribution comes from the persisted audit trail, not from the viewer:
+  - **Data:** `edit_history()` feeds the new item fields `staff_edited_by`, `admin_edited_by`, `last_edited_by`, `last_edited_at`, `last_edit_role` and `editors`.
+  - **Labels:** "Edited by staff7", "Final wording edited by admin2", and "you" only when the persisted editor is the viewer.
+  - **Proposer vs. editor:** "Requested by …" is shown separately from "last edited by …".
+- No migration. The API change is additive: new fields only.
+
+**2.4 Permanent deletion** (new `app/knowledge/purge.py`, migration `0013_kb_legal_hold.py`, routes in `app/api/routes/knowledge.py`)
+- **Separate from Archive.** It is a distinct administrator operation, and Archive behaviour is unchanged.
+- **Only for archived or never-published documents.** A live document must first be archived through the approval-based deletion request.
+- **Blocked by:** a legal hold (new, per document), the retention period after archiving, open change requests, pending proposals, M5 recording holds, in-flight
+  processing, and the feature switch.
+- **Confirmation:**
+  - **Preview first:** the administrator sees what will be removed (`purge-preview`) before deleting.
+  - **Typed identity:** they must type the exact id and title and tick an acknowledgement.
+  - **Stale-proof:** the request carries the page's row_version as a compare-and-set, which is also the PostgreSQL row lock.
+- **Removed, in one transaction:** versions, staged and live passages with their embeddings, the document's items in closed change requests, finished proposals, the
+  placement and the document row. References inside analyses are scrubbed.
+- **Kept:** the content-free audit trail, plus one `document_purged` tombstone. Disk ingest, the import wizard and document creation all refuse a purged id.
+  Repeating the request returns `already_deleted`.
+- **New endpoints:** `GET /documents/{id}/purge-preview`, `POST /documents/{id}/purge`, `PUT /documents/{id}/legal-hold`.
+
+**M7: the knowledge-management UI over the M6 API** (`frontend/src/components/KnowledgeAdmin.tsx`; docs/M6.md §13 is the scope, see docs/M7.md for the discrepancy
+with the roadmap)
+- **Documents table:** server-side status and category filters, pagination, legal-hold badge, and empty, loading and error states.
+- **Version comparison:** any two versions, using the server's `/compare` statistics plus a word-level view of both full texts (`TextCompare` in `Compare.tsx`).
+- **Review queue:** feedback cards plus a table of all proposals with a state filter.
+- **Audit log:** tenant-wide, with document, action and actor filters, and *Load older* via the `before_id` cursor.
+- **Import from disk:** a wizard that lists the files, asks for confirmation, then shows the result.
+- **Legal-hold and Permanently-delete dialogs.**
+- `/meta` gains `audit_actions`, `purge_enabled` and `purge_min_archived_days`.
+
+## Files
+- **Backend, new:**
+  - `app/knowledge/purge.py`
+  - `app/db/migrations/versions/0013_kb_legal_hold.py`
+  - `tests/knowledge/{test_m6_purge, test_m6_attribution, test_m7_admin_api}.py`
+  - PostgreSQL tests added to `tests/db/test_postgres_m6_final.py`
+- **Backend, modified:**
+  - `app/db/models.py`: 4 legal-hold columns
+  - `app/knowledge/changes.py`: editor attribution
+  - `app/knowledge/store.py`: legal hold in `doc_view`; a purged id cannot be reused
+  - `app/knowledge/importer.py` and `app/rag/ingest.py`: skip purged ids
+  - `app/knowledge/audit.py`: 3 new actions
+  - `app/config.py`: 2 settings
+  - `app/api/routes/knowledge.py`: 3 routes and the `/meta` fields
+  - `tests/db/test_migrations_m6.py`: the head is now 0013, plus a 0013 upgrade/downgrade test
+- **Frontend, new:** `components/KnowledgeAdminM7.test.tsx`.
+- **Frontend, modified:**
+  - `components/KnowledgeAdmin.tsx`: M7 tabs and dialogs
+  - `components/workspace/{KnowledgeWorkspace, AdminRequests, Decisions, Compare, ui}.tsx`
+  - `lib/{nav, api, types}.ts`
+  - `app/globals.css`
+  - tests: `KnowledgeAdmin`, `KnowledgeWorkspace`, `AiKnowledge`
+- **Docs:** `docs/M6_REFINEMENTS.md` (new), `docs/M7.md` (new), `docs/ROADMAP.md`, `docs/M6.md` §13, `.env.example`, `TEST_REPORT.md` (new), three screenshots.
+
+## Configuration (safe defaults)
+- `SG_KB_PURGE_ENABLED=true`: permanent deletion is still gated by every rule above.
+- `SG_KB_PURGE_MIN_ARCHIVED_DAYS=0`: set it, for example to 30, to enforce a retention period.
+
+## Backward compatibility
+- **Migration 0013 is additive:** 4 columns with constant or NULL defaults. Existing documents start without a hold, and the downgrade drops only those columns.
+- **No endpoint was removed or renamed.** One client signature changed: `kbDocs(token, {q, status, category, page, pageSize})`, an internal TypeScript client.
+- **Behaviour change:** a document id that was permanently deleted can't be created again; the server refuses with 409.
+
+## Limitations
+- Chat transcripts that once quoted a purged document are not modified: they are customer records.
+- A disk file is never deleted by the server; its id is blocked instead.
+- A cached answer becomes unreachable at once and expires by TTL.
+- The `make ingest` CLI prints nothing new for purged ids: they are only listed in `IngestReport.purged_skipped`.
+- No real Ollama run was done in this round: the changes don't touch the LLM path.
+
+---
+
 # M6 — FINAL COMPLETION (`supportgraph-m6-final.zip`, 2026-11-11)
 
 Apply over the project with `unzip -o supportgraph-m6-final.zip`. This is the one consolidated M6 delivery: Part 2, the patch-ups, Part 3, the add-on, and this final round.

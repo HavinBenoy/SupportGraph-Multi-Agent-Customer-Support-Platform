@@ -61,10 +61,11 @@ def test_0009_upgrades_downgrades_and_re_upgrades_without_touching_existing_data
     assert KB <= set(inspect(eng).get_table_names()) and counts(eng) == (1, 1, 1, 1)
 
 
-def test_0012_is_the_head_and_the_chain_is_unbroken(at_0008):
+def test_0013_is_the_head_and_the_chain_is_unbroken(at_0008):
     from alembic.script import ScriptDirectory
     script = ScriptDirectory.from_config(at_0008[1])
-    assert script.get_current_head() == "0012" and script.get_revision("0012").down_revision == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
+    assert script.get_current_head() == "0013" and script.get_revision("0013").down_revision == "0012"
+    assert script.get_revision("0012").down_revision == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
 
 
 def test_the_knowledge_tables_enforce_their_rules(at_0008):
@@ -167,3 +168,22 @@ def test_0012_widens_the_request_state_machine_keeps_part1_rows_and_reverses_by_
         assert c.execute(text("SELECT content FROM kb_versions")).scalar() == "body"
     command.upgrade(cfg, "head")
     assert "analysis" in cols("kb_change_requests")
+
+
+def test_0013_adds_the_legal_hold_without_touching_existing_documents(at_0008):
+    """Final M6 2.4: additive columns only; an existing document keeps every value and starts with no hold; downgrade drops only the new columns."""
+    url, cfg, eng = at_0008
+    command.upgrade(cfg, "0012")
+    with eng.begin() as c:
+        c.execute(text("INSERT INTO kb_documents (tenant_id, doc_id, title, category, status, origin, latest_version, row_version, created_by, tags) "
+                       "SELECT id, 'held-doc', 'Held', 'policies', 'draft', 'store', 0, 3, 'admin1', '[]' FROM tenants LIMIT 1"))
+    command.upgrade(cfg, "0013")
+    with eng.connect() as c:
+        row = c.execute(text("SELECT title, row_version, legal_hold, legal_hold_reason FROM kb_documents WHERE doc_id = 'held-doc'")).one()
+    assert (row[0], row[1], bool(row[2]), row[3]) == ("Held", 3, False, None)
+    command.downgrade(cfg, "0012")
+    cols = {c["name"] for c in inspect(eng).get_columns("kb_documents")}
+    assert "legal_hold" not in cols and "title" in cols
+    with eng.connect() as c:
+        assert c.execute(text("SELECT title FROM kb_documents WHERE doc_id = 'held-doc'")).scalar() == "Held"
+    command.upgrade(cfg, "head")

@@ -283,6 +283,33 @@ describe("Administrator change requests (integrated approve → process → publ
     expect(log).toHaveTextContent("Submitted for review");
   });
 
+  it("names the staff member who edited (never 'you' for someone else's edit) and the administrator who edited the final wording", async () => {
+    world({ r: submitted({ created_by: "staff7", items: [
+      decided("manual", { doc_id: "faq", doc_title: "FAQ", included: true, staff_edited_by: "staff7", last_edited_by: "staff7", last_edit_role: "author", editors: ["staff7"] }),
+      decided("manual", { doc_id: "py", doc_title: "Python fees", included: true, admin_edited: true, staff_edited_by: "staff8", admin_edited_by: "admin1",
+        last_edited_by: "admin1", last_edit_role: "admin", last_edited_at: "2026-11-03T10:00:00Z", editors: ["admin1", "staff8"] })] }) });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /Open request cr_ai1/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: /Documents/ }));
+    const faq = await screen.findByRole("article", { name: "Document FAQ" });
+    expect(faq).toHaveTextContent("Edited by staff7");
+    expect(faq).not.toHaveTextContent("Edited by you");
+    const py = screen.getByRole("article", { name: "Document Python fees" });
+    expect(py).toHaveTextContent("Edited by staff8");                                      // the staff edit stays attributed to its author ...
+    expect(py).toHaveTextContent("Final wording edited by you");                          // ... and admin1 (the viewer) made the latest edit
+    expect(await expand("Document Python fees")).toHaveTextContent("Requested by staff7 · text proposed by the AI · last edited by you");
+  });
+
+  it("without persisted editor metadata it says 'Edited', never guesses 'you'", async () => {
+    world({ r: submitted({ items: [decided("manual", { doc_id: "faq", doc_title: "FAQ", included: true })] }) });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: /Open request cr_ai1/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: /Documents/ }));
+    const faq = await screen.findByRole("article", { name: "Document FAQ" });
+    expect(faq).toHaveTextContent("Edited");
+    expect(faq).not.toHaveTextContent("by you");
+  });
+
   it("Approve publishes nothing; publication needs an explicit confirmation and only then calls publish", async () => {
     const state = { r: submitted({ status: "under_review" }) };
     const f = world(state, {

@@ -84,7 +84,8 @@ def doc_view(db: Session, d: KbDocument) -> dict:
             "origin": d.origin, "latest_version": d.latest_version, "published_version": d.published_version, "row_version": d.row_version,
             "latest_status": None if latest is None else LIFECYCLE[latest.status], "published_at": None if live is None else _iso(live.published_at),
             "published_by": None if live is None else live.published_by, "created_by": d.created_by, "created_at": _iso(d.created_at),
-            "updated_by": d.updated_by, "updated_at": _iso(d.updated_at), "archived_by": d.archived_by, "archived_at": _iso(d.archived_at)}
+            "updated_by": d.updated_by, "updated_at": _iso(d.updated_at), "archived_by": d.archived_by, "archived_at": _iso(d.archived_at),
+            "legal_hold": bool(d.legal_hold), "legal_hold_reason": d.legal_hold_reason, "legal_hold_by": d.legal_hold_by, "legal_hold_at": _iso(d.legal_hold_at)}
 
 
 # ----------------------------------------------------------------------------------------------------------------------------------- create
@@ -102,6 +103,9 @@ def create_document(db: Session, tenant_id: str, actor: str, s: Settings, *, doc
     body, size = v.content(content, title, s)
     if db.get(KbDocument, (tenant_id, doc_id)) is not None:
         raise Conflict("a document with this doc_id already exists")
+    from app.knowledge.purge import is_purged
+    if is_purged(db, tenant_id, doc_id):
+        raise Conflict("this doc_id belonged to a permanently deleted document and cannot be reused: choose another id")
     chk = v.checksum(title, body)
     doc = KbDocument(tenant_id=tenant_id, doc_id=doc_id, title=title, category=category, description=description, tags=tags, status="draft", origin=origin,
                      latest_version=1, published_version=None, row_version=0, created_by=actor[:64])

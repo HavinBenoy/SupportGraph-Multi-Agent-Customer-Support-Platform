@@ -242,6 +242,8 @@ class Settings(BaseSettings):
     kb_require_separate_reviewer: bool = False                                 # true: the administrator who proposed a feedback-based change cannot review it
     kb_direct_archive: bool = False                                            # final M6: a PUBLISHED document is deleted only through an approved deletion request;
                                                                                # true restores the old one-click archive of a published document (not recommended)
+    kb_purge_enabled: bool = True                                              # final M6 2.4: administrators may PERMANENTLY delete an archived (or never-published) document
+    kb_purge_min_archived_days: int = Field(default=0, ge=0, le=3650)          # retention: days a document must stay archived before it can be deleted permanently
     kb_legacy_folders: bool = False                                            # final M6: the folder-management API is retired (410). true re-enables it (legacy only;
                                                                                # folder rows and placements were never deleted, so this is fully reversible)
 

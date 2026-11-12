@@ -51,7 +51,8 @@ export function TaskStatus({ req }: { req: KwRequest }) {
 function Candidate({ req, it, readOnly, open, onToggle, onItem, canSubmit, onSubmit }: {
   req: KwRequest; it: KwItem; readOnly: boolean; open: boolean; onToggle: () => void; onItem: (i: KwItem) => void; canSubmit: boolean; onSubmit: () => void;
 }) {
-  const { withToken } = useAuth();
+  const { withToken, session } = useAuth();
+  const me = session?.username ?? null;
   const [mode, setMode] = useState<"view" | "edit" | "discard">("view");
   const [texts, setTexts] = useState<string[]>([]);
   const [full, setFull] = useState("");
@@ -83,7 +84,7 @@ function Candidate({ req, it, readOnly, open, onToggle, onItem, canSubmit, onSub
         <span className="kw-acc-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
         <span className="kw-acc-main"><b>{it.doc_title}</b>
           <span className="kw-sub">{tl ?? (it.ai?.reason ? (it.ai.reason.length > 110 ? `${it.ai.reason.slice(0, 110)}…` : it.ai.reason) : `${ai.length} proposed change(s)`)}</span></span>
-        <span className="kw-acc-chips"><ClassChip c={it.classification} /> <DecisionChip d={it.decision} />{needs && <span className="kw-chip kw-need">Action required</span>}
+        <span className="kw-acc-chips"><ClassChip c={it.classification} /> <DecisionChip d={it.decision} editor={it.staff_edited_by} me={me} />{needs && <span className="kw-chip kw-need">Action required</span>}
           {it.base_stale && <span className="kw-chip st-failed">Out of date</span>}</span>
       </button>
       {open && (
@@ -174,6 +175,8 @@ function Candidate({ req, it, readOnly, open, onToggle, onItem, canSubmit, onSub
 export function Decisions({ req, readOnly = false, onItem, onSubmit, onReanalyse, busy }: {
   req: KwRequest; readOnly?: boolean; onItem: (i: KwItem) => void; onSubmit: () => void; onReanalyse?: () => void; busy?: boolean;
 }) {
+  const { session } = useAuth();
+  const me = session?.username ?? null;
   const items = req.items ?? [];
   const cands = items.filter((i) => i.actionable);
   const manual = items.filter((i) => i.origin === "manual");
@@ -214,7 +217,7 @@ export function Decisions({ req, readOnly = false, onItem, onSubmit, onReanalyse
             <thead><tr><th scope="col">Document</th><th scope="col">AI says</th><th scope="col">Confidence</th><th scope="col">Your decision</th></tr></thead>
             <tbody>
               {manual.map((it) => <tr key={it.doc_id}><th scope="row">{it.doc_title}</th><td>Your own edit</td><td>—</td><td><span className="kw-chip">✎ Included</span></td></tr>)}
-              {cands.map((it) => <tr key={it.doc_id}><th scope="row">{it.doc_title}</th><td><ClassChip c={it.classification} /></td><td>{pct(it.confidence)}</td><td><DecisionChip d={it.decision} /></td></tr>)}
+              {cands.map((it) => <tr key={it.doc_id}><th scope="row">{it.doc_title}</th><td><ClassChip c={it.classification} /></td><td>{pct(it.confidence)}</td><td><DecisionChip d={it.decision} editor={it.staff_edited_by} me={me} /></td></tr>)}
             </tbody></table></div>
         </section>)}
       {!readOnly && (

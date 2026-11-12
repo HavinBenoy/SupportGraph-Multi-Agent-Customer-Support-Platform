@@ -34,7 +34,7 @@ from app.api.deps import require_admin, require_staff
 from app.auth.tokens import Principal
 from app.db.models import KB_CATEGORIES, KB_DOC_STATUSES, KB_PROPOSAL_STATUSES, KbDocument, KbVersion
 from app.db.session import session_scope
-from app.knowledge import audit, importer, pipeline, proposals, store, workspace
+from app.knowledge import audit, importer, pipeline, proposals, purge, store, workspace
 from app.knowledge.errors import KbError
 from app.llm.gateway import get_embedding_client
 
@@ -102,6 +102,21 @@ class ExpectIn(BaseModel):
     expected_row_version: StrictInt | None = Field(default=None, ge=0)
 
 
+class PurgeIn(BaseModel):
+    """Permanent deletion: the administrator types the id and the exact title, and sends the row_version the page showed (all three are checked)."""
+    model_config = ConfigDict(extra="forbid")
+    confirm_doc_id: str = Field(min_length=1, max_length=128)
+    confirm_title: str = Field(min_length=1, max_length=300)
+    expected_row_version: StrictInt = Field(ge=0)
+
+
+class LegalHoldIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    hold: bool
+    reason: str | None = Field(default=None, max_length=300)
+    expected_row_version: StrictInt = Field(ge=0)
+
+
 class ProcessIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     force: StrictBool = False
@@ -138,7 +153,8 @@ async def meta(request: Request, p: Principal = Depends(require_admin)) -> dict:
     unmanaged = await asyncio.to_thread(importer.unmanaged_disk_docs, p.tenant_id)
     return {"categories": list(KB_CATEGORIES), "document_statuses": list(KB_DOC_STATUSES), "proposal_statuses": list(KB_PROPOSAL_STATUSES),
             "limits": {"max_bytes": s.kb_max_bytes, "max_chunks": s.kb_max_chunks, "allowed_types": ["text/markdown", "text/plain"]},
-            "embedding_model": embedder_of(request).name, "require_separate_reviewer": s.kb_require_separate_reviewer, "unmanaged_disk_documents": unmanaged}
+            "embedding_model": embedder_of(request).name, "require_separate_reviewer": s.kb_require_separate_reviewer, "unmanaged_disk_documents": unmanaged,
+            "audit_actions": list(audit.ACTIONS), "purge_enabled": s.kb_purge_enabled, "purge_min_archived_days": s.kb_purge_min_archived_days}
 
 
 @admin_router.get("/documents")
@@ -283,6 +299,29 @@ async def archive(doc_id: DOC, request: Request, body: ExpectIn | None = None, p
 async def unarchive(doc_id: DOC, body: ExpectIn | None = None, p: Principal = Depends(require_admin)) -> dict:
     exp = body.expected_row_version if body else None
     return await asyncio.to_thread(_guard, lambda db: pipeline.unarchive_document(db, p.tenant_id, p.subject, doc_id, expected_row_version=exp))
+
+
+@admin_router.get("/documents/{doc_id}/purge-preview")
+async def purge_preview(doc_id: DOC, request: Request, p: Principal = Depends(require_admin)) -> dict:
+    """What a PERMANENT deletion would remove (counts, no text) and what currently prevents it. Changes nothing."""
+    s = request.app.state.settings
+    return await asyncio.to_thread(_guard, lambda db: purge.preview(db, p.tenant_id, doc_id, s))
+
+
+@admin_router.post("/documents/{doc_id}/purge")
+async def purge_document(doc_id: DOC, body: PurgeIn, request: Request, p: Principal = Depends(require_admin)) -> dict:
+    """PERMANENTLY delete an archived (or never-published) document: its versions, passages, embeddings and its text inside closed change requests. Cannot be
+    undone. Separate from Archive (which keeps everything). Refused under legal hold / retention / open requests / processing; idempotent (already_deleted)."""
+    s = request.app.state.settings
+    return await asyncio.to_thread(_guard, lambda db: purge.purge_document(db, p.tenant_id, p.subject, s, doc_id, confirm_doc_id=body.confirm_doc_id,
+                                                                          confirm_title=body.confirm_title, expected_row_version=body.expected_row_version))
+
+
+@admin_router.put("/documents/{doc_id}/legal-hold")
+async def legal_hold(doc_id: DOC, body: LegalHoldIn, p: Principal = Depends(require_admin)) -> dict:
+    """Place or release a legal hold. A held document can never be deleted permanently (everything else works as before)."""
+    return await asyncio.to_thread(_guard, lambda db: purge.set_legal_hold(db, p.tenant_id, p.subject, doc_id, hold=body.hold, reason=body.reason,
+                                                                          expected_row_version=body.expected_row_version))
 
 
 @admin_router.get("/audit")

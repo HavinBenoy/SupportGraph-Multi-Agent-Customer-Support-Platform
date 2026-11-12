@@ -7,7 +7,7 @@ import type { KwAuditEvent, KwItem, KwRequest, KwStatus } from "@/lib/types";
 import { PatchLegend, PatchView, baseText } from "./PatchView";
 import { CompareView, applyPatches } from "./Compare";
 import { TaskStatus } from "./Decisions";
-import { ClassChip, DecisionChip, LABEL, Badge, msg, pct, when, STEP_STATUS } from "./ui";
+import { ClassChip, DecisionChip, LABEL, Badge, editedBy, msg, pct, when, STEP_STATUS } from "./ui";
 
 const POLL_MS = 1500;
 const BUSY: KwStatus[] = ["processing", "publishing"];
@@ -212,7 +212,8 @@ function RequestDetail({ initial, onBack, onChanged }: { initial: KwRequest; onB
 }
 
 function AdminDoc({ req, it, editable, open, onToggle, onItem, onDone }: { req: KwRequest; it: KwItem; editable: boolean; open: boolean; onToggle: () => void; onItem: (i: KwItem) => void; onDone: () => void }) {
-  const { withToken } = useAuth();
+  const { withToken, session } = useAuth();
+  const me = session?.username ?? null;
   const [mode, setMode] = useState<"none" | "edit" | "exclude">("none");
   const [texts, setTexts] = useState<string[]>([]);
   const [full, setFull] = useState("");
@@ -237,15 +238,16 @@ function AdminDoc({ req, it, editable, open, onToggle, onItem, onDone }: { req: 
           <span className="kw-sub">{deletion ? "Deletion: the document will be archived" : discarded ? `Discarded by staff${it.rationale ? `: ${it.rationale}` : ""}` : trail || (it.ai?.reason ? (it.ai.reason.length > 110 ? `${it.ai.reason.slice(0, 110)}…` : it.ai.reason) : "Staff edit")}</span></span>
         <span className="kw-acc-chips">
           {deletion ? <span className="kw-chip st-failed">Delete</span> : it.origin === "ai" ? <ClassChip c={it.classification} /> : <span className="kw-chip">Staff edit</span>}{" "}
-          {!deletion && <DecisionChip d={it.origin === "manual" && !it.decision ? "manual" : it.decision} />}
+          {!deletion && <DecisionChip d={it.origin === "manual" && !it.decision ? "manual" : it.decision} editor={it.staff_edited_by} me={me} />}
           {it.admin_decision && <span className={`kw-chip ${it.admin_decision === "excluded" ? "dc-discarded" : "dc-accepted"}`}>{it.admin_decision === "excluded" ? "✕ Excluded by admin" : "✓ Confirmed"}</span>}
-          {it.admin_edited && <span className="kw-chip dc-manual">✎ Edited by admin</span>}
+          {it.admin_edited && <span className="kw-chip dc-manual">✎ Final wording edited by {editedBy(it.admin_edited_by, me) ?? "an administrator"}</span>}
           {it.base_stale && <span className="kw-chip st-failed">Out of date</span>}
           {needs && <span className="kw-chip kw-need">Action required</span>}</span>
       </button>
       {open && (
         <div className="kw-acc-body" id={bodyId}>
           <p className="kw-sub">{it.ai?.path ?? ""} · based on v{it.base_version}{it.base_stale ? ` — now v${it.current_published_version}` : ""}{it.origin === "ai" ? ` · confidence ${pct(it.confidence)}` : ""}</p>
+          <p className="kw-sub kw-attrib">Requested by {req.created_by} · {it.origin === "ai" ? "text proposed by the AI" : "text written by the requester"}{it.last_edited_by ? ` · last edited by ${editedBy(it.last_edited_by, me)}${it.last_edited_at ? ` (${when(it.last_edited_at)})` : ""}` : ""}</p>
           {it.base_stale && <p className="kw-banner warn" role="alert">This document was published again after the change was prepared. It cannot be published as it stands.</p>}
           {it.overlapping_requests?.map((o) => <p key={o.request_id} className="kw-banner warn">Also in request {o.request_id.slice(0, 8)} ({LABEL[o.status]}, by {o.created_by}).</p>)}
           {it.ai?.reason && <p className="kw-why"><b>AI explanation:</b> {it.ai.reason}</p>}

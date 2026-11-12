@@ -271,3 +271,26 @@ main > * { animation: page-in .45s var(--ease) both; }
 .an-defs dl { display: grid; gap: 6px; grid-template-columns: 1fr; } .an-def { display: grid; grid-template-columns: 14rem 1fr; gap: 12px; }
 .an-def dt { text-transform: capitalize; }
 @media (max-width: 640px) { .an-def { grid-template-columns: 1fr; gap: 2px; } .funnel li { grid-template-columns: 7rem 1fr 2.5rem 2.5rem; } }
+
+/* ---- M7: document administration (table, pager, compare, dialogs) + final-M6 permanent deletion ---- */
+.kb-filters { flex-wrap: wrap; gap: 8px; }
+.kb-filters input { min-width: 0; flex: 1 1 200px; } .kb-filters select { flex: 0 1 auto; }
+.kb-doctable .row.linkish, .row.linkish { border: 0; background: none; padding: 0; display: grid; gap: 2px; }
+.row.linkish:hover { background: none; text-decoration: underline; text-underline-offset: 3px; }
+.kb-doctable tr.sel th, .kb-doctable tr.sel td { background: rgba(139, 92, 246, .08); }
+.kb-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.kb-compare-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 10px 0; }
+.kb-compare-bar label { display: grid; gap: 4px; font-size: .8rem; color: var(--muted); }
+.kb-compare { flex-basis: 100%; }
+.dialog.danger { border-color: rgba(248, 113, 113, .55); width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.dialog label { display: grid; gap: 4px; margin-top: 10px; }
+.dialog code { font-size: .85em; padding: 1px 6px; border-radius: 6px; background: rgba(255, 255, 255, .06); }
+.btn.danger.solid, .kw-btn.danger.solid { background: #b91c1c; border-color: #ef4444; color: #fff; }
+.btn.danger.solid:hover:not(:disabled), .kw-btn.danger.solid:hover:not(:disabled) { background: #dc2626; }
+.btn.danger.solid:disabled, .kw-btn.danger.solid:disabled { opacity: .45; }
+.kb-purge-list, .kb-import-list { margin: 8px 0; padding-left: 18px; display: grid; gap: 3px; }
+.kb-steps { list-style: none; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
+.kb-steps li { font-size: .8rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); }
+.kb-steps li[aria-current] { color: var(--text); border-color: rgba(139, 92, 246, .6); background: rgba(139, 92, 246, .12); }
+.kb-audit td { vertical-align: top; }
+@media (max-width: 640px) { .kb-filters input, .kb-filters select { flex: 1 1 100%; } }

@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbDoc, KnowledgeAnalytics, KwAuditEvent, KwDecision, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbCompare, KbDoc, KbPurgePreview, KnowledgeAnalytics, KwAuditEvent, KwDecision, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -73,7 +73,9 @@ export const api = {
   interventions: (token: string) => call<Interventions>("/staff/interventions", { token }),
   // M5: Trial Verification Mode (administrators only, except the read-only flag)
   kbMeta: (token: string) => call<KbMeta>("/admin/knowledge/meta", { token }),
-  kbDocs: (token: string, q?: string, status?: string) => call<KbList>(`/admin/knowledge/documents?${new URLSearchParams({ page_size: "50", ...(q ? { q } : {}), ...(status ? { status } : {}) })}`, { token }),
+  kbDocs: (token: string, f: { q?: string; status?: string; category?: string; page?: number; pageSize?: number } = {}) =>
+    call<KbList>(`/admin/knowledge/documents?${new URLSearchParams({ page_size: String(f.pageSize ?? 25), page: String(f.page ?? 1), ...(f.q ? { q: f.q } : {}),
+      ...(f.status ? { status: f.status } : {}), ...(f.category ? { category: f.category } : {}) })}`, { token }),
   kbCreate: (token: string, d: KbNewDoc) => call<{ document: KbDoc; version: KbVersionRow }>("/admin/knowledge/documents", { method: "POST", token, body: d }),
   kbDoc: (token: string, id: string) => call<KbDoc>(`/admin/knowledge/documents/${encodeURIComponent(id)}`, { token }),
   kbVersions: (token: string, id: string) => call<KbVersions>(`/admin/knowledge/documents/${encodeURIComponent(id)}/versions`, { token }),
@@ -90,6 +92,19 @@ export const api = {
   kbReview: (token: string, call_id: string, decision: "approve" | "reject", note?: string) =>
     call<KbProposalRow>(`/admin/knowledge/proposals/${encodeURIComponent(call_id)}/review`, { method: "POST", token, body: { decision, ...(note ? { note } : {}) } }),
   kbAudit: (token: string, docId?: string) => call<{ items: KbAuditRow[]; next_before_id: number | null }>(`/admin/knowledge/audit?${new URLSearchParams({ limit: "20", ...(docId ? { doc_id: docId } : {}) })}`, { token }),
+  // M7: the rest of the administrator UI over the M6 API (docs/M6.md section 13)
+  kbAuditPage: (token: string, f: { doc_id?: string; action?: string; actor?: string; before_id?: number | null; limit?: number } = {}) =>
+    call<{ items: KbAuditRow[]; next_before_id: number | null }>(`/admin/knowledge/audit?${new URLSearchParams({ limit: String(f.limit ?? 50), ...(f.doc_id ? { doc_id: f.doc_id } : {}),
+      ...(f.action ? { action: f.action } : {}), ...(f.actor ? { actor: f.actor } : {}), ...(f.before_id ? { before_id: String(f.before_id) } : {}) })}`, { token }),
+  kbCompare: (token: string, id: string, from: number, to: number) => call<KbCompare>(`/admin/knowledge/documents/${encodeURIComponent(id)}/compare?from=${from}&to=${to}`, { token }),
+  kbProposals: (token: string, status?: string) => call<{ items: KbProposalRow[]; total: number }>(`/admin/knowledge/proposals?${new URLSearchParams({ limit: "50", ...(status ? { status } : {}) })}`, { token }),
+  kbImportDisk: (token: string) => call<{ imported: string[]; skipped: string[]; failed: { doc_id: string; error: string }[] }>("/admin/knowledge/import-disk", { method: "POST", token }),
+  // Final M6 2.4: legal hold and permanent deletion (administrators only; the server checks every rule)
+  kbLegalHold: (token: string, id: string, body: { hold: boolean; reason?: string; expected_row_version: number }) =>
+    call<KbDoc>(`/admin/knowledge/documents/${encodeURIComponent(id)}/legal-hold`, { method: "PUT", token, body }),
+  kbPurgePreview: (token: string, id: string) => call<KbPurgePreview>(`/admin/knowledge/documents/${encodeURIComponent(id)}/purge-preview`, { token }),
+  kbPurge: (token: string, id: string, body: { confirm_doc_id: string; confirm_title: string; expected_row_version: number }) =>
+    call<{ doc_id: string; outcome: "deleted" | "already_deleted"; removed?: KbPurgePreview["removes"] }>(`/admin/knowledge/documents/${encodeURIComponent(id)}/purge`, { method: "POST", token, body }),
   // Knowledge workspace. Staff routes also accept administrators; review routes are administrators only. (Folders were retired in final M6.)
   kwTree: (token: string, scope: "admin" | "staff") => call<KwTree>(`/${scope}/knowledge/tree`, { token }),
   kwRead: (token: string, id: string) => call<KwReadDoc>(`/staff/knowledge/documents/${encodeURIComponent(id)}`, { token }),

@@ -124,6 +124,15 @@ export interface KbDoc {
   doc_id: string; title: string; category: string; description: string | null; tags: string[]; status: "draft" | "published" | "archived"; origin: "store" | "imported";
   latest_version: number; published_version: number | null; row_version: number; latest_status: KbLifecycle | null; published_at: string | null; published_by: string | null;
   created_by: string; created_at: string | null; updated_by: string | null; updated_at: string | null; archived_by: string | null; archived_at: string | null;
+  legal_hold?: boolean; legal_hold_reason?: string | null; legal_hold_by?: string | null; legal_hold_at?: string | null;
+}
+export interface KbCompare {
+  from: KbVersionRow; to: KbVersionRow; identical: boolean; title_changed: boolean; stats: { added_lines: number; removed_lines: number; size_delta_bytes: number }; diff: string[]; truncated: boolean;
+}
+export interface KbPurgePreview {
+  doc_id: string; title: string; status: string; row_version: number; legal_hold: boolean; legal_hold_reason: string | null; archived_at: string | null; origin: string;
+  removes: { versions: number; staged_chunks: number; live_chunks: number; change_items: number; change_requests: number; proposals: number };
+  keeps: string[]; blockers: string[]; disk_file_note: string | null;
 }
 export interface KbVersionRow {
   version: number; title: string; status: string; lifecycle: KbLifecycle; checksum: string; size_bytes: number; change_note: string; created_by: string; created_at: string | null;
@@ -132,11 +141,14 @@ export interface KbVersionRow {
 }
 export interface KbList { items: KbDoc[]; total: number; page: number; page_size: number }
 export interface KbVersions { items: KbVersionRow[]; total: number }
-export interface KbMeta { categories: string[]; limits: { max_bytes: number; max_chunks: number }; embedding_model: string; unmanaged_disk_documents: string[] }
+export interface KbMeta { categories: string[]; limits: { max_bytes: number; max_chunks: number }; embedding_model: string; unmanaged_disk_documents: string[];
+  document_statuses?: string[]; proposal_statuses?: string[]; audit_actions?: string[]; purge_enabled?: boolean; purge_min_archived_days?: number }
 export interface KbNewDoc { doc_id: string; title: string; category: string; content: string; description?: string }
-export interface KbProposalRow { call_id: string; doc_id: string; version: number; status: "proposed" | "approved" | "rejected" | "published"; proposed_by: string; reviewed_by: string | null; published_by: string | null; review_note: string | null }
+export interface KbProposalRow { call_id: string; doc_id: string; version: number; status: "proposed" | "approved" | "rejected" | "published"; proposed_by: string; reviewed_by: string | null; published_by: string | null; review_note: string | null;
+  proposed_at?: string | null; reviewed_at?: string | null; published_at?: string | null }
 export interface KbFeedbackRow { call_id: string; category: string; what_was_wrong: string; suggested_correction: string | null; written_by: string; proposal: KbProposalRow | null }
-export interface KbAuditRow { id: number; at: string | null; actor: string; action: string; resource_id: string; doc_id: string | null; version: number | null }
+export interface KbAuditRow { id: number; at: string | null; actor: string; action: string; resource_id: string; doc_id: string | null; version: number | null;
+  resource_type?: string; summary?: Record<string, string | number | boolean> }
 
 // ---- Knowledge workspace (Part 1) ----------------------------------------------------------------------------------------------
 export interface KwFolder { folder_id: string; parent_id: string | null; name: string; path: string; row_version: number; document_count: number }
@@ -171,6 +183,9 @@ export interface KwItem {
   decision: string | null; rationale: string | null; row_version: number; result_version: number | null; diff?: KwDiff; proposed_content?: string;
   base_checksum?: string; proposed_checksum?: string; classification?: KwClass | null; confidence?: number | null; decided_by?: string | null; decided_at?: string | null;
   admin_decision?: "confirmed" | "excluded" | null; admin_note?: string | null; admin_by?: string | null; admin_at?: string | null; admin_edited?: boolean;
+  /** From the audit trail (never from the viewer): the latest human editor of this item's text, and the latest staff / administrator editor. */
+  last_edited_by?: string | null; last_edited_at?: string | null; last_edit_role?: "author" | "admin" | null; editors?: string[];
+  staff_edited_by?: string | null; admin_edited_by?: string | null;
   included?: boolean; staff_included?: boolean; actionable?: boolean; process_status?: "pending" | "processing" | "ready" | "failed" | null;
   publish_status?: "pending" | "published" | "not_published" | "failed" | null; process_error?: string | null; ai?: KwAi | null; final_edits?: KwPatch[] | null;
   overlapping_requests?: { request_id: string; status: KwStatus; created_by: string }[];

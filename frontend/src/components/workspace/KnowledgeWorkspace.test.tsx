@@ -220,14 +220,73 @@ describe("Knowledge workspace — administrators", () => {
   });
   const mountAdmin = () => { signedIn("admin", "admin1"); return renderWithAuth(<KnowledgeWorkspace scope="admin" />); };
 
-  it("shows drafts and archived documents to administrators and filters by status", async () => {
+  it("opens on Live by default for administrators; other statuses stay one choice away and the choice survives a reload", async () => {
     adminWorld({ "GET /api/admin/knowledge/tree": () => ({ json: { ...TREE, documents: [...TREE.documents,
       { doc_id: "old", title: "Old brochure", category: "faq", folder_id: null, status: "archived", published_version: null, latest_version: 3, updated_at: null }] } }) });
-    mountAdmin();
-    expect(await screen.findByRole("button", { name: "Open Old brochure" })).toHaveTextContent("Archived");
-    await userEvent.selectOptions(screen.getByLabelText("Filter by status"), "live");
-    expect(await screen.findByText("2 of 3 document(s)")).toBeInTheDocument();
+    const { unmount } = mountAdmin();
+    expect(await screen.findByText("2 of 3 document(s)")).toBeInTheDocument();                      // Live is the default
+    expect(screen.getByLabelText("Filter by status")).toHaveValue("live");
+    expect(window.location.search).not.toContain("st=");                                           // the default is not written into the URL
     expect(screen.queryByRole("button", { name: "Open Old brochure" })).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText("Filter by status"), "archived");
+    expect(await screen.findByRole("button", { name: "Open Old brochure" })).toHaveTextContent("Archived");
+    expect(window.location.search).toContain("st=archived");
+    unmount();
+    mountAdmin();                                                                                   // "reload": the URL keeps the choice
+    expect(await screen.findByRole("button", { name: "Open Old brochure" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by status")).toHaveValue("archived");
+    await userEvent.selectOptions(screen.getByLabelText("Filter by status"), "all");
+    expect(await screen.findByText("3 document(s)")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Filter by status"), "live");
+    expect(window.location.search).not.toContain("st=");
+  });
+
+  it("staff have no status filter (they only ever see live documents)", async () => {
+    staffWorld();
+    mountStaff();
+    await screen.findByRole("button", { name: "Open Fee rules" });
+    expect(screen.queryByLabelText("Filter by status")).toBeNull();
+  });
+
+  it("Back from a document opened from the list returns to the list (in-app history)", async () => {
+    adminWorld();
+    window.history.pushState({}, "", "/admin?tab=knowledge&view=requests");                        // the admin was on Change requests before
+    window.history.pushState({}, "", "/admin?tab=knowledge");
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: "Open Fee rules" }));
+    expect(window.location.search).toContain("kb=doc");
+    await userEvent.click(await screen.findByRole("button", { name: "All documents" }));
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).not.toContain("kb=doc"));
+    expect(window.location.search).not.toContain("view=requests");                               // never into Change requests
+  });
+
+  it("Back from a document that was NOT opened from the list (direct URL, a sub-tab switch that restored it) goes to the list, not to the previous page", async () => {
+    adminWorld();
+    window.history.pushState({}, "", "/admin?tab=knowledge&view=requests");                        // Change requests ...
+    window.history.pushState({}, "", "/admin?tab=knowledge&kb=doc&d=fee-rules");                    // ... then the workspace restored the open document
+    const back = vi.spyOn(window.history, "back");
+    mountAdmin();
+    expect(await screen.findByRole("heading", { name: "Fee rules" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "All documents" }));
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument();
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?tab=knowledge");                                         // replaced in place: the earlier history is untouched
+    back.mockRestore();
+  });
+
+  it("Back from a document opened from My change requests returns to My change requests", async () => {
+    adminWorld({ "GET /api/staff/knowledge/changes": () => ({ json: { items: [req({ status: "submitted" })], total: 1, page: 1, page_size: 50 } }) });
+    window.history.pushState({}, "", "/admin?tab=knowledge");
+    mountAdmin();
+    await userEvent.click(await screen.findByRole("button", { name: /My change requests/ }));
+    await screen.findByRole("region", { name: /change requests/i }).catch(() => null);
+    expect(window.location.search).toContain("kb=mine");
+    window.history.pushState({ sgOrigin: "kb:mine" }, "", "/admin?tab=knowledge&kb=doc&d=fee-rules");  // what onResume does
+    window.dispatchEvent(new Event("sg:url"));
+    expect(await screen.findByRole("heading", { name: "Fee rules" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "All documents" }));
+    await waitFor(() => expect(window.location.search).toContain("kb=mine"));
   });
 
   it("keeps the view in the URL: Back returns from a document to the list", async () => {

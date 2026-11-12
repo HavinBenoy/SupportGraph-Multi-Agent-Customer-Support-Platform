@@ -20,10 +20,16 @@ export const Badge = ({ s }: { s: KwStatus }) => <span className={`kw-chip st-${
 export const CLASS_LABEL: Record<KwClass, string> = { definite: "Definitely affected", potential: "Potentially affected — needs confirmation", related_no_change: "Related — no change needed" };
 export const ClassChip = ({ c }: { c: KwClass | null | undefined }) => (c ? <span className={`kw-chip cl-${c}`}><span aria-hidden="true">{c === "definite" ? "■" : c === "potential" ? "▲" : "○"} </span>{CLASS_LABEL[c]}</span> : null);
 
-export const DECISION_LABEL: Record<string, string> = { accepted: "Accepted", manual: "Edited by you", discarded: "Discarded" };
-export const DecisionChip = ({ d }: { d: string | null | undefined }) => (
-  <span className={`kw-chip dc-${d ?? "pending"}`}><span aria-hidden="true">{d === "accepted" ? "✓ " : d === "manual" ? "✎ " : d === "discarded" ? "✕ " : "… "}</span>{d ? DECISION_LABEL[d] ?? d : "Needs a decision"}</span>
-);
+export const DECISION_LABEL: Record<string, string> = { accepted: "Accepted", manual: "Edited", discarded: "Discarded" };
+/** "Edited by <name>" comes from the persisted editor (the audit trail), never from who is looking: "you" only when that editor IS the viewer. */
+export const editedBy = (editor: string | null | undefined, me: string | null | undefined) => (editor ? (me && editor === me ? "you" : editor) : null);
+export const DecisionChip = ({ d, editor, me }: { d: string | null | undefined; editor?: string | null; me?: string | null }) => {
+  const who = d === "manual" ? editedBy(editor, me) : null;
+  return (
+    <span className={`kw-chip dc-${d ?? "pending"}`}><span aria-hidden="true">{d === "accepted" ? "✓ " : d === "manual" ? "✎ " : d === "discarded" ? "✕ " : "… "}</span>
+      {d ? (who ? `Edited by ${who}` : DECISION_LABEL[d] ?? d) : "Needs a decision"}</span>
+  );
+};
 
 export const STEP_STATUS: KwStatus[] = ["submitted", "under_review", "approved", "processing", "publishing", "published"];
 

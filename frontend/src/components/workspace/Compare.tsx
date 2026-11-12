@@ -158,3 +158,21 @@ export function CompareView({ it, preview, name }: { it: KwItem; preview?: strin
     </section>
   );
 }
+
+/** Two arbitrary texts side by side (M7: any two versions of a document), with only the changed words marked. Display only. */
+export function TextCompare({ before, after, beforeLabel, afterLabel, name }: { before: string; after: string; beforeLabel: string; afterLabel: string; name: string }) {
+  const segs = useMemo(() => wordDiff(before, after), [before, after]);
+  const n = changeCount(segs);
+  return (
+    <section className="kw-cmp" aria-label={`Comparison for ${name}`}>
+      <div className="kw-cmp-bar">
+        <p className="kw-muted tiny" role="status">{n.blocks === 0 ? "The two versions have the same text." : `${n.blocks} change${n.blocks === 1 ? "" : "s"} · +${n.added} / −${n.removed} words`}</p>
+        <span className="kw-legend" aria-hidden="true"><del className="kw-del">removed</del> <ins className="kw-ins">added</ins></span>
+      </div>
+      <div className="kw-cmp-grid">
+        <Panel title={beforeLabel} segs={segs} show="old" label={`${beforeLabel} of ${name}`} />
+        <Panel title={afterLabel} segs={segs} show="new" label={`${afterLabel} of ${name}`} tone="ai" />
+      </div>
+    </section>
+  );
+}

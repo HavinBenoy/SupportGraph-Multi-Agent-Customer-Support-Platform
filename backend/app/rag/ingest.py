@@ -38,6 +38,7 @@ class IngestReport:
     unchanged: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     managed_skipped: list[str] = field(default_factory=list)   # M6: articles owned by the knowledge store; disk ingest never touches them
+    purged_skipped: list[str] = field(default_factory=list)    # final M6: permanently deleted documents whose file is still on disk (never re-ingested)
     chunks_written: int = 0
 
     @property
@@ -78,6 +79,11 @@ def ingest_tenant(db: Session, tenant_id: str, embedder: EmbeddingClient, *, ten
     # M6: a document that the knowledge store manages (drafts, versions, publication, archive) is changed ONLY through the store. Disk ingest neither
     # overwrites it (that would bypass versioning and publication) nor withdraws it because it has no file.
     managed = set(db.execute(select(KbDocument.doc_id).where(KbDocument.tenant_id == tenant_id)).scalars())
+    # Final M6: a PERMANENTLY deleted knowledge document (audit tombstone `document_purged`) is never brought back from a file left in the docs folder.
+    from app.knowledge.purge import purged_ids
+    purged = purged_ids(db, tenant_id)
+    report.purged_skipped = sorted(d.doc_id for d in docs if d.doc_id in purged)
+    managed |= purged
     report.managed_skipped = sorted(d.doc_id for d in docs if d.doc_id in managed)
     docs = [d for d in docs if d.doc_id not in managed]
     on_disk = {d.doc_id for d in docs}
