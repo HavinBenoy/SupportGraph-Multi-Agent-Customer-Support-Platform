@@ -21,6 +21,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.telephony.media import resample  # noqa: E402
 
 
+def _token_from_settings() -> str:
+    """The same value the API reads: the repository's .env (app.config), so the simulator and the server always agree."""
+    try:
+        from app.config import Settings
+        t = Settings().telephony_stream_token
+        return t.get_secret_value() if t else ""
+    except Exception:  # noqa: BLE001 - an unreadable .env: the message below explains what to set
+        return ""
+
+
 def load_wav(path: str, rate: int) -> bytes:
     with wave.open(path, "rb") as w:
         if w.getnchannels() != 1 or w.getsampwidth() != 2:
@@ -31,9 +41,12 @@ def load_wav(path: str, rate: int) -> bytes:
 async def run(a) -> int:
     import websockets
 
-    token = a.token or os.environ.get("SG_TELEPHONY_STREAM_TOKEN", "")
+    token = a.token or os.environ.get("SG_TELEPHONY_STREAM_TOKEN", "") or _token_from_settings()
     if len(token) < 32:
-        raise SystemExit("set SG_TELEPHONY_STREAM_TOKEN (>= 32 characters) or pass --token")
+        raise SystemExit("SG_TELEPHONY_STREAM_TOKEN is not set (or shorter than 32 characters). Put it in the project's .env together with "
+                         "SG_TELEPHONY_PROVIDER=edesy, restart `make api`, then run this again (or pass --token).")
+    if a.wav and not Path(a.wav).is_file():
+        raise SystemExit(f"no such WAV file: {Path(a.wav).resolve()}")
     url = f"{a.api.rstrip('/')}/api/telephony/edesy/stream/{token}"
     frame = a.rate * 20 // 1000 * 2
     got = bytearray()

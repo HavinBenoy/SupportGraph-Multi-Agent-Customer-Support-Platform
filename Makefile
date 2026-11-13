@@ -269,7 +269,7 @@ test-calls:  ## M4: call sessions, staff live calls, takeover (SQLite, sandbox-s
 
 # ---- M8: telephone line (docs/M8.md). The Edesy targets call a PAID provider's API with YOUR key (EDESY_API_KEY in your shell); nothing runs them automatically.
 phone-sim:  ## simulate a phone call against the running API (free; Edesy protocol): make phone-sim [ARGS='--wav q.wav --keys "*123456#" --rate 8000']
-	cd backend && ../.venv/bin/python scripts/phone_sim.py $(ARGS)
+	.venv/bin/python backend/scripts/phone_sim.py $(ARGS)        # run from the project root, so --wav/--out paths are relative to it
 edesy-numbers:  ## list your Edesy numbers (needs EDESY_API_KEY)
 	cd backend && ../.venv/bin/python scripts/edesy_setup.py numbers
 edesy-stream-test:  ## ask Edesy to test your public stream URL: make edesy-stream-test URL=wss://host/api/telephony/edesy/stream/<token>
