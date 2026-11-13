@@ -19,7 +19,7 @@ SAFE_KEYS = {"fields", "category", "status", "from_status", "to_status", "chunks
              "call_id", "error", "decision", "unchanged", "origin", "count", "imported", "skipped", "failed", "tags", "stale_takeover", "attempt", "current_attempt",
              "folder_id", "parent_id", "from_folder", "to_folder", "name", "request_id", "items", "added", "deleted", "base_version", "result_version",
              "classification", "confidence", "candidates", "definite", "potential", "related", "unsupported", "historical", "questions", "documents", "retry", "stage",
-             "workflow", "admin_edited", "remaining", "scanned", "clean"}
+             "workflow", "admin_edited", "remaining", "scanned", "clean", "revision"}
 MAX_STR = 200
 
 

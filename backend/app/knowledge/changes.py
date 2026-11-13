@@ -122,8 +122,19 @@ def edit_history(db: Session, tenant_id: str, request_id: str, doc_id: str) -> l
             continue
         if e.action == "change_draft_saved" and sm.get("status") == "item_removed":
             continue
-        out.append({"by": e.actor, "at": store._iso(e.created_at), "role": "admin" if e.action == "change_item_edited" else "author"})
+        out.append({"by": e.actor, "at": store._iso(e.created_at), "role": "admin" if e.action == "change_item_edited" else "author", "revision": bool(sm.get("revision"))})
     return out
+
+
+def revision_source(it: KbChangeItem) -> str | None:
+    """"manual" = the text is a person's own wording; "ai" = the AI proposal as suggested; "unchanged" = discarded; None = no decision yet."""
+    if it.decision == "discarded":
+        return "unchanged"
+    if it.decision == "manual" or it.origin == "manual" or it.admin_edited:
+        return "manual"
+    if it.decision == "accepted":
+        return "ai"
+    return None
 
 
 def item_view(db: Session, it: KbChangeItem, *, detail: bool, overlaps: list | None = None) -> dict:
@@ -137,6 +148,9 @@ def item_view(db: Session, it: KbChangeItem, *, detail: bool, overlaps: list | N
     out = {"doc_id": it.doc_id, "doc_title": doc.title if doc else it.doc_id, "base_version": it.base_version, "current_published_version": cur,
            "last_edited_by": last["by"] if last else None, "last_edited_at": last["at"] if last else None, "last_edit_role": last["role"] if last else None,
            "editors": sorted({e["by"] for e in edits}) if human else [],
+           # refinement 2.2: where the proposed text came from — the AI proposal as suggested, or a person's own (manual) wording — and whether it was revised after
+           # an administrator returned the request. Derived from persisted decisions and the audit trail, never from the viewer.
+           "revision_source": revision_source(it), "revised_after_return": bool(human and any(e.get("revision") for e in edits if e["role"] == "author")),
            "staff_edited_by": next((e["by"] for e in reversed(edits) if e["role"] == "author"), None) if (it.decision == "manual" or it.origin == "manual") else None,
            "admin_edited_by": next((e["by"] for e in reversed(edits) if e["role"] == "admin"), None) if it.admin_edited else None,
            "base_stale": cur != it.base_version, "proposed_title": it.proposed_title, "stats": it.stats, "origin": it.origin, "decision": it.decision,
@@ -321,7 +335,7 @@ def save_item(db: Session, tenant_id: str, actor: str, s: Settings, request_id: 
     db.execute(update(KbChangeRequest).where(KbChangeRequest.tenant_id == tenant_id, KbChangeRequest.request_id == request_id).values(updated_at=store.now())
                .execution_options(synchronize_session=False))
     audit.record(db, tenant_id, actor, "change_draft_saved", "request", request_id, doc_id=doc_id, request_id=request_id, base_version=it.base_version,
-                 added=int(it.stats.get("added_chars", 0)), deleted=int(it.stats.get("deleted_chars", 0)))
+                 added=int(it.stats.get("added_chars", 0)), deleted=int(it.stats.get("deleted_chars", 0)), revision=r.status == "needs_revision")
     return item_view(db, it, detail=True)
 
 
@@ -620,7 +634,7 @@ def decide_item(db: Session, tenant_id: str, actor: str, s: Settings, request_id
                .execution_options(synchronize_session=False))
     db.expire(it)
     audit.record(db, tenant_id, actor, "change_decision_recorded", "request", request_id, doc_id=doc_id, request_id=request_id, decision=decision,
-                 base_version=it.base_version, classification=it.classification, confidence=it.confidence)
+                 base_version=it.base_version, classification=it.classification, confidence=it.confidence, revision=r.status == "needs_revision")
     return item_view(db, db.get(KbChangeItem, (tenant_id, request_id, doc_id)), detail=True)
 
 

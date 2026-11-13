@@ -1,6 +1,7 @@
 "use client";
 import { useUrlParam } from "@/lib/nav";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Splitter, useSplitWidth } from "./Splitter";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { KwAuditEvent, KwItem, KwRequest, KwStatus } from "@/lib/types";
@@ -37,6 +38,8 @@ export function ChangeRequests() {
   const [sel, setSel] = useState<KwRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selId, setSelId] = useUrlParam("cr", null);                     // master-detail: the list stays, the selection is in the URL (Back works, also on phones)
+  const box = useRef<HTMLDivElement>(null);
+  const split = useSplitWidth(box, "sg.split.admin-requests", 380);    // refinement 2.1: resizable list | detail
   const load = useCallback(() => { withToken((t) => api.kwRequests(t, status || undefined)).then((r) => { setRows(r.items); setError(null); }).catch((e) => setError(msg(e))); }, [withToken, status]);
   useEffect(() => { setRows(null); load(); }, [load]);
   useEffect(() => {
@@ -47,7 +50,7 @@ export function ChangeRequests() {
   }, [selId, withToken]);
 
   return (
-    <div className="kw"><div className={`kw-requests-admin kw-md${selId ? " has-sel" : ""}`}>
+    <div className="kw"><div ref={box} className={`kw-requests-admin kw-md resizable${selId ? " has-sel" : ""}`}>
       <section aria-label="Change requests" className="kw-md-list">
         <h1 className="kw-title">Change requests</h1>
         <p className="kw-muted">Review, approve, process and publish — everything happens here.</p>
@@ -69,7 +72,8 @@ export function ChangeRequests() {
             </li>))}
         </ul>
       </section>
-      <section className="kw-md-detail" aria-label="Request details">
+      <Splitter container={box} split={split} label="Resize the request list" controls="kw-admin-requests-detail" />
+      <section className="kw-md-detail" id="kw-admin-requests-detail" aria-label="Request details">
         {!selId && <p className="kw-muted kw-md-hint">Select a request to review it here: status, author, affected documents, proposals and the approval controls.</p>}
         {selId && !sel && !error && <p className="kw-muted" aria-busy="true">Loading…</p>}
         {sel && sel.request_id === selId && (

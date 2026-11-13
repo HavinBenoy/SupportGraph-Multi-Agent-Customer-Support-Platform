@@ -397,6 +397,17 @@ class Call(Base):
     intervention_owner: Mapped[str | None] = mapped_column(String(64))
     # M5: the call was made while Trial Verification Mode was on for the tenant (decided once, when the call is created).
     trial_mode: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # ---- M8 (migration 0014): the channel and the caller-identity status. Never the raw telephone number: only a keyed hash (to group repeat calls) and a
+    # masked form for staff. caller_status: unknown (no account has this number) | claimed (exactly one account has it; NOT proof of identity) |
+    # ambiguous (several accounts share it) | verified (the caller proved it with that account's phone PIN). caller_role is the role of the claimed account.
+    channel: Mapped[str] = mapped_column(String(16), default="web", server_default="web")
+    caller_status: Mapped[str | None] = mapped_column(String(16))
+    caller_role: Mapped[str | None] = mapped_column(String(16))
+    caller_masked: Mapped[str | None] = mapped_column(String(24))
+    caller_hash: Mapped[str | None] = mapped_column(String(64))
+    provider: Mapped[str | None] = mapped_column(String(16))
+    provider_call_ref: Mapped[str | None] = mapped_column(String(80))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CallEvent(Base):
@@ -898,6 +909,55 @@ class KbChangeItem(Base):
     process_status: Mapped[str | None] = mapped_column(String(12))
     publish_status: Mapped[str | None] = mapped_column(String(14))
     process_error: Mapped[str | None] = mapped_column(String(200))
+
+
+# ---------------------------------------------------------------------------------------------------------------------- M8 telephony (migration 0014)
+class AccountPhone(Base):
+    """M8: a telephone number registered for a STAFF or ADMIN account (students keep theirs in `students.phone`). Used only to recognise who a caller
+    CLAIMS to be; caller ID is never proof of identity. Stored normalised (E.164). Set and removed by an administrator of the same tenant (audited)."""
+
+    __tablename__ = "account_phones"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "username"], ["accounts.tenant_id", "accounts.username"]),
+        Index("ix_account_phones_number", "tenant_id", "phone_e164"),
+    )
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    phone_e164: Mapped[str] = mapped_column(String(20))
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PhonePin(Base):
+    """M8: the phone-support PIN an account holder sets for themselves (after re-entering their password). Only a salted scrypt hash is stored. Failed
+    attempts are counted atomically and lock phone verification for a while; the lock never affects the web sign-in."""
+
+    __tablename__ = "phone_pins"
+    __table_args__ = (ForeignKeyConstraint(["tenant_id", "username"], ["accounts.tenant_id", "accounts.username"]),)
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    pin_hash: Mapped[str] = mapped_column(String(300))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TelephonyAudit(Base):
+    """M8: append-only trail of telephony administration (number set/removed, PIN set/reset/cleared, lockouts). Usernames and actions only: never a
+    number, never a PIN."""
+
+    __tablename__ = "telephony_audit"
+    __table_args__ = (Index("ix_telephony_audit_tenant", "tenant_id", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(40))
+    subject: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 def _guard_version_update(mapper, connection, target) -> None:

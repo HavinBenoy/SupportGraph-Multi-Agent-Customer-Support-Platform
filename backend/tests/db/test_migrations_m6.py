@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.db.base import Base
+from tests.db.m8shape import drop_m8
 from tests.db.test_migrations_m4_1_m5 import cfg_for
 
 KB = {"kb_documents", "kb_versions", "kb_version_chunks", "kb_proposals", "kb_events"}
@@ -23,6 +24,7 @@ def at_0008(tmp_path):
         for t in ("kb_change_items", "kb_change_requests", "kb_doc_placement", "kb_folders", "kb_events", "kb_proposals", "kb_version_chunks", "kb_versions", "kb_documents"):
             c.execute(text(f"DROP TABLE {t}"))
         c.execute(text("ALTER TABLE documents DROP COLUMN kb_version"))
+        drop_m8(c)                                                               # M8 (0014) is newer than this revision
         c.execute(text("INSERT INTO tenants (id, name, timezone, attendance_threshold_pct, is_sample) VALUES ('keep_me','keep','Asia/Kolkata',75,1)"))
         c.execute(text("INSERT INTO documents (tenant_id, doc_id, title, audience, source_path, content_hash, last_reviewed) "
                        "VALUES ('keep_me','disk-doc','On disk','public','tenants/keep_me/docs/a.md','h1','2026-10-01')"))
@@ -61,10 +63,10 @@ def test_0009_upgrades_downgrades_and_re_upgrades_without_touching_existing_data
     assert KB <= set(inspect(eng).get_table_names()) and counts(eng) == (1, 1, 1, 1)
 
 
-def test_0013_is_the_head_and_the_chain_is_unbroken(at_0008):
+def test_0014_is_the_head_and_the_chain_is_unbroken(at_0008):
     from alembic.script import ScriptDirectory
     script = ScriptDirectory.from_config(at_0008[1])
-    assert script.get_current_head() == "0013" and script.get_revision("0013").down_revision == "0012"
+    assert script.get_current_head() == "0014" and script.get_revision("0014").down_revision == "0013" and script.get_revision("0013").down_revision == "0012"
     assert script.get_revision("0012").down_revision == "0011" and script.get_revision("0011").down_revision == "0010" and script.get_revision("0010").down_revision == "0009" and script.get_revision("0009").down_revision == "0008"
 
 
@@ -187,3 +189,22 @@ def test_0013_adds_the_legal_hold_without_touching_existing_documents(at_0008):
     with eng.connect() as c:
         assert c.execute(text("SELECT title FROM kb_documents WHERE doc_id = 'held-doc'")).scalar() == "Held"
     command.upgrade(cfg, "head")
+
+
+def test_0014_adds_the_telephone_channel_without_touching_existing_calls(at_0008):
+    """M8: additive. An existing call reads as a web call with no caller-identity data; the three new tables start empty; downgrade removes exactly them."""
+    url, cfg, eng = at_0008
+    command.upgrade(cfg, "0013")
+    assert "channel" not in {c["name"] for c in inspect(eng).get_columns("calls")}
+    command.upgrade(cfg, "0014")
+    insp = inspect(eng)
+    assert {"account_phones", "phone_pins", "telephony_audit"} <= set(insp.get_table_names())
+    with eng.connect() as c:
+        row = c.execute(text("SELECT id, status, epoch, channel, caller_status, caller_masked FROM calls WHERE id = 'c_old'")).one()
+    assert tuple(row) == ("c_old", "ended", 2, "web", None, None)
+    command.downgrade(cfg, "0013")
+    insp = inspect(eng)
+    assert not {"account_phones", "phone_pins", "telephony_audit"} & set(insp.get_table_names())
+    assert "channel" not in {c["name"] for c in insp.get_columns("calls")} and counts(eng)[3] == 1
+    command.upgrade(cfg, "head")
+    assert "channel" in {c["name"] for c in inspect(eng).get_columns("calls")}

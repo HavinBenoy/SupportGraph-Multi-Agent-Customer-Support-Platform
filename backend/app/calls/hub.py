@@ -597,8 +597,9 @@ class CallHub:
         task.add_done_callback(self._bg.discard)
         return task
 
-    async def open(self, tenant_id: str, ticket_id: str, student_id: str | None, *, send_json, send_bytes, close_caller, trial_mode: bool = False) -> LiveCall:
-        call = await _db(lambda db: svc.create_call(db, tenant_id, ticket_id, student_id, trial_mode))
+    async def open(self, tenant_id: str, ticket_id: str, student_id: str | None, *, send_json, send_bytes, close_caller, trial_mode: bool = False,
+                   channel: str = "web", phone: dict | None = None) -> LiveCall:
+        call = await _db(lambda db: svc.create_call(db, tenant_id, ticket_id, student_id, trial_mode, channel=channel, phone=phone))
         live = LiveCall(self, self.s, tenant_id, call.id, ticket_id, student_id, send_json, send_bytes, close_caller)
         self._live[(tenant_id, call.id)] = live
         return live

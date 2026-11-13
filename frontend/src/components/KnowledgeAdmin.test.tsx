@@ -141,12 +141,16 @@ describe("Knowledge admin", () => {
   it("creates a new document as a draft", async () => {
     const { f } = world({}, { "POST /api/admin/knowledge/documents": () => ({ status: 201, json: { document: doc(), version: ver() } }) });
     mount();
+    expect(await screen.findByRole("button", { name: "New document" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "New document" })).toBeNull();                     // 2.3: hidden until asked for
+    await userEvent.click(screen.getByRole("button", { name: "New document" }));
     const form = await screen.findByRole("region", { name: "New document" });
     await userEvent.type(within(form).getByLabelText(/^Id/), "fees");
     await userEvent.type(within(form).getByLabelText("Title"), "Fee rules");
     await userEvent.type(within(form).getByLabelText(/^Text/), "# Fees\n\nBody text here.");
-    await userEvent.click(within(form).getByRole("button", { name: "Create draft" }));
+    await userEvent.click(within(form).getByRole("button", { name: "Create document" }));
     expect(await screen.findByText(/Draft created/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "New document" })).toBeNull();                     // closes after success
     expect(JSON.parse(String((sent(f, "POST", "/api/admin/knowledge/documents")[0][1] as RequestInit).body))).toMatchObject({ doc_id: "fees", title: "Fee rules", category: "fees" });
   });
 

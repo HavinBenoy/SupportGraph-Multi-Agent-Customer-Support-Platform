@@ -2,7 +2,7 @@
  *  that is safe to show: the server's `detail` when it is a string, otherwise a generic one. Tokens live in sessionStorage (cleared when the
  *  tab closes); see docs/STEP5.md for the trade-off. */
 import type { Analytics, Approval, CallAction, ChatReply, Decision, EscalationDetail, EscalationRow, Feedback, FeedbackInput, FeedbackQueue, History, Interventions, LiveCall,
-  KbAuditRow, KbCompare, KbDoc, KbPurgePreview, KnowledgeAnalytics, KwAuditEvent, KwDecision, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
+  KbAuditRow, KbCompare, KbDoc, KbPurgePreview, KnowledgeAnalytics, KwAuditEvent, KwDecision, KwHistoryRow, KwItem, KwPreview, KwReadDoc, KwRequest, KwRequestList, KwTree, KwVerification, KbFeedbackRow, KbList, KbMeta, KbNewDoc, KbProposalRow, KbVersionRow, KbVersions, PhonePinStatus, PublicConfig, PurgeResult, RecordingRow, RetentionStatus, Role, Session, TelephonyAccount, TelephonyAuditRow, TelephonyStatus, TelephonySummary, Transcript, TrialEventRow, TrialMetrics, TrialPatch, TrialView } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); this.name = "ApiError"; }
@@ -145,6 +145,17 @@ export const api = {
   kwAdminCancel: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/cancel`, { method: "POST", token }),
   kwAudit: (token: string, id: string) => call<{ items: KwAuditEvent[] }>(`/admin/knowledge/changes/${encodeURIComponent(id)}/audit`, { token }),
   kwApply: (token: string, id: string) => call<KwRequest>(`/admin/knowledge/changes/${encodeURIComponent(id)}/apply`, { method: "POST", token }),
+  // ---- M8: telephone line (administration) and one's own phone-support PIN ----
+  telStatus: (token: string) => call<TelephonyStatus>("/admin/telephony/status", { token }),
+  telAccounts: (token: string) => call<{ items: TelephonyAccount[] }>("/admin/telephony/accounts", { token }),
+  telSetPhone: (token: string, username: string, phone: string) => call<{ username: string; phone_masked: string }>(`/admin/telephony/phones/${encodeURIComponent(username)}`, { method: "PUT", token, body: { phone } }),
+  telDeletePhone: (token: string, username: string) => call<{ removed: boolean }>(`/admin/telephony/phones/${encodeURIComponent(username)}`, { method: "DELETE", token }),
+  telResetPin: (token: string, username: string) => call<{ reset: boolean }>(`/admin/telephony/pins/${encodeURIComponent(username)}`, { method: "DELETE", token }),
+  telSummary: (token: string, days = 30) => call<TelephonySummary>(`/admin/telephony/summary?days=${days}`, { token }),
+  telAudit: (token: string) => call<{ items: TelephonyAuditRow[] }>("/admin/telephony/audit?limit=50", { token }),
+  myPin: (token: string) => call<PhonePinStatus>("/me/phone-pin", { token }),
+  setMyPin: (token: string, current_password: string, pin: string) => call<PhonePinStatus>("/me/phone-pin", { method: "PUT", token, body: { current_password, pin } }),
+  clearMyPin: (token: string, current_password: string) => call<{ removed: boolean }>("/me/phone-pin", { method: "DELETE", token, body: { current_password } }),
   trialStatus: (token: string) => call<{ enabled: boolean; recording_offered: boolean }>("/staff/trial", { token }),
   trial: (token: string) => call<TrialView>("/admin/trial", { token }),
   saveTrial: (token: string, expectedVersion: number, patch: TrialPatch) => call<TrialView>("/admin/trial", { method: "PUT", token, body: { expected_version: expectedVersion, ...patch } }),

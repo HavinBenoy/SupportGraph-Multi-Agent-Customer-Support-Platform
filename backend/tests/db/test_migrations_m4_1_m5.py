@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.db.base import Base
+from tests.db.m8shape import drop_m8
 from tests.db.test_postgres import BACKEND
 
 NEW_0007 = {"intervention_feedback", "feedback_reviews"}
@@ -35,6 +36,7 @@ def at_0006(tmp_path):
         c.execute(text("ALTER TABLE documents DROP COLUMN kb_version"))
         c.execute(text("ALTER TABLE calls DROP COLUMN intervention_owner"))
         c.execute(text("ALTER TABLE calls DROP COLUMN trial_mode"))
+        drop_m8(c)                                                               # M8 (0014) is newer than this revision
         c.execute(text("INSERT INTO tenants (id, name, timezone, attendance_threshold_pct, is_sample) VALUES ('keep_me','keep','Asia/Kolkata',75,1)"))
         c.execute(text("INSERT INTO calls (tenant_id, id, ticket_id, status, owner, epoch, created_at) VALUES ('keep_me','c_old','t1','ended','none',2,'2026-10-01 10:00:00')"))
     cfg = cfg_for(url)

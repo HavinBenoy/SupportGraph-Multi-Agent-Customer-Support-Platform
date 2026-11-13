@@ -84,6 +84,9 @@ def _out(c: Call, live: LiveCall | None, p: Principal, feedback: InterventionFee
     out = {
         "id": c.id, "short_id": c.id[2:10], "status": c.status, "category": _category(c), "owner": owner, "owner_staff": owner_staff, "epoch": snap.get("epoch", c.epoch),
         "ticket_ref": _ref(c.ticket_id), "caller": "student" if c.student_id else "anonymous",
+        # M8: the channel and, for a telephone call, who the number CLAIMS to be and whether the caller proved it (masked number only; never the raw one)
+        "channel": getattr(c, "channel", None) or "web", "caller_status": getattr(c, "caller_status", None), "caller_role": getattr(c, "caller_role", None),
+        "caller_masked": getattr(c, "caller_masked", None),
         **({"student_id": c.student_id} if p.role == "admin" and c.student_id else {}),
         "created_at": _iso(c.created_at), "connected_at": _iso(c.connected_at), "takeover_at": _iso(c.takeover_at),
         "ended_at": _iso(c.ended_at), "end_reason": c.end_reason, "duration_s": max(0, dur),

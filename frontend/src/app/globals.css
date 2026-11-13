@@ -294,3 +294,35 @@ main > * { animation: page-in .45s var(--ease) both; }
 .kb-steps li[aria-current] { color: var(--text); border-color: rgba(139, 92, 246, .6); background: rgba(139, 92, 246, .12); }
 .kb-audit td { vertical-align: top; }
 @media (max-width: 640px) { .kb-filters input, .kb-filters select { flex: 1 1 100%; } }
+
+/* ---- refinements 2.3/2.4: document administration as list | details ---- */
+.kb-head { justify-content: space-between; align-items: center; }
+.kb-new { border-color: rgba(139, 92, 246, .45); margin-bottom: 14px; }
+.kb-split { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.kb-detail { min-width: 0; outline: none; }
+.kb-detail-back { display: none; margin: 0 0 8px; }
+.kb-empty { text-align: center; padding: 40px 20px; }
+.kb-pubbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; margin: 8px 0 12px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(255, 255, 255, .03); font-size: .88rem; }
+.kb-pubbar.lc-ready_for_review { border-color: rgba(16, 185, 129, .5); } .kb-pubbar.lc-failed { border-color: rgba(248, 113, 113, .55); } .kb-pubbar.lc-draft { border-color: rgba(245, 158, 11, .45); }
+.kb-editor .bar { justify-content: space-between; }
+/* side by side whenever the documents area itself is wide enough (a container query: inside the workspace the area is narrower than the window) */
+.kb-docs { container-type: inline-size; container-name: kbdocs; }
+.kb-split.has-sel .kb-detail-back { display: block; }
+@container kbdocs (min-width: 700px) {
+  .kb-split { grid-template-columns: minmax(300px, 4fr) minmax(0, 6fr); }
+  .kb-detail { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; overscroll-behavior: contain; border-radius: 16px; }
+  .kb-split.has-sel .kb-detail-back { display: none; }
+}
+@container kbdocs (min-width: 700px) and (max-width: 1099px) {
+  .kb-split.has-sel .kb-doctable th:nth-child(3), .kb-split.has-sel .kb-doctable td:nth-child(3) { display: none; }   /* make room: the date is in the details */
+}
+
+/* ---- M8: telephone line ---- */
+.pill.phone { border-color: rgba(59, 130, 246, .55); }
+.pill.phone.cs-verified { border-color: rgba(16, 185, 129, .6); }
+.pill.phone.cs-claimed, .pill.phone.cs-ambiguous { border-color: rgba(245, 158, 11, .6); }
+.phone-pin-card { max-width: 760px; margin: 16px auto; }
+.phone-pin-card > summary { cursor: pointer; font-weight: 600; }
+.phone-pin .form { max-width: 420px; }
+.table-wrap { overflow-x: auto; }
+form.inline { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }

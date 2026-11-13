@@ -55,6 +55,8 @@ export interface FeedbackBrief { state: FeedbackState; form_open: boolean; revie
 export interface LiveCall {
   id: string; short_id: string; status: CallStatus; category: CallCategory; owner: "ai" | "staff" | "none"; owner_staff: string | null; epoch: number;
   ticket_ref: string; caller: "student" | "anonymous"; student_id?: string;
+  /** M8: "phone" for a telephone call. caller_status: unknown | claimed (the number matches an account: NOT proof) | ambiguous | verified (PIN). */
+  channel?: "web" | "phone"; caller_status?: CallerStatus | null; caller_role?: "student" | "staff" | "admin" | null; caller_masked?: string | null;
   created_at: string; connected_at: string | null; takeover_at: string | null; ended_at: string | null; end_reason: string | null;
   duration_s: number; intervened: boolean; intervention_by: string | null; trial_mode: boolean;
   live: boolean; listeners: number; listening_staff: string[]; mic_open: boolean; announcing: boolean; is_mine: boolean; listening: boolean;
@@ -186,6 +188,8 @@ export interface KwItem {
   /** From the audit trail (never from the viewer): the latest human editor of this item's text, and the latest staff / administrator editor. */
   last_edited_by?: string | null; last_edited_at?: string | null; last_edit_role?: "author" | "admin" | null; editors?: string[];
   staff_edited_by?: string | null; admin_edited_by?: string | null;
+  /** Refinement 2.2: where the proposed text came from (the AI proposal as suggested, or a person's own wording) and whether it was revised after a return. */
+  revision_source?: "ai" | "manual" | "unchanged" | null; revised_after_return?: boolean;
   included?: boolean; staff_included?: boolean; actionable?: boolean; process_status?: "pending" | "processing" | "ready" | "failed" | null;
   publish_status?: "pending" | "published" | "not_published" | "failed" | null; process_error?: string | null; ai?: KwAi | null; final_edits?: KwPatch[] | null;
   overlapping_requests?: { request_id: string; status: KwStatus; created_by: string }[];
@@ -220,3 +224,15 @@ export interface KwRequest {
 }
 export interface KwAuditEvent { id: number; at: string | null; actor: string; action: string; doc_id: string | null; version: number | null; summary: Record<string, string | number | boolean> }
 export interface KwRequestList { items: KwRequest[]; total: number; page: number; page_size: number }
+
+// ---- M8: telephone line ----
+export type CallerStatus = "unknown" | "claimed" | "ambiguous" | "verified";
+export interface TelephonyStatus {
+  provider: "none" | "edesy"; enabled: boolean; ready: boolean; problems: string[]; stream_path: string | null; token_configured: boolean; sample_rate: number;
+  default_tenant: string; ip_allowlist: boolean; max_concurrent: number; active_phone_calls: number; paid_service: boolean; approval_note: string;
+  pin: { length: number; max_attempts: number; lock_minutes: number; attempts_per_call: number };
+}
+export interface TelephonyAccount { username: string; role: "student" | "staff" | "admin"; disabled: boolean; phone_masked: string | null; phone_source: string | null; has_pin: boolean; locked_until: string | null }
+export interface TelephonySummary { days: number; phone: { total: number; verified: number; claimed_unverified: number; unknown: number; ambiguous: number; taken_over: number; failed: number }; web_calls: number }
+export interface TelephonyAuditRow { id: number; at: string | null; actor: string; action: string; subject: string | null }
+export interface PhonePinStatus { has_pin: boolean; locked_until: string | null; updated_at: string | null; length?: number; phone_line?: boolean }

@@ -27,6 +27,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   const [view] = useUrlParam("kb", "list");
   const [docParam] = useUrlParam("d", null);
   const [reqParam] = useUrlParam("r", null);
+  const [newParam] = useUrlParam("new", null);
   const [cat] = useUrlParam("cat", "");
   // Administrators: the status filter defaults to Live (the URL keeps only a non-default choice, so a reload or Back restores it); "all" = every status.
   const [stParam] = useUrlParam("st", null);
@@ -67,7 +68,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
   // Every view change made here marks the new history entry with the view it was opened FROM ("kb:<view>"); the in-app Back button uses history.back() only
   // for such entries, and otherwise (a document URL opened directly, from a bookmark or after another part of the app pushed an entry) returns to the list.
   const nav = (v: string, d: string | null = null, r: string | null = null) => {
-    setNotice(null); setUrlParams({ kb: v === "list" ? null : v, d, r }, "push", `kb:${view ?? "list"}`); setNavOpen(false);
+    setNotice(null); setUrlParams({ kb: v === "list" ? null : v, d, r, new: null }, "push", `kb:${view ?? "list"}`); setNavOpen(false);
   };
   const goList = () => { setAiState(null); nav("list"); };
   const toListFallback = () => { setAiState(null); setNotice(null); setUrlParams({ kb: null, d: null, r: null }, "replace"); };
@@ -119,7 +120,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
           ) : tree && view === "admin" && isAdmin ? (
             <section aria-label="Document administration">
               <BackBar onBack={back} label="Back" />
-              <KnowledgeAdmin openDoc={docParam} onChanged={load} />
+              <KnowledgeAdmin key={newParam ? "new" : "admin"} openDoc={docParam} startCreating={newParam === "1"} onChanged={load} />
             </section>
           ) : tree && open ? (
             <Reader key={open} docId={open} tree={tree} scope={scope} onBack={back} onEdit={(d) => { setEditingDoc(d); nav("edit", d.doc_id); }}
@@ -131,7 +132,7 @@ export function KnowledgeWorkspace({ scope }: { scope: "admin" | "staff" }) {
                   <h1 className="kw-title">Knowledge base</h1>
                   <p className="kw-muted">{filtered ? `${shown.length} of ${tree.documents.length} document(s)` : `${tree.documents.length} document(s)`}{hits ? ` matching “${q.trim()}”` : ""}</p>
                 </div>
-                {isAdmin && <div className="kw-actions" role="toolbar" aria-label="Document actions"><button className="kw-btn primary" onClick={() => nav("admin")}>New document</button></div>}
+                {isAdmin && <div className="kw-actions" role="toolbar" aria-label="Document actions"><button className="kw-btn primary" onClick={() => { setNotice(null); setUrlParams({ kb: "admin", d: null, r: null, new: "1" }, "push", `kb:${view ?? "list"}`); }}>New document</button></div>}
               </header>
               {shown.length === 0 ? <p className="kw-empty">{filtered ? "No documents match the search or filters." : "No documents yet."}</p> : (
                 <ul className="kw-doclist">

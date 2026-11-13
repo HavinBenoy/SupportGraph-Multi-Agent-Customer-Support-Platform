@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { DeletionRequest } from "./workspace/DeletionRequest";
@@ -18,7 +18,7 @@ type AdminTab = "documents" | "review" | "audit" | "import";
  *  version-to-version comparison, processing and publication, legal hold and permanent deletion; the review queue (approved feedback and its proposals); the
  *  tenant's audit browser; and the import wizard for articles that still come from disk. The server enforces every rule (processing before publishing, approved
  *  proposals, versioned edits, row_version checks); this screen shows state and sends requests. Nothing here publishes or deletes by itself. */
-export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string | null; onChanged?: () => void } = {}) {
+export function KnowledgeAdmin({ openDoc = null, onChanged, startCreating = false }: { openDoc?: string | null; onChanged?: () => void; startCreating?: boolean } = {}) {
   const { withToken } = useAuth();
   const [tab, setTab] = useState<AdminTab>("documents");
   const [docs, setDocs] = useState<KbDoc[] | null>(null);
@@ -31,6 +31,17 @@ export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(startCreating);
+  const detailRef = useRef<HTMLDivElement>(null);
+  // 2.4: selecting a document brings its details into view (no full-page jump; smooth only if the user allows motion) and moves focus there.
+  useEffect(() => {
+    if (!sel || !detailRef.current) return;
+    const el = detailRef.current;
+    const reduce = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const r = el.getBoundingClientRect?.();
+    if (r && typeof el.scrollIntoView === "function" && (r.top < 0 || r.top > (window.innerHeight || 800) - 80)) el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    el.focus?.({ preventScroll: true });
+  }, [sel]);
 
   const load = useCallback(() => {
     setError(null); setLoading(true);
@@ -53,9 +64,14 @@ export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string
       </div>
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="banner done">{notice}</p>}
-      {tab === "documents" && (<>
-        <section className="card" aria-label="Documents">
-          <div className="bar kb-filters"><h2>Documents</h2>
+      {tab === "documents" && (<div className="kb-docs">
+        {creating && meta && <NewDocument meta={meta} onCancel={() => setCreating(false)}
+          onDone={(id) => { setCreating(false); setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load(); onChanged?.(); }} />}
+        <div className={`kb-split${sel ? " has-sel" : ""}`}>
+        <section className="card kb-list" aria-label="Documents">
+          <div className="bar kb-head"><h2>Documents</h2>
+            {meta && !creating && <button className="btn primary" onClick={() => setCreating(true)} aria-haspopup="dialog">New document</button>}</div>
+          <div className="bar kb-filters">
             <input aria-label="Search documents" placeholder="Search title, text or description" value={q} onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { setPage(1); setApplied((a) => ({ ...a, q: q.trim() })); } }} />
             <button className="btn small" onClick={() => { setPage(1); setApplied((a) => ({ ...a, q: q.trim() })); }}>Search</button>
@@ -86,9 +102,14 @@ export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string
           </nav>
           {meta && meta.unmanaged_disk_documents.length > 0 && <p className="muted tiny" data-testid="unmanaged">{meta.unmanaged_disk_documents.length} article(s) come from files on disk and are not managed here yet. <button className="btn small" onClick={() => setTab("import")}>Import them</button></p>}
         </section>
-        {meta && <NewDocument meta={meta} onDone={(id) => { setNotice("Draft created. Process it, then publish it when it is ready."); setSel(id); load(); onChanged?.(); }} />}
-        {sel && <Detail key={sel} docId={sel} meta={meta} onChanged={changed} onGone={(m) => { setSel(null); changed(m); }} />}
-      </>)}
+        <div className="kb-detail" ref={detailRef} tabIndex={-1} aria-label="Selected document">
+          {sel ? <>
+            <p className="kb-detail-back"><button className="btn small" onClick={() => setSel(null)}><span aria-hidden="true">←</span> Back to the documents</button></p>
+            <Detail key={sel} docId={sel} meta={meta} onChanged={changed} onGone={(m) => { setSel(null); changed(m); }} />
+          </> : <div className="card kb-empty"><h2>No document selected</h2><p className="muted">Choose a document in the list to see its versions, compare them, process and publish, place a legal hold, or delete it.</p></div>}
+        </div>
+        </div>
+      </div>)}
       {tab === "review" && <><Proposals onChanged={changed} categories={meta?.categories ?? []} /><ProposalQueue onOpen={(id) => { setSel(id); setTab("documents"); }} /></>}
       {tab === "audit" && <AuditBrowser actions={meta?.audit_actions ?? []} onOpen={(id) => { setSel(id); setTab("documents"); }} />}
       {tab === "import" && <ImportWizard meta={meta} onDone={(m) => changed(m)} />}
@@ -96,25 +117,28 @@ export function KnowledgeAdmin({ openDoc = null, onChanged }: { openDoc?: string
   );
 }
 
-function NewDocument({ meta, onDone }: { meta: KbMeta; onDone: (id: string) => void }) {
+function NewDocument({ meta, onDone, onCancel }: { meta: KbMeta; onDone: (id: string) => void; onCancel: () => void }) {
   const { withToken } = useAuth();
   const [f, setF] = useState({ doc_id: "", title: "", category: meta.categories[0] ?? "faq", content: "" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = (e: FormEvent) => {
-    e.preventDefault(); setBusy(true); setError(null);
+    e.preventDefault();
+    if (busy) return;                                                    // one click = one request (no duplicate drafts)
+    setBusy(true); setError(null);
     withToken((t) => api.kbCreate(t, f)).then((r) => { setF({ ...f, doc_id: "", title: "", content: "" }); onDone(r.document.doc_id); }).catch((er) => setError(msg(er))).finally(() => setBusy(false));
   };
   return (
-    <section className="card" aria-label="New document">
+    <section className="card kb-new" aria-label="New document" onKeyDown={(e) => { if (e.key === "Escape" && !busy) onCancel(); }}>
       <h2>New document</h2>
       {error && <p role="alert" className="error">{error}</p>}
       <form className="form" onSubmit={submit}>
-        <label>Id (lower-case letters, digits, dashes)<input value={f.doc_id} onChange={(e) => setF({ ...f, doc_id: e.target.value })} required maxLength={128} /></label>
+        <label>Id (lower-case letters, digits, dashes)<input value={f.doc_id} onChange={(e) => setF({ ...f, doc_id: e.target.value })} required maxLength={128} pattern="[a-z0-9][a-z0-9-]*" autoFocus /></label>
         <label>Title<input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required maxLength={300} /></label>
         <label>Category<select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{meta.categories.map((c) => <option key={c}>{c}</option>)}</select></label>
         <label>Text (Markdown, up to {Math.round(meta.limits.max_bytes / 1000)} KB)<textarea rows={6} value={f.content} onChange={(e) => setF({ ...f, content: e.target.value })} required /></label>
-        <div className="actions"><button className="btn primary" disabled={busy}>Create draft</button></div>
+        <div className="actions"><button type="button" className="btn" disabled={busy} onClick={onCancel}>Cancel</button>
+          <button className="btn primary" disabled={busy} aria-busy={busy}>{busy ? "Creating…" : "Create document"}</button></div>
       </form>
     </section>
   );
@@ -145,11 +169,28 @@ function Detail({ docId, meta, onChanged, onGone }: { docId: string; meta: KbMet
     withToken(fn).then(() => { load(); onChanged(done); }).catch((e) => { setError(msg(e)); load(); }).finally(() => setBusy(false));
   };
   const view = (n: number) => withToken((t) => api.kbVersion(t, docId, n)).then(setShown).catch((e) => setError(msg(e)));
+  // M7 editor: start from the latest version's text (GET /versions/{n}); the save carries the row_version the page loaded (POST /versions), so a stale page gets 409.
+  const [baseText, setBaseText] = useState<string | null>(null);
+  const [baseVer, setBaseVer] = useState<number | null>(null);
+  const [loadingText, setLoadingText] = useState(false);
+  const loadLatest = () => {
+    if (!vers[0]) return;
+    setLoadingText(true);
+    withToken((t) => api.kbVersion(t, docId, vers[0].version)).then((v) => { setText(v.content ?? ""); setBaseText(v.content ?? ""); setBaseVer(v.version); })
+      .catch((e) => setError(msg(e))).finally(() => setLoadingText(false));
+  };
   const addVersion = (e: FormEvent) => {
     e.preventDefault();
-    if (!doc) return;
-    run((t) => api.kbAddVersion(t, docId, text, note, doc.row_version).then(() => { setText(""); setNote(""); }), "New version saved as a draft.");
+    if (!doc || busy) return;
+    run((t) => api.kbAddVersion(t, docId, text, note, doc.row_version).then(() => { setText(""); setNote(""); setBaseText(null); setBaseVer(null); }), "New version saved as a draft.");
   };
+  const latest = vers[0];
+  const nextStep = !latest || !doc ? null : doc.status === "archived" ? "Archived: unarchive it to work on it again."
+    : latest.lifecycle === "draft" ? `v${latest.version} is a draft: process it to check it and build its passages.`
+    : latest.lifecycle === "processing" ? `v${latest.version} is being processed…`
+    : latest.lifecycle === "failed" ? `Processing v${latest.version} failed${latest.processing_error ? `: ${latest.processing_error}` : ""}. Fix the text or process it again.`
+    : latest.lifecycle === "ready_for_review" ? `v${latest.version} is processed and ready: review it and publish it.`
+    : latest.lifecycle === "published" ? `v${latest.version} is live.` : `Latest version v${latest.version}: ${LABEL[latest.lifecycle] ?? latest.lifecycle}.`;
 
   return (
     <section className="card" aria-label={`Document ${docId}`}>
@@ -158,6 +199,14 @@ function Detail({ docId, meta, onChanged, onGone }: { docId: string; meta: KbMet
       {doc && (<>
         <h2>{doc.title}</h2>
         <p className="muted tiny">{doc.doc_id} · {doc.category} · {LABEL[doc.status]} · {doc.published_version ? `live version ${doc.published_version}` : "nothing live"}</p>
+        {latest && nextStep && (
+          <div className={`kb-pubbar lc-${latest.lifecycle}`} role="group" aria-label="Publication">
+            <span><b>{LABEL[latest.lifecycle] ?? latest.lifecycle}</b> · {nextStep}</span>
+            {doc.status !== "archived" && (latest.lifecycle === "draft" || latest.lifecycle === "failed") &&
+              <button className="btn small" disabled={busy} onClick={() => run((t) => api.kbProcess(t, docId, latest.version).then((r) => { if (r.status === "failed") throw new ApiError(422, `Processing failed: ${r.error ?? "unknown error"}`); }), `Version ${latest.version} processed.`)}>Process latest (v{latest.version})</button>}
+            {doc.status !== "archived" && latest.lifecycle === "ready_for_review" &&
+              <button className="btn small primary" disabled={busy} onClick={() => run((t) => api.kbPublish(t, docId, latest.version), `Version ${latest.version} is now live.`)}>Publish latest (v{latest.version})</button>}
+          </div>)}
         <div className="actions">
           {doc.status === "published" && <button className="btn" disabled={busy} onClick={() => run((t) => api.kbDocAction(t, docId, "unpublish"), "Unpublished: the assistant no longer uses this document.")}>Unpublish</button>}
           {doc.status === "published" && doc.published_version != null &&
@@ -198,11 +247,14 @@ function Detail({ docId, meta, onChanged, onGone }: { docId: string; meta: KbMet
           </div>)}
         {shown && <div className="card" aria-label={`Version ${shown.version} text`}><p className="muted tiny">Version {shown.version} · checksum {shown.checksum.slice(0, 12)}</p><pre className="tiny" style={{ whiteSpace: "pre-wrap" }}>{shown.content}</pre></div>}
         {doc.status !== "archived" && (
-          <form className="form" onSubmit={addVersion} aria-label="New version">
-            <h3>New version</h3>
-            <label>Text<textarea rows={5} value={text} onChange={(e) => setText(e.target.value)} required /></label>
+          <form className="form kb-editor" onSubmit={addVersion} aria-label="New version">
+            <div className="bar"><h3>Edit — new version</h3>
+              {vers[0] && <button type="button" className="btn small" disabled={busy || loadingText} onClick={loadLatest}>{text ? "Reload" : "Start from"} v{vers[0].version} text</button>}</div>
+            <p className="muted tiny">Saving creates a new <b>draft</b> version (the live text is not touched). It is checked against the document as you loaded it: if someone else changed it meanwhile, nothing is overwritten.</p>
+            <label>Text<textarea rows={10} value={text} onChange={(e) => setText(e.target.value)} required /></label>
+            {text && baseText !== null && baseText !== text && <TextCompare before={baseText} after={text} beforeLabel={`Version ${baseVer}`} afterLabel="Your edit (not saved)" name={doc.title} />}
             <label>What changed<input value={note} onChange={(e) => setNote(e.target.value)} required maxLength={500} /></label>
-            <div className="actions"><button className="btn primary" disabled={busy}>Save as draft version</button></div>
+            <div className="actions"><button className="btn primary" disabled={busy || !text.trim() || (baseText !== null && baseText === text)}>Save as draft version</button></div>
           </form>)}
         <h3>Recent audit events</h3>
         <ul className="notes">{audit.map((a) => <li key={a.id} className="tiny">{when(a.at)} · {a.actor} · {a.action.replace(/_/g, " ")}{a.version ? ` · v${a.version}` : ""}</li>)}</ul>

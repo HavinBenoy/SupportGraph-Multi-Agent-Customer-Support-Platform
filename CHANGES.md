@@ -1,3 +1,107 @@
+# M7 COMPLETION, FRONTEND REFINEMENTS 2.1–2.4 AND M8 TELEPHONE LINE (`supportgraph-m8.zip`, 2026-11-12)
+
+Delta ZIP over `supportgraph-m6r-m7.zip`. Apply it from the project root with `unzip -o supportgraph-m8.zip`, then run `make db-migrate`. There is one additive
+migration, **0014**, and no new dependency. The ZIP contains no `.env`, data, recordings, virtual environment, `node_modules` or build output.
+
+**No project ZIP was attached to this request.** The work continued on the tree delivered as `supportgraph-m6r-m7.zip`, the version you verified. Apply this delta over
+that version. Details: **docs/M8.md**, **docs/M7.md** (addendum), **TEST_REPORT.md**.
+
+## Part 1: remaining M7
+The re-inspection of `docs/M6.md` §13 found two items that existed only in a minimal form.
+- **Editor.** It now starts from the latest version's text, with a word-level preview against it. Save is disabled until something changes, and the save still
+  carries `row_version`.
+- **Publish bar.** A lifecycle bar offers only the next step for the latest version: process, or publish.
+
+The API is unchanged. See the docs/M7.md addendum. Every other §13 item was already complete and was left as it was.
+
+## Part 2: frontend refinements
+**2.1 Resizable list | detail** (`workspace/Splitter.tsx`; used in `AdminRequests.tsx` *Change requests* and `Requests.tsx` *My change requests*)
+- **Accessibility.** A `role="separator"` with `aria-valuenow`, `aria-valuemin` and `aria-valuemax`, focusable. Keyboard: ←/→ (Shift for bigger steps), Home, End,
+  and Enter or double-click to reset.
+- **Dragging.** Pointer capture keeps the drag on the divider. Moves are applied through `requestAnimationFrame` and a CSS variable, so the panes are not re-rendered
+  while you drag. Text selection is suppressed only during the drag.
+- **Bounds.** At least 280 px; at most 65% of the container, re-clamped when the window resizes.
+- **Selection.** The selected row is kept in view after a resize.
+- **Session memory.** The width is remembered for the browser session (sessionStorage, guarded: blocked storage simply means it isn't remembered).
+- **Small screens.** Below 900 px the divider is hidden and the existing one-pane-at-a-time layout is used.
+- **No new dependency.** Comparison, AI proposal, manual editing and review are untouched; they sit in the detail pane.
+
+**2.2 Revising a returned request** (`workspace/Revision.tsx`, `Requests.tsx`; backend `changes.py`, `audit.py`)
+- **Two separate options, inside the same request and lifecycle.** Neither publishes anything.
+  - **A · Revise with the AI.** This runs the existing analysis again. A manual request is first converted to AI-assisted under the same id.
+  - **B · Edit manually.** You edit the complete returned proposal as text: add, remove, replace or restructure. Then *Save revision* and *Resubmit for review*.
+- **Comparison.** Original → AI proposal → your manual revision.
+- **The AI's own proposal is kept.** *Use the AI proposal instead* brings it back and clears the manual attribution.
+- **The server rebuilds the diff** from the immutable published version. The published document and its versions are not touched.
+- **Item view, new fields:**
+  - `revision_source`: `ai`, `manual` or `unchanged`;
+  - `revised_after_return`, derived from the audit trail.
+- **Audit.** Every save after a return is audited with `revision: true` (`change_decision_recorded` / `change_draft_saved`), and the audit holds no text.
+- **Labels.** "AI-assisted", "Manual" and "· revised after return" are shown to the author and to the reviewing administrator.
+- **Safety.** Stale-edit protection (`expected_row_version` → 409), owner-only access (another account → 404) and validation are the existing ones.
+
+**2.3 New document button** (`KnowledgeAdmin.tsx`, `KnowledgeWorkspace.tsx`)
+- The form is hidden until *New document* is pressed. The workspace's own *New document* button opens it directly (`?new=1`).
+- **Cancel** or **Escape** creates nothing.
+- On success the form closes, the list refreshes and the new draft opens. A server error stays visible in the form.
+- One click sends one request: the button shows "Creating…" and is disabled while the request is in flight.
+- Every field and validation rule is kept.
+
+**2.4 Documents and details side by side** (`KnowledgeAdmin.tsx`, `globals.css`)
+- **Layout.** List and details sit side by side whenever the documents area is at least 700 px wide (a container query); the details are sticky and scroll on their
+  own. Narrower areas show the details stacked under the list, with "← Back to the documents".
+- **Empty state.** "No document selected".
+- **Selection.** The selected row is highlighted (`aria-current`) and the details follow a new selection.
+- **Scrolling.** The details are scrolled into view only when they are off-screen. The scroll is smooth, or instant under `prefers-reduced-motion`, and focus moves
+  to them.
+- Every document operation is preserved.
+
+## Part 3: M8 telephone line
+The scope comes from the roadmap and master spec §5–8; see docs/M8.md §1 for what was included and why.
+- **Package `app/telephony/`:**
+  - `base.py`: the provider contract;
+  - `edesy.py`: Edesy media streams, following the documented protocol;
+  - `media.py`: the audio bridge (8/16 kHz ↔ 16 kHz, 20 ms frames, `killAudio` on barge-in and on every ownership change, `disconnect`, playback marks);
+  - `identity.py`: normalise, look up, mask, keyed hash, phone PIN (scrypt) with an atomic lockout.
+- **Route `app/api/routes/telephony.py`:**
+  - the WebSocket `/api/telephony/edesy/stream/{token}`;
+  - admin `GET status`, `GET accounts`, `PUT`/`DELETE phones/{user}`, `DELETE pins/{user}`, `GET summary`, `GET audit`;
+  - own PIN `GET`/`PUT`/`DELETE /api/me/phone-pin`.
+- **Integration.** A phone call uses the same `VoiceSession`, call hub, takeover, hand-over announcement and Trial Verification Mode as a browser call. There is no
+  parallel workflow.
+  - `hub.open` and `svc.create_call` take an optional `channel` and caller-identity fields; the defaults keep existing behaviour.
+  - `/api/staff/calls` rows gain `channel`, `caller_status`, `caller_role` and `caller_masked`.
+- **Database (migration 0014, additive).** New `calls` columns: `channel` (default `web`), `caller_status`, `caller_role`, `caller_masked`, `caller_hash`, `provider`,
+  `provider_call_ref` and `verified_at`. New tables `account_phones`, `phone_pins` and `telephony_audit`.
+- **Frontend:**
+  - an Admin **Telephone line** tab;
+  - Live Calls shows "Phone · verified / not verified" and words a matching number as a claim;
+  - a **Phone support PIN** panel under the chat.
+- **Tools:**
+  - `scripts/phone_sim.py` (`make phone-sim`) is a free local simulator speaking the Edesy protocol;
+  - `scripts/edesy_setup.py` (`make edesy-numbers`, `edesy-stream-test`, `edesy-attach`, `edesy-detach`) uses your `EDESY_API_KEY` from the shell. Nothing runs it
+    automatically.
+- **Off by default** (`SG_TELEPHONY_PROVIDER=none`). A public number is a **paid service that needs your approval**; nothing in this delivery enables or pays for it.
+
+## Bugs found and fixed while testing (this round)
+- **Lockout race (PostgreSQL).** Wrong PINs were counted *after* the hash comparison, so parallel guesses could exceed the limit: 8 were checked where the limit was
+  5. The attempt is now reserved first, with `UPDATE … RETURNING` holding the row lock.
+- **Keypad order.** Keypad digits were handled as separate tasks and could be processed out of order. They now go through a per-call queue.
+- **Sample rate from the environment.** `SG_TELEPHONY_SAMPLE_RATE` from the environment was rejected: a `Literal[8000, 16000]` doesn't accept the string "8000".
+  It is now an int with a validator. This was found by running the simulator against a real `uvicorn` process.
+
+## Compatibility
+- Every API change is additive: new fields and new routes. A call without a channel is a web call. Existing tests were not removed or weakened.
+- **Tests that changed because the schema moved on:**
+  - `test_0013_is_the_head…` became `test_0014_is_the_head…`;
+  - the two SQLite migration fixtures that rebuild older revisions now also drop the M8 tables and columns (`tests/db/m8shape.py`).
+- **Tests that changed because the behaviour changed:**
+  - The KnowledgeAdmin create test now presses *New document* first.
+  - *Continue with the AI analysis* is no longer shown for `needs_revision`; option A replaces it there.
+- **Two server changes, both harmless:**
+  - CORS `allow_methods` now includes `DELETE`, for the new DELETE routes. Your frontend uses the same-origin proxy, so CORS does not apply to it.
+  - `/chat` became a client page, so it can show the PIN panel to signed-in users.
+
 # M6 ACCEPTANCE REFINEMENTS + M7 (`supportgraph-m6r-m7.zip`, 2026-11-12)
 
 Delta ZIP. Apply it from the project root with `unzip -o supportgraph-m6r-m7.zip`, then run `make db-migrate` (one additive migration, **0013**). There are no new

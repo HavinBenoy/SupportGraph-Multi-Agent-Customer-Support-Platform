@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
@@ -247,12 +247,36 @@ class Settings(BaseSettings):
     kb_legacy_folders: bool = False                                            # final M6: the folder-management API is retired (410). true re-enables it (legacy only;
                                                                                # folder rows and placements were never deleted, so this is fully reversible)
 
+    # --- M8: telephone line (PSTN through a provider's media WebSocket). OFF by default: a public number is a PAID service and needs your approval. ---
+    # "none" = no telephone endpoint at all (the route answers 404/closes). "edesy" = Edesy Voice API media streams (docs/M8.md). The provider is behind
+    # app/telephony; the AI conversation (LangGraph, VoiceSession, call hub) never depends on it.
+    telephony_provider: Literal["none", "edesy"] = "none"
+    # Edesy does not authenticate the media WebSocket, so the URL itself carries a long random secret: /api/telephony/edesy/stream/<token>. At least 32
+    # characters; generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Empty = the endpoint refuses every connection.
+    telephony_stream_token: SecretStr | None = None
+    telephony_sample_rate: int = 16000                                         # 8000 or 16000 (checked below); must match the sample_rate you attach in Edesy (`make edesy-attach`)
+    telephony_tenant: str = "qspiders_sample"                                  # the tenant a call belongs to when its dialled number is not in the map below
+    telephony_number_tenants: str = ""                                         # "917969002802=qspiders_sample,9180...=other" (dialled number => tenant)
+    telephony_allowed_ips: str = ""                                            # optional comma list of source IPs allowed to open the stream (empty = any)
+    telephony_max_concurrent: int = Field(default=4, ge=1, le=100)             # simultaneous phone calls this process accepts (more are refused politely)
+    telephony_default_country: str = "91"                                      # numbers without a country code are taken as Indian
+    phone_pin_length: int = Field(default=6, ge=4, le=8)                       # the phone-support PIN has exactly this many digits
+    phone_pin_max_attempts: int = Field(default=5, ge=3, le=10)                # wrong PINs (across calls) before phone verification is locked
+    phone_pin_lock_minutes: int = Field(default=15, ge=1, le=1440)
+    phone_pin_attempts_per_call: int = Field(default=3, ge=1, le=10)
+
     # --- Tracing (Langfuse). Off unless SG_TRACING_ENABLED=true AND both keys are set. ---
     # The keys use Langfuse's standard variable names, so the same .env also works for its tools.
     tracing_enabled: bool = False
     langfuse_public_key: str | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_PUBLIC_KEY", "langfuse_public_key"))
     langfuse_secret_key: SecretStr | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_SECRET_KEY", "langfuse_secret_key"))
     langfuse_base_url: str = Field(default="http://localhost:3100", validation_alias=AliasChoices("LANGFUSE_BASE_URL", "langfuse_base_url"))
+
+    @model_validator(mode="after")
+    def _check_telephony_rate(self) -> "Settings":
+        if self.telephony_sample_rate not in (8000, 16000):
+            raise ValueError("SG_TELEPHONY_SAMPLE_RATE must be 8000 or 16000")
+        return self
 
 
 @lru_cache

@@ -1,4 +1,4 @@
-.PHONY: test-ai test-ai-pg eval-impact test-kw test-kw-pg venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice test-calls
+.PHONY: phone-sim edesy-numbers edesy-attach edesy-detach edesy-stream-test test-phone test-ai test-ai-pg eval-impact test-kw test-kw-pg venv db-up db-down db-psql db-migrate db-seed db-setup ingest faq eval-rag test test-pg demo langfuse-init langfuse-up langfuse-wait langfuse-down langfuse-logs langfuse-reset verify-tracing verify-tracing-faq support eval-routing verify-tracing-support review auth-init demo-accounts api frontend-install frontend-dev frontend-test frontend-build e2e eval judge-calibrate llm-smoke bench-check bench-llm bench-embed bench-stt bench-tts bench-report bench-review bench-quick bench-full bench-experiment test-smoke test-fast test-targeted test-full e2e-local voice-setup voice-smoke bench-voice test-calls
 
 venv:
 	python3 -m venv .venv
@@ -266,3 +266,17 @@ judge-calibrate:  ## agreement of the judge with human labels; ARGS="--relabel" 
 test-calls:  ## M4: call sessions, staff live calls, takeover (SQLite, sandbox-safe: fake audio, no models)
 	cd backend && ../.venv/bin/python -m pytest -q tests/calls tests/unit/test_m4_embedder_keepalive.py
 
+
+# ---- M8: telephone line (docs/M8.md). The Edesy targets call a PAID provider's API with YOUR key (EDESY_API_KEY in your shell); nothing runs them automatically.
+phone-sim:  ## simulate a phone call against the running API (free; Edesy protocol): make phone-sim [ARGS='--wav q.wav --keys "*123456#" --rate 8000']
+	cd backend && ../.venv/bin/python scripts/phone_sim.py $(ARGS)
+edesy-numbers:  ## list your Edesy numbers (needs EDESY_API_KEY)
+	cd backend && ../.venv/bin/python scripts/edesy_setup.py numbers
+edesy-stream-test:  ## ask Edesy to test your public stream URL: make edesy-stream-test URL=wss://host/api/telephony/edesy/stream/<token>
+	cd backend && ../.venv/bin/python scripts/edesy_setup.py stream-test --url "$(URL)" --rate $${RATE:-16000}
+edesy-attach:  ## route an Edesy number to SupportGraph: make edesy-attach NUMBER_ID=... URL=wss://... [RATE=16000]
+	cd backend && ../.venv/bin/python scripts/edesy_setup.py attach --number-id "$(NUMBER_ID)" --url "$(URL)" --rate $${RATE:-16000}
+edesy-detach:  ## stop routing that number to SupportGraph: make edesy-detach NUMBER_ID=...
+	cd backend && ../.venv/bin/python scripts/edesy_setup.py detach --number-id "$(NUMBER_ID)"
+test-phone:  ## the M8 telephone tests (offline fakes; no provider is contacted)
+	cd backend && ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/telephony

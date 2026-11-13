@@ -19,6 +19,13 @@ const clock = (s: number) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2
 export interface LiveCallsDeps { createClient: (h: LiveHandlers) => LiveClient; wsUrl: (callId: string) => string }
 const realDeps: LiveCallsDeps = { createClient: (h) => createLiveClient(h, realLiveDeps), wsUrl: (id) => liveWsUrl(id) };
 interface Conn { callId: string; state: LiveState; speaking: boolean; muted: boolean; announcing: boolean; ownerGone: boolean }
+/** M8: who a telephone caller is, in words. A matching number is a claim, never proof: only "verified" means the caller typed that account's PIN. */
+export const CALLER_STATUS: Record<string, string> = { unknown: "number not registered", claimed: "number matches an account — NOT verified", ambiguous: "number shared by several accounts — not verified", verified: "verified with phone PIN" };
+export const callerWords = (c: LiveCall) => {
+  if (c.channel !== "phone") return c.caller === "student" ? "Signed-in student" : "Visitor";
+  const who = c.caller_role && c.caller_status !== "unknown" ? `${c.caller_role} ` : "";
+  return `Phone ${c.caller_masked ?? "(number withheld)"} · ${who}${CALLER_STATUS[c.caller_status ?? "unknown"] ?? c.caller_status}`;
+};
 interface Line { id: number; speaker: "caller" | "ai"; text: string }
 let lineId = 1;
 
@@ -153,7 +160,7 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
               <button className={`row ${selId === c.id ? "sel" : ""}`} onClick={() => setSelId(c.id)} aria-label={`Call ${c.short_id}, ${CATEGORY_LABEL[c.category]}`}>
                 <strong>{c.short_id}</strong> <StatusBadge call={c} />{" "}
                 {hearing(c) && <span className="pill">{hearing(c)}</span>}
-                <span className="muted block">{owner(c)} · {c.caller === "student" ? "student" : "visitor"} {c.ticket_ref} · started {new Date(c.created_at).toLocaleTimeString()} · {clock(duration(c))}</span>
+                <span className="muted block">{c.channel === "phone" && <span className={`pill phone cs-${c.caller_status ?? "unknown"}`}>Phone · {c.caller_status === "verified" ? "verified" : "not verified"}</span>} {owner(c)} · {c.caller === "student" ? "student" : "visitor"} {c.ticket_ref} · started {new Date(c.created_at).toLocaleTimeString()} · {clock(duration(c))}</span>
               </button>
             </li>
           ))}
@@ -166,7 +173,8 @@ export function LiveCalls({ deps = realDeps }: { deps?: LiveCallsDeps }) {
             <h2>Call {sel.short_id} <StatusBadge call={sel} />{sel.trial_mode && <span className="pill" title="Made while Trial Verification Mode was on">Trial call</span>}</h2>
             <dl>
               <dt>Audio owner</dt><dd>{owner(sel)}</dd>
-              <dt>Caller</dt><dd>{sel.caller === "student" ? "Signed-in student" : "Visitor"} · ref {sel.ticket_ref}{sel.student_id ? ` · ${sel.student_id}` : ""}</dd>
+              <dt>Channel</dt><dd>{sel.channel === "phone" ? "Telephone" : "Browser voice"}</dd>
+              <dt>Caller</dt><dd>{callerWords(sel)} · ref {sel.ticket_ref}{sel.student_id ? ` · ${sel.student_id}` : ""}</dd>
               <dt>Started</dt><dd>{new Date(sel.created_at).toLocaleString()} · {clock(duration(sel))}</dd>
               {sel.takeover_at && <><dt>Last takeover</dt><dd>{new Date(sel.takeover_at).toLocaleTimeString()}</dd></>}
               {!sel.live && <><dt>Ended</dt><dd>{sel.ended_at ? new Date(sel.ended_at).toLocaleTimeString() : ""} · {END_REASON[sel.end_reason ?? ""] ?? sel.end_reason ?? ""}</dd></>}

@@ -25,9 +25,12 @@ EVENT_KINDS = frozenset({
     # M5
     "trial_notice_played", "consent_offered", "consent_granted", "consent_declined", "consent_withdrawn",
     "recording_started", "recording_stopped", "recording_failed",
+    # M8: the telephone channel. The caller's claimed identity and its verification (ids and outcomes only; never a number, never a PIN)
+    "caller_identified", "caller_verified", "caller_verification_failed",
 })
 SAFE_DETAIL_KEYS = frozenset({"reason", "role", "epoch", "listeners", "previous_owner", "duration_s", "connection", "status",
-                              "action", "category", "policy_version", "recording_id", "variant"})
+                              "action", "category", "policy_version", "recording_id", "variant",
+                              "channel", "caller_status", "result", "provider"})
 MAX_DETAIL_STR = 64
 
 
@@ -52,11 +55,18 @@ def new_call_id() -> str:
     return "c_" + secrets.token_hex(8)
 
 
-def create_call(db: Session, tenant_id: str, ticket_id: str, student_id: str | None, trial_mode: bool = False) -> Call:
+PHONE_FIELDS = ("caller_status", "caller_role", "caller_masked", "caller_hash", "provider", "provider_call_ref")
+
+
+def create_call(db: Session, tenant_id: str, ticket_id: str, student_id: str | None, trial_mode: bool = False, *, channel: str = "web",
+                phone: dict | None = None) -> Call:
+    """`channel` = web (the browser voice line) | phone (M8). `phone` carries the caller-identity fields of a telephone call (masked number, keyed hash,
+    claimed status/role, provider and its call reference); a phone call always starts with student_id None (anonymous) whatever the number claims."""
+    extra = {k: v for k, v in (phone or {}).items() if k in PHONE_FIELDS}
     call = Call(tenant_id=tenant_id, id=new_call_id(), ticket_id=ticket_id, student_id=student_id, status="created", owner="none", epoch=0, created_at=now(),
-                trial_mode=trial_mode)
+                trial_mode=trial_mode, channel=channel, **extra)
     db.add(call)
-    add_event(db, tenant_id, call.id, "created", "caller", status="created")
+    add_event(db, tenant_id, call.id, "created", "caller", status="created", **({"channel": channel} if channel != "web" else {}))
     db.flush()
     return call
 
